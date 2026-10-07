@@ -1,23 +1,34 @@
-import { useState, useEffect } from 'react';
+import { lazy, Suspense, useState, useEffect } from 'react';
 import { Toaster } from 'react-hot-toast';
 import toast from 'react-hot-toast';
 import { useGame } from './context/useGame';
 import { useSocket } from './context/useSocket';
-import RegistrationScreen from './components/Registration/RegistrationScreen';
-import GameScreen from './components/Game/GameScreen';
-import RoomSetup from './components/Room/RoomSetup';
-import CardSelection from './components/Room/CardSelection';
-import WaitingRoom from './components/Room/WaitingRoom';
-import OrganizerDashboard from './components/Organizer/OrganizerDashboard';
-import PlayerCardView from './components/Player/PlayerCardView';
-import LandingPage from './components/Landing/LandingPage';
-import TVDisplay from './components/TVDisplay/TVDisplay';
-import QuickJoin from './components/Room/QuickJoin';
 import Snowflakes from './components/UI/Snowflakes';
 import { API_URL } from './config/api';
 import './App.css';
 
 const STORAGE_KEY = 'bingo_session';
+
+const RegistrationScreen = lazy(() => import('./components/Registration/RegistrationScreen'));
+const GameScreen = lazy(() => import('./components/Game/GameScreen'));
+const RoomSetup = lazy(() => import('./components/Room/RoomSetup'));
+const CardSelection = lazy(() => import('./components/Room/CardSelection'));
+const OrganizerDashboard = lazy(() => import('./components/Organizer/OrganizerDashboard'));
+const PlayerCardView = lazy(() => import('./components/Player/PlayerCardView'));
+const LandingPage = lazy(() => import('./components/Landing/LandingPage'));
+const TVDisplay = lazy(() => import('./components/TVDisplay/TVDisplay'));
+const QuickJoin = lazy(() => import('./components/Room/QuickJoin'));
+
+const LoadingScreen = () => (
+  <div className="app">
+    <div className="reconnecting-screen">
+      <div className="reconnecting-container">
+        <div className="spinner-large"></div>
+        <p>Cargando...</p>
+      </div>
+    </div>
+  </div>
+);
 
 function App() {
   const { gameState } = useGame();
@@ -268,7 +279,9 @@ function App() {
     return (
       <div className="app">
         <Toaster position="top-right" toastOptions={{ duration: 3000 }} />
-        <TVDisplay roomCode={tvRoomCode.toUpperCase()} />
+        <Suspense fallback={<LoadingScreen />}>
+          <TVDisplay roomCode={tvRoomCode.toUpperCase()} />
+        </Suspense>
       </div>
     );
   }
@@ -290,10 +303,12 @@ function App() {
       <div className="app">
         <Toaster position="top-right" toastOptions={{ duration: 3000 }} />
         <Snowflakes />
-        <QuickJoin
-          roomCode={quickJoinRoomCode.toUpperCase()}
-          onJoinComplete={handleQuickJoinComplete}
-        />
+        <Suspense fallback={<LoadingScreen />}>
+          <QuickJoin
+            roomCode={quickJoinRoomCode.toUpperCase()}
+            onJoinComplete={handleQuickJoinComplete}
+          />
+        </Suspense>
       </div>
     );
   }
@@ -369,7 +384,9 @@ function App() {
     return (
       <div className="app">
         <Toaster position="top-right" toastOptions={{ duration: 3000 }} />
-        <LandingPage onStartGame={handleStartFromLanding} />
+        <Suspense fallback={<LoadingScreen />}>
+          <LandingPage onStartGame={handleStartFromLanding} />
+        </Suspense>
       </div>
     );
   }
@@ -417,7 +434,9 @@ function App() {
         <div className="app">
           <Toaster position="top-right" toastOptions={{ duration: 3000 }} />
           <Snowflakes />
-          <RoomSetup onRoomReady={handleRoomReady} />
+          <Suspense fallback={<LoadingScreen />}>
+            <RoomSetup onRoomReady={handleRoomReady} />
+          </Suspense>
         </div>
       );
     }
@@ -428,7 +447,9 @@ function App() {
         <div className="app">
           <Toaster position="top-right" toastOptions={{ duration: 3000 }} />
           <Snowflakes />
-          <CardSelection roomData={roomData} onCardSelected={handleCardSelected} />
+          <Suspense fallback={<LoadingScreen />}>
+            <CardSelection roomData={roomData} onCardSelected={handleCardSelected} />
+          </Suspense>
         </div>
       );
     }
@@ -440,7 +461,9 @@ function App() {
           <div className="app">
             <Toaster position="top-right" toastOptions={{ duration: 3000 }} />
             <Snowflakes />
-            <OrganizerDashboard roomData={roomData} />
+            <Suspense fallback={<LoadingScreen />}>
+              <OrganizerDashboard roomData={roomData} />
+            </Suspense>
           </div>
         );
       } else {
@@ -448,7 +471,9 @@ function App() {
           <div className="app">
             <Toaster position="top-right" toastOptions={{ duration: 3000 }} />
             <Snowflakes />
-            <PlayerCardView roomData={roomData} />
+            <Suspense fallback={<LoadingScreen />}>
+              <PlayerCardView roomData={roomData} />
+            </Suspense>
           </div>
         );
       }
@@ -486,11 +511,13 @@ function App() {
         }}
       />
 
-      {gameState === 'registration' && <RegistrationScreen />}
+      <Suspense fallback={<LoadingScreen />}>
+        {gameState === 'registration' && <RegistrationScreen />}
 
-      {(gameState === 'playing' || gameState === 'paused' || gameState === 'finished') && (
-        <GameScreen />
-      )}
+        {(gameState === 'playing' || gameState === 'paused' || gameState === 'finished') && (
+          <GameScreen />
+        )}
+      </Suspense>
     </div>
   );
 }
