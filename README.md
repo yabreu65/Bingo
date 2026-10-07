@@ -40,6 +40,19 @@ cd ../bingo-react && npm test && npm run lint && npm run build
 
 GitHub Actions runs the same backend and frontend checks for pushes to `main` and pull requests targeting `main`.
 
+## Production container deployment
+
+The repository includes non-root backend and static frontend images with health checks:
+
+```bash
+cp backend/.env.example backend/.env.production
+# Edit backend/.env.production with production secrets and MongoDB URI.
+VITE_BACKEND_URL=https://api.example.com \
+  docker compose -f docker-compose.production.yml up -d --build
+```
+
+The frontend is exposed on port `8080` and the backend on `5001` by default. Use a reverse proxy or cloud load balancer for HTTPS, and point `FRONTEND_URL` to the public frontend origin. MongoDB is intentionally external: use a managed MongoDB deployment with backups rather than bundling the database in this compose file.
+
 ## Repository map
 
 | Area | Purpose |
