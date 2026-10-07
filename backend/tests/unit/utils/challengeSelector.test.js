@@ -18,50 +18,46 @@ describe('challengeSelector utils', () => {
     it('should rotate challenge types', () => {
       const trivia = GAME_CONSTANTS.CHALLENGE_TYPES.TRIVIA;
       const dance = GAME_CONSTANTS.CHALLENGE_TYPES.DANCE;
-      const sing = GAME_CONSTANTS.CHALLENGE_TYPES.SING;
-      const group = GAME_CONSTANTS.CHALLENGE_TYPES.GROUP;
+      const karaoke = GAME_CONSTANTS.CHALLENGE_TYPES.KARAOKE;
 
-      // El orden depende de Object.keys(), que en objetos es: DANCE, SING, TRIVIA, GROUP
-      // dance -> sing
-      expect(getNextChallengeType(dance)).toBe(sing);
-      // sing -> trivia
-      expect(getNextChallengeType(sing)).toBe(trivia);
-      // trivia -> group
-      expect(getNextChallengeType(trivia)).toBe(group);
-      // group -> dance (loops back)
-      expect(getNextChallengeType(group)).toBe(dance);
+      // The backend rotates only across challenge types persisted in Game.availablePools.
+      expect(getNextChallengeType(trivia)).toBe(dance);
+      expect(getNextChallengeType(dance)).toBe(karaoke);
+      expect(getNextChallengeType(karaoke)).toBe(trivia);
     });
   });
 
   describe('selectRandomChallenge', () => {
     it('should select a challenge from the pool', () => {
       const challengeType = GAME_CONSTANTS.CHALLENGE_TYPES.TRIVIA;
-      const challenge = selectRandomChallenge(challengeType);
+      const result = selectRandomChallenge(challengeType);
 
-      expect(challenge).toBeDefined();
-      expect(challenge).toHaveProperty('text');
-      expect(typeof challenge.text).toBe('string');
+      expect(result.challenge).toBeDefined();
+      expect(result.challenge).toHaveProperty('question');
+      expect(result.challenge).toHaveProperty('options');
+      expect(result.challenge.deezerId).toBeNull();
+      expect(result.updatedPools.trivia).toHaveLength(9);
     });
 
     it('should return challenge with deezerId for dance type', () => {
       const challengeType = GAME_CONSTANTS.CHALLENGE_TYPES.DANCE;
-      const challenge = selectRandomChallenge(challengeType);
+      const result = selectRandomChallenge(challengeType);
 
-      expect(challenge).toHaveProperty('text');
-      expect(challenge).toHaveProperty('deezerId');
-      expect(challenge.deezerId).not.toBeNull();
+      expect(result.challenge).toHaveProperty('text');
+      expect(result.challenge).toHaveProperty('deezerId');
+      expect(result.challenge.deezerId).not.toBeNull();
     });
 
     it('should return challenge with null deezerId for trivia', () => {
       const challengeType = GAME_CONSTANTS.CHALLENGE_TYPES.TRIVIA;
-      const challenge = selectRandomChallenge(challengeType);
+      const result = selectRandomChallenge(challengeType);
 
-      expect(challenge.deezerId).toBeNull();
+      expect(result.challenge.deezerId).toBeNull();
     });
 
     it('should return null for invalid challenge type', () => {
-      const challenge = selectRandomChallenge('invalid-type');
-      expect(challenge).toBeNull();
+      const result = selectRandomChallenge('invalid-type');
+      expect(result.challenge).toBeNull();
     });
   });
 
@@ -198,6 +194,7 @@ describe('challengeSelector utils', () => {
           id: 'player-123',
           name: 'Test Player'
         },
+        data: 'Baila Thriller',
         text: 'Baila Thriller',
         deezerId: '555639',
         duration: GAME_CONSTANTS.CHALLENGE_DURATION
@@ -211,14 +208,27 @@ describe('challengeSelector utils', () => {
         name: 'Quiz Master'
       };
       const challenge = {
-        text: '¿Cuántas letras tiene BINGO?',
+        question: '¿Cuántas letras tiene BINGO?',
+        options: ['4 letras', '5 letras', '6 letras', '7 letras'],
+        correct: 1,
         deezerId: null
       };
 
       const data = createChallengeData(challengeType, selectedPlayer, challenge);
 
-      expect(data.deezerId).toBeNull();
-      expect(data.text).toBe('¿Cuántas letras tiene BINGO?');
+      expect(data).toEqual({
+        type: 'trivia',
+        player: {
+          id: 'player-456',
+          name: 'Quiz Master'
+        },
+        duration: GAME_CONSTANTS.CHALLENGE_DURATION,
+        data: {
+          question: '¿Cuántas letras tiene BINGO?',
+          options: ['4 letras', '5 letras', '6 letras', '7 letras'],
+          correct: 1
+        }
+      });
     });
   });
 });

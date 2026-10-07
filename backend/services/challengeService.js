@@ -43,7 +43,7 @@ function prepareChallengeForGame(players, usedPlayers, lastChallengeType, roomCo
     logger.info(`Next challenge type: ${challengeType}`);
 
     // Seleccionar un challenge del pool
-    const challenge = selectRandomChallenge(challengeType);
+    const { challenge } = selectRandomChallenge(challengeType);
 
     if (!challenge) {
       logger.warn(`No challenge available for type: ${challengeType}`);

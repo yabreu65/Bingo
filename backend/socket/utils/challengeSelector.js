@@ -56,10 +56,20 @@ function getNextChallengeType(lastChallengeType) {
  * @returns {Object} - Challenge seleccionado y pools actualizados
  */
 function selectRandomChallenge(challengeType, availablePools) {
+  const sourcePool = CHALLENGE_POOLS[challengeType];
+
+  if (!Array.isArray(sourcePool)) {
+    logger.warn(`Challenge type "${challengeType}" is not supported`);
+    return {
+      challenge: null,
+      updatedPools: availablePools || {}
+    };
+  }
+
   if (!availablePools || !availablePools[challengeType]) {
     logger.warn(`Available pool for type "${challengeType}" not found, initializing...`);
     availablePools = availablePools || {};
-    availablePools[challengeType] = shuffleArray(CHALLENGE_POOLS[challengeType]);
+    availablePools[challengeType] = shuffleArray(sourcePool);
   }
 
   let pool = availablePools[challengeType];
@@ -67,7 +77,7 @@ function selectRandomChallenge(challengeType, availablePools) {
   // Si el pool está vacío, remezclar
   if (!pool || pool.length === 0) {
     logger.info(`Pool for ${challengeType} exhausted, reshuffling...`);
-    pool = shuffleArray(CHALLENGE_POOLS[challengeType]);
+    pool = shuffleArray(sourcePool);
     availablePools[challengeType] = pool;
   }
 
@@ -177,14 +187,22 @@ function shouldTriggerChallenge(numbersSinceChallenge, challengeFrequency) {
  * Crea el objeto de datos del reto para emitir al cliente
  */
 function createChallengeData(challengeType, selectedPlayer, challenge) {
+  const player = {
+    id: selectedPlayer._id,
+    name: selectedPlayer.name
+  };
+
+  if (selectedPlayer.isManual !== undefined) {
+    player.isManual = selectedPlayer.isManual;
+  }
+
+  if (selectedPlayer.cardNumber !== undefined) {
+    player.cardNumber = selectedPlayer.cardNumber;
+  }
+
   const baseData = {
     type: challengeType,
-    player: {
-      id: selectedPlayer._id,
-      name: selectedPlayer.name,
-      isManual: selectedPlayer.isManual || false,
-      cardNumber: selectedPlayer.cardNumber
-    },
+    player,
     duration: GAME_CONSTANTS.CHALLENGE_DURATION
   };
 
