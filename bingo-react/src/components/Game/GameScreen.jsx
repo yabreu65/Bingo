@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useGame } from '../../context/GameContext';
+import { useGame } from '../../context/useGame';
 import BingoCard from '../BingoCard/BingoCard';
 import ChallengeModal from '../Challenges/ChallengeModal';
 import Leaderboard from '../Ranking/Leaderboard';

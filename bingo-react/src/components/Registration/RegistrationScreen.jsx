@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useGame } from '../../context/GameContext';
+import { useGame } from '../../context/useGame';
 import MusicPlayer from '../Music/MusicPlayer';
 import './RegistrationScreen.css';
 

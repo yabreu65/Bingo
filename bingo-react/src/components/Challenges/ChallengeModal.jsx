@@ -1,5 +1,5 @@
-import { useState, useEffect, useRef } from 'react';
-import { useGame } from '../../context/GameContext';
+import { useState, useEffect, useRef, useCallback } from 'react';
+import { useGame } from '../../context/useGame';
 import ReactPlayer from 'react-player';
 import DeezerPlayer from '../Music/DeezerPlayer';
 import { getRandomSongForChallenge } from '../../data/deezerSongs';
@@ -15,13 +15,7 @@ const ChallengeModal = ({
   externalPlayerId = null,
   externalPlayerName = null
 }) => {
-  // Intentar usar el contexto si está disponible, sino usar props externas
-  let contextData = {};
-  try {
-    contextData = useGame();
-  } catch (e) {
-    // No hay contexto disponible, usar props externas
-  }
+  const contextData = useGame();
 
   const activeChallenge = externalActiveChallenge || contextData.activeChallenge;
   const completeChallenge = externalCompleteChallenge || contextData.completeChallenge;
@@ -32,7 +26,7 @@ const ChallengeModal = ({
   const [selectedAnswer, setSelectedAnswer] = useState(null);
   const [showResult, setShowResult] = useState(false);
   const [timer, setTimer] = useState(0);
-  const [timerInterval, setTimerInterval] = useState(null);
+  const timerIntervalRef = useRef(null);
   const [deezerSong, setDeezerSong] = useState(null);
   const [karaokeSong, setKaraokeSong] = useState(null);
   const [currentLyricIndex, setCurrentLyricIndex] = useState(0);
@@ -42,6 +36,26 @@ const ChallengeModal = ({
   // Refs para los sonidos
   const applauseAudioRef = useRef(null);
   const donkeyAudioRef = useRef(null);
+
+  const startTimer = useCallback((initialTime) => {
+    if (timerIntervalRef.current) {
+      clearInterval(timerIntervalRef.current);
+    }
+
+    setTimer(initialTime);
+    const interval = setInterval(() => {
+      setTimer(prev => {
+        if (prev <= 1) {
+          clearInterval(interval);
+          timerIntervalRef.current = null;
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+
+    timerIntervalRef.current = interval;
+  }, []);
 
   useEffect(() => {
     if (activeChallenge) {
@@ -95,32 +109,21 @@ const ChallengeModal = ({
         startTimer(90);
       }
     } else {
-      if (timerInterval) {
-        clearInterval(timerInterval);
-        setTimerInterval(null);
+      if (timerIntervalRef.current) {
+        clearInterval(timerIntervalRef.current);
+        timerIntervalRef.current = null;
       }
       setDeezerSong(null);
       setKaraokeSong(null);
     }
 
     return () => {
-      if (timerInterval) clearInterval(timerInterval);
+      if (timerIntervalRef.current) {
+        clearInterval(timerIntervalRef.current);
+        timerIntervalRef.current = null;
+      }
     };
-  }, [activeChallenge]);
-
-  const startTimer = (initialTime) => {
-    clearInterval(timerInterval);
-    const interval = setInterval(() => {
-      setTimer(prev => {
-        if (prev <= 1) {
-          clearInterval(interval);
-          return 0;
-        }
-        return prev - 1;
-      });
-    }, 1000);
-    setTimerInterval(interval);
-  };
+  }, [activeChallenge, startTimer]);
 
   // Auto-scroll de letras para karaoke
   useEffect(() => {

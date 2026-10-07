@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import { createContext, useState, useEffect, useCallback, useRef } from 'react';
 import { SONGS } from '../data/songs';
 import { TRIVIA_QUESTIONS } from '../data/triviaQuestions';
 import { DANCE_CHALLENGES, SING_CHALLENGES, GROUP_CHALLENGES } from '../data/challenges';
@@ -15,19 +15,10 @@ import {
 
 const GameContext = createContext();
 
-export const useGame = () => {
-  const context = useContext(GameContext);
-  if (!context) {
-    throw new Error('useGame debe usarse dentro de GameProvider');
-  }
-  return context;
-};
-
 export const GameProvider = ({ children }) => {
   // ===== ESTADO PRINCIPAL =====
   const [gameState, setGameState] = useState('registration'); // registration, playing, paused, finished
   const [players, setPlayers] = useState([]);
-  const [currentPlayerIndex, setCurrentPlayerIndex] = useState(0);
 
   // ===== ESTADO DEL BINGO =====
   const [availableNumbers, setAvailableNumbers] = useState([]);
@@ -40,7 +31,8 @@ export const GameProvider = ({ children }) => {
 
   // ===== ESTADO DE TIMER =====
   const [timeRemaining, setTimeRemaining] = useState(30);
-  const [timerInterval, setTimerInterval] = useState(null);
+  const timerIntervalRef = useRef(null);
+  const challengeTimeoutRef = useRef(null);
 
   // ===== ESTADO DE RETOS =====
   const [numbersSinceChallenge, setNumbersSinceChallenge] = useState(0);
@@ -161,78 +153,65 @@ export const GameProvider = ({ children }) => {
   }, [players.length, initializeGame]);
 
   const pauseGame = useCallback(() => {
-    if (timerInterval) {
-      clearInterval(timerInterval);
-      setTimerInterval(null);
+    if (timerIntervalRef.current) {
+      clearInterval(timerIntervalRef.current);
+      timerIntervalRef.current = null;
     }
     setGameState('paused');
-  }, [timerInterval]);
+  }, []);
 
   const resumeGame = useCallback(() => {
     setGameState('playing');
   }, []);
 
   const stopGame = useCallback(() => {
-    if (timerInterval) {
-      clearInterval(timerInterval);
-      setTimerInterval(null);
+    if (timerIntervalRef.current) {
+      clearInterval(timerIntervalRef.current);
+      timerIntervalRef.current = null;
+    }
+    if (challengeTimeoutRef.current) {
+      clearTimeout(challengeTimeoutRef.current);
+      challengeTimeoutRef.current = null;
     }
     setGameState('registration');
     initializeGame();
     setCurrentNumber(null);
     setCurrentSong(null);
-  }, [timerInterval, initializeGame]);
+  }, [initializeGame]);
 
   // ===== FUNCIÓN DE LLAMAR NÚMERO =====
 
-  const callNextNumber = useCallback(() => {
-    if (availableNumbers.length === 0) {
-      setGameState('finished');
-      return;
-    }
-
-    // Seleccionar número aleatorio
-    const randomIndex = Math.floor(Math.random() * availableNumbers.length);
-    const number = availableNumbers[randomIndex];
-
-    // Actualizar estado
-    setAvailableNumbers(prev => prev.filter((_, index) => index !== randomIndex));
-    setCalledNumbers(prev => [number, ...prev]);
-    setCurrentNumber(number);
-
-    // Cambiar canción
-    changeCurrentSong();
-
-    // Marcar números en cartones de jugadores
-    markNumberInAllCards(number);
-
-    // Resetear timer
-    setTimeRemaining(config.timeBetweenNumbers);
-
-    // Incrementar contador para retos
-    const newCount = numbersSinceChallenge + 1;
-    setNumbersSinceChallenge(newCount);
-
-    // Verificar si toca reto
-    if (newCount >= config.challengeFrequency) {
-      setNumbersSinceChallenge(0);
-      setTimeout(() => {
-        triggerChallenge();
-      }, 1000);
-    }
-  }, [availableNumbers, numbersSinceChallenge, config]);
-
   const changeCurrentSong = useCallback(() => {
-    if (availableSongs.length === 0) {
-      setAvailableSongs([...SONGS]);
-    }
+    const songPool = availableSongs.length > 0 ? availableSongs : SONGS;
+    const randomIndex = Math.floor(Math.random() * songPool.length);
+    const song = songPool[randomIndex];
 
-    const randomIndex = Math.floor(Math.random() * availableSongs.length);
-    const song = availableSongs[randomIndex];
-
-    setAvailableSongs(prev => prev.filter((_, index) => index !== randomIndex));
+    setAvailableSongs(songPool.filter((_, index) => index !== randomIndex));
     setCurrentSong(song);
   }, [availableSongs]);
+
+  const getAchievementUpdates = useCallback((player) => {
+    const { markedCells } = player.bingoCard;
+    const updates = {};
+
+    if (!player.stats.linesCompleted && checkLines(markedCells)) {
+      updates.linesCompleted = countCompletedLines(markedCells);
+    }
+
+    if (!player.stats.hasFourCorners && checkFourCorners(markedCells)) {
+      updates.hasFourCorners = true;
+    }
+
+    if (!player.stats.hasCentralCross && checkCentralCross(markedCells)) {
+      updates.hasCentralCross = true;
+    }
+
+    if (!player.stats.hasFullCard && checkFullCard(markedCells)) {
+      updates.hasFullCard = true;
+    }
+
+    return updates;
+  }, []);
 
   const markNumberInAllCards = useCallback((number) => {
     setPlayers(prev => prev.map(player => {
@@ -250,42 +229,24 @@ export const GameProvider = ({ children }) => {
         },
         stats: {
           ...player.stats,
-          numbersMarked: newMarked.length
+          numbersMarked: newMarked.length,
+          ...getAchievementUpdates({
+            ...player,
+            bingoCard: {
+              ...player.bingoCard,
+              markedCells: newMarked
+            },
+            stats: {
+              ...player.stats,
+              numbersMarked: newMarked.length
+            }
+          })
         }
       };
 
-      // Verificar logros
-      checkPlayerAchievements(updatedPlayer);
-
       return updatedPlayer;
     }));
-  }, []);
-
-  const checkPlayerAchievements = useCallback((player) => {
-    const { bingoCard, stats } = player;
-    const { markedCells } = bingoCard;
-
-    // Verificar línea completa (si no la había completado antes)
-    if (!stats.linesCompleted && checkLines(markedCells)) {
-      updatePlayerStats(player.id, { linesCompleted: countCompletedLines(markedCells) });
-    }
-
-    // Verificar 4 esquinas
-    if (!stats.hasFourCorners && checkFourCorners(markedCells)) {
-      updatePlayerStats(player.id, { hasFourCorners: true });
-    }
-
-    // Verificar cruz central
-    if (!stats.hasCentralCross && checkCentralCross(markedCells)) {
-      updatePlayerStats(player.id, { hasCentralCross: true });
-    }
-
-    // Verificar cartón completo
-    if (!stats.hasFullCard && checkFullCard(markedCells)) {
-      updatePlayerStats(player.id, { hasFullCard: true });
-      // Podría pausar el juego o mostrar celebración
-    }
-  }, [updatePlayerStats]);
+  }, [getAchievementUpdates]);
 
   // ===== FUNCIONES DE RETOS =====
 
@@ -304,8 +265,8 @@ export const GameProvider = ({ children }) => {
 
     // Seleccionar tipo de reto
     const enabledTypes = Object.entries(config.enabledChallengeTypes)
-      .filter(([_, enabled]) => enabled)
-      .map(([type, _]) => type);
+      .filter(([, enabled]) => enabled)
+      .map(([type]) => type);
 
     if (enabledTypes.length === 0) return;
 
@@ -314,33 +275,43 @@ export const GameProvider = ({ children }) => {
     let challenge;
     switch (challengeType) {
       case 'trivia':
+      {
         challenge = {
           type: 'trivia',
           player: randomPlayer,
           data: TRIVIA_QUESTIONS[Math.floor(Math.random() * TRIVIA_QUESTIONS.length)]
         };
         break;
+      }
       case 'dance':
+      {
         challenge = {
           type: 'dance',
           player: randomPlayer,
           data: DANCE_CHALLENGES[Math.floor(Math.random() * DANCE_CHALLENGES.length)]
         };
         break;
+      }
       case 'sing':
+      {
         challenge = {
           type: 'sing',
           player: randomPlayer,
           data: SING_CHALLENGES[Math.floor(Math.random() * SING_CHALLENGES.length)]
         };
         break;
+      }
       case 'group':
+      {
         challenge = {
           type: 'group',
           player: randomPlayer,
           data: GROUP_CHALLENGES[Math.floor(Math.random() * GROUP_CHALLENGES.length)]
         };
         break;
+      }
+      default:
+        return;
     }
 
     setActiveChallenge(challenge);
@@ -356,6 +327,7 @@ export const GameProvider = ({ children }) => {
 
     switch (type) {
       case 'trivia':
+      {
         const isCorrect = selectedAnswer === activeChallenge.data.correct;
 
         statUpdates = {
@@ -363,6 +335,7 @@ export const GameProvider = ({ children }) => {
           triviaAttempted: player.stats.triviaAttempted + 1
         };
         break;
+      }
 
       case 'dance':
         statUpdates = {
@@ -394,6 +367,34 @@ export const GameProvider = ({ children }) => {
     resumeGame();
   }, [activeChallenge, players, updatePlayerStats, resumeGame]);
 
+  const callNextNumber = useCallback(() => {
+    if (availableNumbers.length === 0) {
+      setGameState('finished');
+      return;
+    }
+
+    const randomIndex = Math.floor(Math.random() * availableNumbers.length);
+    const number = availableNumbers[randomIndex];
+
+    setAvailableNumbers(prev => prev.filter((_, index) => index !== randomIndex));
+    setCalledNumbers(prev => [number, ...prev]);
+    setCurrentNumber(number);
+    changeCurrentSong();
+    markNumberInAllCards(number);
+    setTimeRemaining(config.timeBetweenNumbers);
+
+    const newCount = numbersSinceChallenge + 1;
+    if (newCount >= config.challengeFrequency) {
+      setNumbersSinceChallenge(0);
+      challengeTimeoutRef.current = setTimeout(() => {
+        challengeTimeoutRef.current = null;
+        triggerChallenge();
+      }, 1000);
+    } else {
+      setNumbersSinceChallenge(newCount);
+    }
+  }, [availableNumbers, numbersSinceChallenge, config, changeCurrentSong, markNumberInAllCards, triggerChallenge]);
+
   // closeChallenge eliminado - ahora es obligatorio completar
 
   // ===== EFECTOS =====
@@ -411,12 +412,12 @@ export const GameProvider = ({ children }) => {
         });
       }, 1000);
 
-      setTimerInterval(interval);
+      timerIntervalRef.current = interval;
 
       return () => clearInterval(interval);
-    } else if (timerInterval) {
-      clearInterval(timerInterval);
-      setTimerInterval(null);
+    } else if (timerIntervalRef.current) {
+      clearInterval(timerIntervalRef.current);
+      timerIntervalRef.current = null;
     }
   }, [gameState, activeChallenge, config.timeBetweenNumbers, callNextNumber]);
 

@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Toaster } from 'react-hot-toast';
 import toast from 'react-hot-toast';
-import { useGame } from './context/GameContext';
+import { useGame } from './context/useGame';
 import { useSocket } from './context/SocketContext';
 import RegistrationScreen from './components/Registration/RegistrationScreen';
 import GameScreen from './components/Game/GameScreen';
