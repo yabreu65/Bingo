@@ -30,3 +30,6 @@ backend/uploads/
 # Local multimedia assets (kept outside Git until deployment storage is defined)
 bingo-react/public/music/**/*.mp4
 bingo-react/public/music/**/*.mp3
+
+# Backup files
+*.backup
