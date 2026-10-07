@@ -342,7 +342,7 @@ const TVDisplay = ({ roomCode }) => {
       socket.off('tiebreak-voting-progress', handleTiebreakVotingProgress);
       socket.off('tiebreak-results', handleTiebreakResults);
     };
-  }, [socket, roomCode]); // Solo re-ejecutar si cambia el socket o roomCode
+  }, [socket, roomCode, activeChallenge, gameState, playlist.length]); // Solo re-ejecutar si cambia el contexto de la sala o el estado del juego
 
   // Manejar cuando termina una canción
   const handleVideoEnded = () => {
@@ -380,22 +380,23 @@ const TVDisplay = ({ roomCode }) => {
   // Auto-reproducir cuando cambia la canción
   useEffect(() => {
     if (videoPlayerRef.current && currentSong?.localFile) {
+      const videoElement = videoPlayerRef.current;
       console.log('📺 Loading new song:', currentSong.title);
       console.log('   - Current gameState:', gameState);
       console.log('   - Challenge active:', isChallengeActiveRef.current);
 
       // Cargar el nuevo video
-      videoPlayerRef.current.load();
+      videoElement.load();
 
       // Posicionar en el segundo 20 y reproducir cuando esté listo
       const handleLoadedMetadata = () => {
-        if (videoPlayerRef.current) {
-          videoPlayerRef.current.currentTime = 20;
+        if (videoElement) {
+          videoElement.currentTime = 20;
 
           // Solo auto-reproducir si el juego está activo Y NO hay un challenge
           if (gameState === 'playing' && !isChallengeActiveRef.current) {
             console.log('📺 Auto-playing new song from second 20');
-            videoPlayerRef.current.play()
+            videoElement.play()
               .then(() => {
                 console.log('✅ New song playing successfully');
               })
@@ -411,13 +412,13 @@ const TVDisplay = ({ roomCode }) => {
         }
       };
 
-      videoPlayerRef.current.addEventListener('loadedmetadata', handleLoadedMetadata);
+      videoElement.addEventListener('loadedmetadata', handleLoadedMetadata);
 
       return () => {
-        videoPlayerRef.current?.removeEventListener('loadedmetadata', handleLoadedMetadata);
+        videoElement.removeEventListener('loadedmetadata', handleLoadedMetadata);
       };
     }
-  }, [currentSong, gameState]);
+  }, [currentSong, gameState, activeChallenge, playlist.length]);
 
   // Sincronizar video con el estado del juego Y cuando termina un challenge
   useEffect(() => {

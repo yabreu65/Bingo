@@ -1,5 +1,5 @@
 "use client";
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import toast from 'react-hot-toast';
 import { showError, showSuccess } from '../../utils/toastUtils';
 import { useSocket } from '../../context/useSocket';
@@ -533,7 +533,7 @@ export default function OrganizerDashboard({ roomData }) {
       socket.off('challenge-completed', handleChallengeCompleted);
       socket.off('bingo-verified', handleBingoVerified);
     };
-  }, [socket, roomState.config?.timeBetweenNumbers]);
+  }, [socket, roomState.config?.timeBetweenNumbers, roomState.players]);
 
   // Efecto para el temporizador visual
   useEffect(() => {
@@ -639,7 +639,7 @@ export default function OrganizerDashboard({ roomData }) {
   };
 
   // --- Handlers para Jugadores Manuales ---
-  async function fetchManualPlayers() {
+  const fetchManualPlayers = useCallback(async () => {
     try {
       const [playersRes, cardsRes] = await Promise.all([
         fetch(`${API_URL}/api/rooms/${roomState.code}/manual-players`),
@@ -658,14 +658,14 @@ export default function OrganizerDashboard({ roomData }) {
     } catch (error) {
       console.error('Error fetching manual players:', error);
     }
-  }
+  }, [roomState.code]);
 
   // Efecto para cargar jugadores manuales
   useEffect(() => {
     if (roomState.code) {
       setTimeout(() => fetchManualPlayers(), 0);
     }
-  }, [roomState.code]);
+  }, [roomState.code, fetchManualPlayers]);
 
   const handleAssignManualCard = async () => {
     if (!manualPlayerForm.name.trim() || !manualPlayerForm.cardNumber) {

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { WifiOff, RefreshCw } from 'lucide-react';
 
 /**
@@ -9,6 +9,18 @@ export default function NetworkError({ error, onRetry, autoRetry = true, maxRetr
   const [isRetrying, setIsRetrying] = useState(false);
   const [countdown, setCountdown] = useState(5);
 
+  const handleRetry = useCallback(async () => {
+    setIsRetrying(true);
+    try {
+      await onRetry();
+      setRetryCount(0);
+    } catch {
+      setRetryCount(prev => prev + 1);
+    } finally {
+      setIsRetrying(false);
+    }
+  }, [onRetry]);
+
   // Auto-retry con exponential backoff
   useEffect(() => {
     if (!autoRetry || retryCount >= maxRetries) return;
@@ -18,7 +30,7 @@ export default function NetworkError({ error, onRetry, autoRetry = true, maxRetr
     }, Math.min(1000 * Math.pow(2, retryCount), 10000)); // Max 10 seconds
 
     return () => clearTimeout(timer);
-  }, [retryCount, autoRetry, maxRetries]);
+  }, [retryCount, autoRetry, maxRetries, handleRetry]);
 
   // Countdown para mostrar al usuario
   useEffect(() => {
@@ -35,18 +47,6 @@ export default function NetworkError({ error, onRetry, autoRetry = true, maxRetr
 
     return () => clearInterval(timer);
   }, [countdown, autoRetry, retryCount, maxRetries]);
-
-  const handleRetry = async () => {
-    setIsRetrying(true);
-    try {
-      await onRetry();
-      setRetryCount(0); // Reset on success
-    } catch {
-      setRetryCount(prev => prev + 1);
-    } finally {
-      setIsRetrying(false);
-    }
-  };
 
   const isNetworkError = error?.message?.includes('network') ||
                         error?.message?.includes('fetch') ||

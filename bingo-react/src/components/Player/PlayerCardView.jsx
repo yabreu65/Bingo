@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import toast from 'react-hot-toast';
 import { useSocket } from '../../context/useSocket';
 import ChallengeModal from '../Challenges/ChallengeModal';
@@ -57,7 +57,7 @@ const PlayerCardView = ({ roomData }) => {
     setGameState(data.state);
   }
 
-  function handleGameStateUpdate(data) {
+  const handleGameStateUpdate = useCallback((data) => {
     console.log('🔄 Game state update received:', data);
 
     // Actualizar estado del juego
@@ -102,18 +102,18 @@ const PlayerCardView = ({ roomData }) => {
     }
 
     toast.success('Estado sincronizado correctamente');
-  }
+  }, [roomData.playerId]);
 
   function handleEvent(data) {
     setActiveEvent(data);
     setTimeout(() => setActiveEvent(null), 8000); // Ocultar después de 8 segundos
   }
 
-  function handleCellMarked(data) {
+  const handleCellMarked = useCallback((data) => {
     if (data.playerId === roomData.playerId) {
       setMarkedCells((prev) => [...prev, { row: data.row, col: data.col }]);
     }
-  }
+  }, [roomData.playerId]);
 
   function handleChallengeTriggered(data) {
     console.log('🎯 PlayerCardView: Challenge triggered:', data);
@@ -249,7 +249,7 @@ const PlayerCardView = ({ roomData }) => {
       socket?.off('tiebreak-vote-confirmed', handleTiebreakVoteConfirmed);
       socket?.off('tiebreak-results', handleTiebreakResults);
     };
-  }, [socket]);
+  }, [socket, roomData.roomCode, roomData.playerId, handleCellMarked, handleGameStateUpdate]);
 
   const handleTiebreakVote = (performerId, stars) => {
     console.log(`⭐ Voting for ${performerId}: ${stars} stars`);

@@ -37,7 +37,7 @@ const WaitingRoom = ({ roomData, onGameStart }) => {
       if (unsubscribePlayerJoined) unsubscribePlayerJoined();
       if (unsubscribeGameStarted) unsubscribeGameStarted();
     };
-  }, []);
+  }, [joinRoom, onPlayerJoined, onGameStarted, onGameStart, roomData.roomCode, roomData.playerId]);
 
   useEffect(() => {
     const unsubCell = onCellMarked((data) => {
@@ -60,7 +60,7 @@ const WaitingRoom = ({ roomData, onGameStart }) => {
       setTimeLeft(intervalSec);
     });
     return () => { if (unsubCalled) unsubCalled(); };
-  }, [onNumberCalled]);
+  }, [onNumberCalled, intervalSec]);
 
   useEffect(() => {
     if (!gameStarted) return;
