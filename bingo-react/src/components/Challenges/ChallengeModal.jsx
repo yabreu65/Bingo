@@ -57,6 +57,7 @@ const ChallengeModal = ({
     timerIntervalRef.current = interval;
   }, []);
 
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     if (activeChallenge) {
       console.log('🎯 ChallengeModal received activeChallenge:', activeChallenge);
@@ -124,8 +125,10 @@ const ChallengeModal = ({
       }
     };
   }, [activeChallenge, startTimer]);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   // Auto-scroll de letras para karaoke
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     if (activeChallenge?.type === 'karaoke' && karaokeSong?.lyrics && timer > 0) {
       const totalLines = karaokeSong.lyrics.length;
@@ -143,6 +146,7 @@ const ChallengeModal = ({
       setCurrentLyricIndex(newIndex);
     }
   }, [timer, karaokeSong, activeChallenge]);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   const handleTriviaAnswer = (answerIndex) => {
     if (showResult) return;

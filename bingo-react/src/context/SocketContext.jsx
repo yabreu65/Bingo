@@ -1,16 +1,7 @@
-import { createContext, useContext, useEffect, useState, useCallback, useRef } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
+import { SocketContext } from './SocketContextValue';
 import io from 'socket.io-client';
 import { getBackendUrl } from '../config/api';
-
-const SocketContext = createContext();
-
-export const useSocket = () => {
-  const context = useContext(SocketContext);
-  if (!context) {
-    throw new Error('useSocket must be used within SocketProvider');
-  }
-  return context;
-};
 
 export const SocketProvider = ({ children }) => {
   const [socket, setSocket] = useState(null);
@@ -154,7 +145,6 @@ export const SocketProvider = ({ children }) => {
         } else {
           // Aunque parezca conectado, forzar re-join para asegurar
           if (roomDataRef.current) {
-            const { roomCode, playerId } = roomDataRef.current;
             console.log('🔄 Forcing rejoin to ensure connection...');
 
             // Desconectar y reconectar para forzar un rejoin limpio

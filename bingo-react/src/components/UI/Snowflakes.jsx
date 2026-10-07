@@ -1,22 +1,14 @@
-import { useEffect, useState } from 'react';
 import './Snowflakes.css';
 
 const Snowflakes = () => {
-  const [snowflakes, setSnowflakes] = useState([]);
-
-  useEffect(() => {
-    // Generar 50 copos de nieve con propiedades aleatorias
-    const flakes = Array.from({ length: 50 }, (_, i) => ({
-      id: i,
-      left: Math.random() * 100,
-      animationDuration: Math.random() * 3 + 2,
-      animationDelay: Math.random() * 5,
-      fontSize: Math.random() * 10 + 10,
-      opacity: Math.random() * 0.6 + 0.4
-    }));
-
-    setSnowflakes(flakes);
-  }, []);
+  const snowflakes = Array.from({ length: 50 }, (_, i) => ({
+    id: i,
+    left: (i * 37) % 100,
+    animationDuration: 2 + ((i * 11) % 3),
+    animationDelay: (i * 7) % 5,
+    fontSize: 10 + ((i * 13) % 10),
+    opacity: 0.4 + ((i * 17) % 6) / 10
+  }));
 
   return (
     <div className="snowflakes-container">

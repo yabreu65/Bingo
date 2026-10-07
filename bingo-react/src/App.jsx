@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { Toaster } from 'react-hot-toast';
 import toast from 'react-hot-toast';
 import { useGame } from './context/useGame';
-import { useSocket } from './context/SocketContext';
+import { useSocket } from './context/useSocket';
 import RegistrationScreen from './components/Registration/RegistrationScreen';
 import GameScreen from './components/Game/GameScreen';
 import RoomSetup from './components/Room/RoomSetup';
@@ -40,7 +40,7 @@ function App() {
   useEffect(() => {
     if (!socket) return;
 
-    const handleRoomClosed = (data) => {
+    const handleRoomClosed = () => {
       // Limpiar localStorage
       localStorage.removeItem('bingo_session');
 
@@ -229,19 +229,6 @@ function App() {
     setRoomData(data);
     setCardSelected(true);
     setInWaitingRoom(true);
-  };
-
-  const handleGameStart = (gameId) => {
-    setInWaitingRoom(false);
-    // The game will start through the GameContext
-  };
-
-  const handleLeaveRoom = () => {
-    localStorage.removeItem(STORAGE_KEY);
-    setMode(null);
-    setRoomData(null);
-    setCardSelected(false);
-    setInWaitingRoom(false);
   };
 
   // Función para continuar con la sesión guardada

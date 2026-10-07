@@ -1,35 +1,24 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo } from 'react';
 import './Confetti.css';
 
 const Confetti = ({ trigger, onComplete }) => {
-  const [pieces, setPieces] = useState([]);
-  const [show, setShow] = useState(false);
+  const pieces = useMemo(() => Array.from({ length: 100 }, (_, i) => ({
+    id: i,
+    left: (i * 37) % 100,
+    animationDuration: 2 + ((i * 11) % 3),
+    animationDelay: ((i * 7) % 5) / 10,
+    color: ['#ff6b6b', '#4ecdc4', '#45b7d1', '#f9ca24', '#6c5ce7', '#fd79a8'][i % 6],
+    rotation: (i * 29) % 360
+  })), []);
 
   useEffect(() => {
-    if (trigger) {
-      setShow(true);
+    if (!trigger) return undefined;
 
-      // Generar piezas de confeti
-      const confettiPieces = Array.from({ length: 100 }, (_, i) => ({
-        id: i,
-        left: Math.random() * 100,
-        animationDuration: Math.random() * 3 + 2,
-        animationDelay: Math.random() * 0.5,
-        color: ['#ff6b6b', '#4ecdc4', '#45b7d1', '#f9ca24', '#6c5ce7', '#fd79a8'][Math.floor(Math.random() * 6)],
-        rotation: Math.random() * 360
-      }));
-
-      setPieces(confettiPieces);
-
-      // Ocultar después de 5 segundos
-      setTimeout(() => {
-        setShow(false);
-        if (onComplete) onComplete();
-      }, 5000);
-    }
+    const timer = setTimeout(() => onComplete?.(), 5000);
+    return () => clearTimeout(timer);
   }, [trigger, onComplete]);
 
-  if (!show) return null;
+  if (!trigger) return null;
 
   return (
     <div className="confetti-container">

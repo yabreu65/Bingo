@@ -170,7 +170,7 @@ export async function fetchWithRetry(url, options = {}, retryConfig = {}) {
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
       // Log del intento (solo en desarrollo)
-      if (process.env.NODE_ENV === 'development' && attempt > 0) {
+      if (import.meta.env.DEV && attempt > 0) {
         console.log(`🔄 Reintento ${attempt}/${maxRetries} para ${url}`);
       }
 
@@ -182,7 +182,7 @@ export async function fetchWithRetry(url, options = {}, retryConfig = {}) {
       let data;
       try {
         data = await response.json();
-      } catch (e) {
+      } catch {
         // Si no es JSON válido, usar texto
         const text = await response.text();
         data = { message: text };
@@ -217,7 +217,7 @@ export async function fetchWithRetry(url, options = {}, retryConfig = {}) {
       // Si quedan reintentos, esperar antes del siguiente intento
       if (attempt < maxRetries) {
         const delay = calculateBackoff(attempt, baseDelay, maxDelay, jitterFactor);
-        if (process.env.NODE_ENV === 'development') {
+        if (import.meta.env.DEV) {
           console.log(`⏳ Esperando ${delay}ms antes del reintento...`);
         }
         await sleep(delay);
@@ -242,7 +242,7 @@ export async function fetchWithRetry(url, options = {}, retryConfig = {}) {
       // Error reintentable, continuar al siguiente intento
       if (attempt < maxRetries) {
         const delay = calculateBackoff(attempt, baseDelay, maxDelay, jitterFactor);
-        if (process.env.NODE_ENV === 'development') {
+        if (import.meta.env.DEV) {
           console.log(`⏳ Error de red, esperando ${delay}ms antes del reintento...`);
         }
         await sleep(delay);

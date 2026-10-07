@@ -41,7 +41,7 @@ export default function NetworkError({ error, onRetry, autoRetry = true, maxRetr
     try {
       await onRetry();
       setRetryCount(0); // Reset on success
-    } catch (err) {
+    } catch {
       setRetryCount(prev => prev + 1);
     } finally {
       setIsRetrying(false);

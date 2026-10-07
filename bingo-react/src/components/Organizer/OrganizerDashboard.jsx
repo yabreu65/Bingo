@@ -1,10 +1,11 @@
 "use client";
 import { useState, useEffect } from 'react';
 import toast from 'react-hot-toast';
-import { showError, showSuccess, showInfo } from '../../utils/toastUtils';
-import { useSocket } from '../../context/SocketContext';
+import { showError, showSuccess } from '../../utils/toastUtils';
+import { useSocket } from '../../context/useSocket';
 import { API_URL } from '../../config/api';
 import { QRCodeSVG } from 'qrcode.react';
+// eslint-disable-next-line no-unused-vars
 import { motion, AnimatePresence } from 'framer-motion';
 import { Play, Pause, RefreshCw, Users, Link as LinkIcon, Tv, X, Search, Crown, Mic, Music, Gift, Target, Clock, Video, Eye, CheckCircle, XCircle } from 'lucide-react';
 import RecordingChallenge from '../Recording/RecordingChallenge';
@@ -294,7 +295,7 @@ const ManualBingoValidator = ({ isOpen, onClose, player, calledNumbers, gameMode
 
         {/* Header B-I-N-G-O */}
         <div className="grid grid-cols-5 gap-2 mb-2">
-          {letters.map((letter, idx) => (
+          {letters.map(letter => (
             <div
               key={letter}
               className={`${letterColors[letter]} text-white font-bold text-2xl py-3 rounded-lg text-center shadow-lg`}
@@ -436,7 +437,7 @@ export default function OrganizerDashboard({ roomData }) {
             console.log('✅ Dashboard state synced:', syncResponse.data);
 
             // Actualizar todos los estados con los datos sincronizados
-            const { room, gameState: newGameState, currentNumber: syncedNumber, calledNumbers: syncedNumbers, gameStarted } = syncResponse.data;
+            const { room, gameState: newGameState, currentNumber: syncedNumber, calledNumbers: syncedNumbers } = syncResponse.data;
 
             if (room) setRoomState(room);
             if (newGameState) setGameState(newGameState);
@@ -545,13 +546,6 @@ export default function OrganizerDashboard({ roomData }) {
     return () => clearInterval(timer);
   }, [gameState, nextNumberIn]);
 
-  // Efecto para cargar jugadores manuales
-  useEffect(() => {
-    if (roomState.code) {
-      fetchManualPlayers();
-    }
-  }, [roomState.code]);
-
   // --- Handlers de Acciones ---
   const handleStartGame = () => {
     if (roomState.players.filter(p => p.isConnected).length < 1) { // Permitir iniciar con 1 jugador para pruebas
@@ -645,7 +639,7 @@ export default function OrganizerDashboard({ roomData }) {
   };
 
   // --- Handlers para Jugadores Manuales ---
-  const fetchManualPlayers = async () => {
+  async function fetchManualPlayers() {
     try {
       const [playersRes, cardsRes] = await Promise.all([
         fetch(`${API_URL}/api/rooms/${roomState.code}/manual-players`),
@@ -664,7 +658,14 @@ export default function OrganizerDashboard({ roomData }) {
     } catch (error) {
       console.error('Error fetching manual players:', error);
     }
-  };
+  }
+
+  // Efecto para cargar jugadores manuales
+  useEffect(() => {
+    if (roomState.code) {
+      setTimeout(() => fetchManualPlayers(), 0);
+    }
+  }, [roomState.code]);
 
   const handleAssignManualCard = async () => {
     if (!manualPlayerForm.name.trim() || !manualPlayerForm.cardNumber) {

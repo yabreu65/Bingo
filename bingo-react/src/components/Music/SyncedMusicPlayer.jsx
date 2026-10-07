@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import toast from 'react-hot-toast';
 import ReactPlayer from 'react-player';
-import { useSocket } from '../../context/SocketContext';
+import { useSocket } from '../../context/useSocket';
 import './MusicPlayer.css';
 
 const SyncedMusicPlayer = ({ roomCode, isHost, playlist = [], currentIndex: externalIndex = 0, onSongChange }) => {

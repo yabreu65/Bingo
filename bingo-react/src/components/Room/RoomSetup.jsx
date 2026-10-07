@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import toast from 'react-hot-toast';
-import { useSocket } from '../../context/SocketContext';
+import { useSocket } from '../../context/useSocket';
 import { API_URL } from '../../config/api';
 import './RoomSetup.css';
 

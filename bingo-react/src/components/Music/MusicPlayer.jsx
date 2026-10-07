@@ -3,34 +3,22 @@ import ReactPlayer from 'react-player';
 import { MUSIC_PLAYLISTS, shufflePlaylist } from '../../config/musicPlaylists';
 import './MusicPlayer.css';
 
-const MusicPlayer = ({ autoPlay = true, onSongChange, syncMode = false, currentSongId = null }) => {
-  const [playlist, setPlaylist] = useState([]);
+const MusicPlayer = ({ onSongChange, syncMode = false, currentSongId = null }) => {
+  const [playlist, setPlaylist] = useState(() => shufflePlaylist());
   const [currentIndex, setCurrentIndex] = useState(0);
   const [playing, setPlaying] = useState(false); // Empieza pausado para evitar autoplay bloqueado
   const [volume, setVolume] = useState(0.5);
   const [muted, setMuted] = useState(false);
   const [showPlayer, setShowPlayer] = useState(false);
   const [showPlaylist, setShowPlaylist] = useState(false);
-  const [userInteracted, setUserInteracted] = useState(false); // Track si el usuario ya interactuó
   const playerRef = useRef(null);
 
-  // Inicializar playlist aleatoria
-  useEffect(() => {
-    const randomPlaylist = shufflePlaylist();
-    setPlaylist(randomPlaylist);
-  }, []);
-
-  // Si está en modo sync, usar la canción del servidor
-  useEffect(() => {
-    if (syncMode && currentSongId) {
-      const songIndex = playlist.findIndex(song => song.id === currentSongId);
-      if (songIndex !== -1 && songIndex !== currentIndex) {
-        setCurrentIndex(songIndex);
-      }
-    }
-  }, [syncMode, currentSongId, playlist]);
-
-  const currentSong = playlist[currentIndex];
+  // En modo sync, derivar la canción del servidor sin duplicar estado local.
+  const syncedIndex = syncMode && currentSongId
+    ? playlist.findIndex(song => song.id === currentSongId)
+    : -1;
+  const activeIndex = syncedIndex >= 0 ? syncedIndex : currentIndex;
+  const currentSong = playlist[activeIndex];
 
   // Notificar cambio de canción
   useEffect(() => {
@@ -61,7 +49,6 @@ const MusicPlayer = ({ autoPlay = true, onSongChange, syncMode = false, currentS
 
   const handlePlayPause = () => {
     if (!syncMode) {
-      setUserInteracted(true);
       setPlaying(!playing);
       if (!playing) {
         setMuted(false); // Asegurar que no esté silenciado al reproducir

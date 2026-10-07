@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import toast from 'react-hot-toast';
-import { useSocket } from '../../context/SocketContext';
+import { useSocket } from '../../context/useSocket';
 import ChallengeModal from '../Challenges/ChallengeModal';
 import TiebreakVotingModal from '../Voting/TiebreakVotingModal';
 import './PlayerCardView.css';
@@ -46,6 +46,101 @@ const PlayerCardView = ({ roomData }) => {
       }
     }
   }, [currentNumber, calledNumbers, gameState, markedCells]);
+
+
+  function handleNumberCalled(data) {
+    setCurrentNumber(data.number);
+    setCalledNumbers((prev) => [...prev, data.number]);
+  }
+
+  function handleGameStateChanged(data) {
+    setGameState(data.state);
+  }
+
+  function handleGameStateUpdate(data) {
+    console.log('🔄 Game state update received:', data);
+
+    // Actualizar estado del juego
+    if (data.gameState) {
+      setGameState(data.gameState);
+    }
+
+    // Actualizar número actual
+    if (data.currentNumber !== undefined) {
+      setCurrentNumber(data.currentNumber);
+    }
+
+    // Actualizar números cantados
+    if (data.calledNumbers) {
+      setCalledNumbers(data.calledNumbers);
+    }
+
+    // Actualizar celdas marcadas si es nuestro jugador
+    if (data.playerData && data.playerData.playerId === roomData.playerId) {
+      if (data.playerData.markedCells) {
+        const cells = data.playerData.markedCells.map(cell =>
+          Array.isArray(cell) ? { row: cell[0], col: cell[1] } : cell
+        );
+        setMarkedCells(cells);
+      }
+    }
+
+    // Restaurar challenge activo si hay uno
+    if (data.activeChallenge) {
+      setActiveChallenge(data.activeChallenge);
+    }
+
+    // Restaurar tie-break si está activo
+    if (data.tieBreak && data.tieBreak.active) {
+      // Si está en votación, mostrar modal
+      if (data.tieBreak.status === 'voting') {
+        setTiebreakVoting({
+          candidates: data.tieBreak.candidates || [],
+          votingDuration: 30
+        });
+      }
+    }
+
+    toast.success('Estado sincronizado correctamente');
+  }
+
+  function handleEvent(data) {
+    setActiveEvent(data);
+    setTimeout(() => setActiveEvent(null), 8000); // Ocultar después de 8 segundos
+  }
+
+  function handleCellMarked(data) {
+    if (data.playerId === roomData.playerId) {
+      setMarkedCells((prev) => [...prev, { row: data.row, col: data.col }]);
+    }
+  }
+
+  function handleChallengeTriggered(data) {
+    console.log('🎯 PlayerCardView: Challenge triggered:', data);
+    setActiveChallenge(data);
+  }
+
+  function handleChallengeComplete() {
+    console.log('🎯 PlayerCardView: Challenge complete');
+    setActiveChallenge(null);
+  }
+
+  // Handlers para tie-break voting
+  function handleTiebreakVotingStarted(data) {
+    console.log('🗳️ Tie-break voting started:', data);
+    setTiebreakVoting(data);
+  }
+
+  function handleTiebreakVoteConfirmed(data) {
+    console.log('✅ Vote confirmed:', data);
+    toast.success(`Voto registrado para ${data.performerId}`);
+  }
+
+  function handleTiebreakResults(data) {
+    console.log('🏆 Tie-break results:', data);
+    setTiebreakVoting(null);
+    toast.success('Votación finalizada');
+  }
 
   useEffect(() => {
     if (!socket) return;
@@ -155,100 +250,6 @@ const PlayerCardView = ({ roomData }) => {
       socket?.off('tiebreak-results', handleTiebreakResults);
     };
   }, [socket]);
-
-  const handleNumberCalled = (data) => {
-    setCurrentNumber(data.number);
-    setCalledNumbers((prev) => [...prev, data.number]);
-  };
-
-  const handleGameStateChanged = (data) => {
-    setGameState(data.state);
-  };
-
-  const handleGameStateUpdate = (data) => {
-    console.log('🔄 Game state update received:', data);
-
-    // Actualizar estado del juego
-    if (data.gameState) {
-      setGameState(data.gameState);
-    }
-
-    // Actualizar número actual
-    if (data.currentNumber !== undefined) {
-      setCurrentNumber(data.currentNumber);
-    }
-
-    // Actualizar números cantados
-    if (data.calledNumbers) {
-      setCalledNumbers(data.calledNumbers);
-    }
-
-    // Actualizar celdas marcadas si es nuestro jugador
-    if (data.playerData && data.playerData.playerId === roomData.playerId) {
-      if (data.playerData.markedCells) {
-        const cells = data.playerData.markedCells.map(cell =>
-          Array.isArray(cell) ? { row: cell[0], col: cell[1] } : cell
-        );
-        setMarkedCells(cells);
-      }
-    }
-
-    // Restaurar challenge activo si hay uno
-    if (data.activeChallenge) {
-      setActiveChallenge(data.activeChallenge);
-    }
-
-    // Restaurar tie-break si está activo
-    if (data.tieBreak && data.tieBreak.active) {
-      // Si está en votación, mostrar modal
-      if (data.tieBreak.status === 'voting') {
-        setTiebreakVoting({
-          candidates: data.tieBreak.candidates || [],
-          votingDuration: 30
-        });
-      }
-    }
-
-    toast.success('Estado sincronizado correctamente');
-  };
-
-  const handleEvent = (data) => {
-    setActiveEvent(data);
-    setTimeout(() => setActiveEvent(null), 8000); // Ocultar después de 8 segundos
-  };
-
-  const handleCellMarked = (data) => {
-    if (data.playerId === roomData.playerId) {
-      setMarkedCells((prev) => [...prev, { row: data.row, col: data.col }]);
-    }
-  };
-
-  const handleChallengeTriggered = (data) => {
-    console.log('🎯 PlayerCardView: Challenge triggered:', data);
-    setActiveChallenge(data);
-  };
-
-  const handleChallengeComplete = () => {
-    console.log('🎯 PlayerCardView: Challenge complete');
-    setActiveChallenge(null);
-  };
-
-  // Handlers para tie-break voting
-  const handleTiebreakVotingStarted = (data) => {
-    console.log('🗳️ Tie-break voting started:', data);
-    setTiebreakVoting(data);
-  };
-
-  const handleTiebreakVoteConfirmed = (data) => {
-    console.log('✅ Vote confirmed:', data);
-    toast.success(`Voto registrado para ${data.performerId}`);
-  };
-
-  const handleTiebreakResults = (data) => {
-    console.log('🏆 Tie-break results:', data);
-    setTiebreakVoting(null);
-    toast.success('Votación finalizada');
-  };
 
   const handleTiebreakVote = (performerId, stars) => {
     console.log(`⭐ Voting for ${performerId}: ${stars} stars`);

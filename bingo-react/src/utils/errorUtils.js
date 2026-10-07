@@ -102,7 +102,7 @@ export function getSafeErrorMessage(error, fallback = 'Ha ocurrido un error') {
       }
 
       return jsonString || fallback;
-    } catch (e) {
+    } catch {
       // Si falla JSON.stringify (referencias circulares no detectadas),
       // retornar fallback
       return fallback;
@@ -227,7 +227,7 @@ export function toSafeString(value, fallback = '') {
         }
         return val;
       });
-    } catch (e) {
+    } catch {
       return fallback;
     }
   }

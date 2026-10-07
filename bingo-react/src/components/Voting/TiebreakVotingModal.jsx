@@ -10,14 +10,14 @@ const TiebreakVotingModal = ({
   isOpen,
   candidates = [], // [{ performerId, performerName }]
   onVote, // (performerId, stars) => void
-  votingDuration = 30,
-  myPlayerId
+  votingDuration = 30
 }) => {
   const [votes, setVotes] = useState({}); // { performerId: stars }
   const [hoveredStars, setHoveredStars] = useState({}); // { performerId: stars }
   const [timeLeft, setTimeLeft] = useState(votingDuration);
 
-  // Timer de votación
+  // Timer de votación. These resets intentionally happen when the modal opens.
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     if (!isOpen) return;
 
@@ -37,6 +37,7 @@ const TiebreakVotingModal = ({
 
     return () => clearInterval(interval);
   }, [isOpen, votingDuration]);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   if (!isOpen) return null;
 

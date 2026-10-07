@@ -29,7 +29,7 @@ const VotingResults = ({
     return Math.round((count / totalVotes) * 100);
   };
 
-  const renderStars = (count) => {
+  const renderStars = () => {
     return Array(5).fill(0).map((_, i) => (
       <Star
         key={i}
@@ -58,7 +58,7 @@ const VotingResults = ({
         {/* Score Principal */}
         <div className="results-score">
           <div className="score-stars">
-            {renderStars(averageStars)}
+            {renderStars()}
           </div>
           <div className="score-average">
             {averageStars.toFixed(1)} / 5.0

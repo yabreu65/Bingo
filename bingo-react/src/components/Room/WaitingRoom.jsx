@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import toast from 'react-hot-toast';
-import { useSocket } from '../../context/SocketContext';
+import { useSocket } from '../../context/useSocket';
 import SyncedMusicPlayer from '../Music/SyncedMusicPlayer';
 import BingoCard from '../BingoCard/BingoCard';
 import './WaitingRoom.css';
@@ -218,13 +218,6 @@ const WaitingRoom = ({ roomData, onGameStart }) => {
                 disabled={players.length < 2}
               >
                 🎮 Iniciar Partida
-              </button>
-              <button
-                className="start-game-btn"
-                onClick={() => setShowHostDashboard((v) => !v)}
-                style={{ marginLeft: 8 }}
-              >
-                🛠️ Panel del Anfitrión
               </button>
               {players.length < 2 && (
                 <p className="min-players-hint">

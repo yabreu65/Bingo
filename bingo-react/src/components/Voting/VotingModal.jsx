@@ -21,7 +21,8 @@ const VotingModal = ({
   const [hasVoted, setHasVoted] = useState(false);
   const [timeLeft, setTimeLeft] = useState(votingDuration);
 
-  // Timer de votación
+  // Timer de votación. These resets intentionally happen when the modal opens.
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     if (!isOpen) return;
 
@@ -41,6 +42,7 @@ const VotingModal = ({
 
     return () => clearInterval(interval);
   }, [isOpen, votingDuration]);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   // No mostrar si el modal no está abierto
   if (!isOpen) return null;

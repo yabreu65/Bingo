@@ -2,7 +2,7 @@
 import { useState, useEffect, useRef } from 'react';
 // eslint-disable-next-line no-unused-vars
 import { AnimatePresence, motion } from 'framer-motion';
-import { useSocket } from '../../context/SocketContext';
+import { useSocket } from '../../context/useSocket';
 import { shufflePlaylist } from '../../config/musicPlaylists';
 import { QRCodeSVG } from 'qrcode.react';
 import { Radio, Tv, Users, Crown } from 'lucide-react';
@@ -53,6 +53,19 @@ const TVDisplay = ({ roomCode }) => {
   const applauseAudioRef = useRef(null); // Ref para sonido de aplauso
   const donkeyAudioRef = useRef(null); // Ref para sonido de burro
   const currentSong = playlist[currentSongIndex];
+
+  const handleStartTiebreakPerformance = () => {
+    if (!tieBreakPerformer) return;
+
+    socket?.emit('start-tiebreak-performance', {
+      roomCode,
+      performerId: tieBreakPerformer.performerId
+    });
+  };
+
+  const handleStartVoting = () => {
+    socket?.emit('start-tiebreak-voting', { roomCode });
+  };
 
   useEffect(() => {
     if (!socket) return;
@@ -196,26 +209,11 @@ const TVDisplay = ({ roomCode }) => {
         }
     };
 
-    const handleStartTiebreakPerformance = () => {
-        if (!tieBreakPerformer) return;
-
-        console.log('🎬 Organizador inició performance');
-        socket?.emit('start-tiebreak-performance', {
-            roomCode: roomCode,
-            performerId: tieBreakPerformer.performerId
-        });
-    };
-
     const handleAllPerformancesDone = (data) => {
         console.log('🎭 Todos han bailado:', data);
         setTieBreakStatus('ready-to-vote');
         setTieBreakCandidates(data.candidates || []);
         setTieBreakPerformer(null); // Limpiar performer actual
-    };
-
-    const handleStartVoting = () => {
-        console.log('🗳️ Iniciando votaciones');
-        socket?.emit('start-tiebreak-voting', { roomCode });
     };
 
     const handleTiebreakVotingStarted = (data) => {

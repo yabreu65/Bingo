@@ -6,7 +6,6 @@ import Leaderboard from '../Ranking/Leaderboard';
 import Modal from '../UI/Modal';
 import Confetti from '../UI/Confetti';
 import MusicPlayer from '../Music/MusicPlayer';
-import { formatDuration } from '../../utils/exportResults';
 import './GameScreen.css';
 
 const GameScreen = () => {

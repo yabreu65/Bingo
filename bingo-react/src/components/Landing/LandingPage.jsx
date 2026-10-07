@@ -3,6 +3,16 @@ import './LandingPage.css';
 
 const LandingPage = ({ onStartGame }) => {
   const [showAnimation, setShowAnimation] = useState(true);
+  const snowflakes = Array.from({ length: 50 }, (_, i) => ({
+    left: `${(i * 37) % 100}%`,
+    animationDelay: `${(i * 7) % 10}s`,
+    animationDuration: `${10 + ((i * 11) % 20)}s`
+  }));
+  const stars = Array.from({ length: 20 }, (_, i) => ({
+    top: `${(i * 47) % 100}%`,
+    left: `${(i * 29) % 100}%`,
+    animationDelay: `${(i * 5) % 3}s`
+  }));
 
   const handleStart = () => {
     setShowAnimation(false);
@@ -15,22 +25,22 @@ const LandingPage = ({ onStartGame }) => {
     <div className="landing-page">
       {/* Fondo animado con nieve */}
       <div className="snow-container">
-        {[...Array(50)].map((_, i) => (
+        {snowflakes.map((flake, i) => (
           <div key={i} className="snowflake" style={{
-            left: `${Math.random() * 100}%`,
-            animationDelay: `${Math.random() * 10}s`,
-            animationDuration: `${10 + Math.random() * 20}s`
+            left: flake.left,
+            animationDelay: flake.animationDelay,
+            animationDuration: flake.animationDuration
           }}>❄</div>
         ))}
       </div>
 
       {/* Estrellas doradas */}
       <div className="stars-container">
-        {[...Array(20)].map((_, i) => (
+        {stars.map((star, i) => (
           <div key={i} className="star" style={{
-            top: `${Math.random() * 100}%`,
-            left: `${Math.random() * 100}%`,
-            animationDelay: `${Math.random() * 3}s`
+            top: star.top,
+            left: star.left,
+            animationDelay: star.animationDelay
           }}>✨</div>
         ))}
       </div>

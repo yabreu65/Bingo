@@ -1,14 +1,3 @@
-import fs from 'fs';
-import path from 'path';
-import { fileURLToPath } from 'url';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
-// Leer los archivos de música
-const musicDir = path.join(__dirname, '../public/music');
-const files = fs.readdirSync(musicDir);
-
 // Mapeo manual para casos especiales
 const manualMapping = {
   "Los Prisioneros - pa pa pa": "Los Prisioneros - Pa pa pa (en vivo 2001).clip.mp4",
@@ -95,7 +84,7 @@ const additionalFiles = [
   "Sandy & Papo  ♣   Es Hora de Bailar  (Vídeo Oficial).clip.mp4",
   "Sandy & Papo - Huelepega (Video Oficial).clip.mp4",
   "Sandy y Papo - Mueve, Mueve - Festival de Viña del Mar 1999.clip.mp4",
-  "SESSION "EL SENSEI" EN VIVO POR PITI FERNÁNDEZ.clip.mp4",
+  "SESSION EL SENSEI EN VIVO POR PITI FERNÁNDEZ.clip.mp4",
   "Shakira - Hips Don't Lie (featuring Wyclef Jean) (Official 4K Video) ft. Wyclef Jean.clip.mp4",
   "Wilfrido Vargas feat. Rubby Pérez - Volveré.clip.mp4",
   "Willie Colon feat. Hector Lavoe - La Murga.clip.mp4"

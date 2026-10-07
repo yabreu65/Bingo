@@ -6,7 +6,6 @@ import { Wifi, WifiOff, Loader2 } from 'lucide-react';
  */
 export default function ReconnectingOverlay({ isConnected, isReconnecting }) {
   const [showOverlay, setShowOverlay] = useState(false);
-  const [reconnectAttempts, setReconnectAttempts] = useState(0);
 
   useEffect(() => {
     if (!isConnected) {
@@ -15,19 +14,10 @@ export default function ReconnectingOverlay({ isConnected, isReconnecting }) {
         setShowOverlay(true);
       }, 1000);
       return () => clearTimeout(timer);
-    } else {
-      setShowOverlay(false);
-      setReconnectAttempts(0);
     }
   }, [isConnected]);
 
-  useEffect(() => {
-    if (isReconnecting) {
-      setReconnectAttempts(prev => prev + 1);
-    }
-  }, [isReconnecting]);
-
-  if (!showOverlay) return null;
+  if (!showOverlay || isConnected) return null;
 
   return (
     <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center">
@@ -67,7 +57,7 @@ export default function ReconnectingOverlay({ isConnected, isReconnecting }) {
               />
             </div>
             <p className="text-xs text-gray-500 mt-2">
-              Intento {reconnectAttempts}
+              Intentando restablecer la conexión
             </p>
           </div>
         )}
@@ -80,7 +70,7 @@ export default function ReconnectingOverlay({ isConnected, isReconnecting }) {
         </p>
 
         {/* Botón de recarga manual (después de varios intentos) */}
-        {reconnectAttempts > 5 && (
+        {!isReconnecting && (
           <button
             onClick={() => window.location.reload()}
             className="mt-6 w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2 px-4 rounded-lg transition-colors"
