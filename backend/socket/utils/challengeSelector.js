@@ -1,0 +1,227 @@
+const { CHALLENGE_POOLS, GAME_CONSTANTS } = require('../../constants');
+const logger = require('../../config/logger');
+
+/**
+ * Mezcla un array aleatoriamente (Fisher-Yates shuffle)
+ * @param {Array} array - Array a mezclar
+ * @returns {Array} - Array mezclado
+ */
+function shuffleArray(array) {
+  const shuffled = [...array];
+  for (let i = shuffled.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+  }
+  return shuffled;
+}
+
+/**
+ * Inicializa los pools disponibles para un juego nuevo
+ * @returns {Object} - Pools mezclados para cada tipo de challenge
+ */
+function initializeChallengePools() {
+  return {
+    trivia: shuffleArray(CHALLENGE_POOLS.trivia),
+    dance: shuffleArray(CHALLENGE_POOLS.dance),
+    karaoke: shuffleArray(CHALLENGE_POOLS.karaoke)
+  };
+}
+
+/**
+ * Selecciona el siguiente tipo de reto basado en el último tipo usado
+ * Rota entre: trivia -> dance -> karaoke -> trivia...
+ */
+function getNextChallengeType(lastChallengeType) {
+  // Rotación fija: trivia -> dance -> karaoke
+  const rotation = [
+    GAME_CONSTANTS.CHALLENGE_TYPES.TRIVIA,
+    GAME_CONSTANTS.CHALLENGE_TYPES.DANCE,
+    GAME_CONSTANTS.CHALLENGE_TYPES.KARAOKE
+  ];
+
+  if (!lastChallengeType) {
+    return rotation[0]; // Empezar con trivia
+  }
+
+  const currentIndex = rotation.indexOf(lastChallengeType);
+  const nextIndex = (currentIndex + 1) % rotation.length;
+
+  return rotation[nextIndex];
+}
+
+/**
+ * Selecciona un reto del pool disponible sin repetición
+ * @param {string} challengeType - Tipo de challenge (trivia, dance, karaoke)
+ * @param {Object} availablePools - Pools disponibles del juego
+ * @returns {Object} - Challenge seleccionado y pools actualizados
+ */
+function selectRandomChallenge(challengeType, availablePools) {
+  if (!availablePools || !availablePools[challengeType]) {
+    logger.warn(`Available pool for type "${challengeType}" not found, initializing...`);
+    availablePools = availablePools || {};
+    availablePools[challengeType] = shuffleArray(CHALLENGE_POOLS[challengeType]);
+  }
+
+  let pool = availablePools[challengeType];
+
+  // Si el pool está vacío, remezclar
+  if (!pool || pool.length === 0) {
+    logger.info(`Pool for ${challengeType} exhausted, reshuffling...`);
+    pool = shuffleArray(CHALLENGE_POOLS[challengeType]);
+    availablePools[challengeType] = pool;
+  }
+
+  // Tomar el primer elemento del pool (ya está mezclado)
+  const selected = pool.shift();
+
+  // Para trivia, el selected es un objeto con question, options y correct
+  if (challengeType === GAME_CONSTANTS.CHALLENGE_TYPES.TRIVIA) {
+    return {
+      challenge: {
+        question: selected.question,
+        options: selected.options,
+        correct: selected.correct,
+        deezerId: null
+      },
+      updatedPools: availablePools
+    };
+  }
+
+  // Para karaoke, retornar con estructura específica
+  if (challengeType === GAME_CONSTANTS.CHALLENGE_TYPES.KARAOKE) {
+    return {
+      challenge: {
+        text: `🎤 Canta: ${selected.title} - ${selected.artist}`,
+        localFile: selected.localFile,
+        karaokeId: selected.id,
+        title: selected.title,
+        artist: selected.artist
+      },
+      updatedPools: availablePools
+    };
+  }
+
+  // Para otros tipos (dance), selected es un objeto con text y deezerId
+  return {
+    challenge: selected,
+    updatedPools: availablePools
+  };
+}
+
+/**
+ * Selecciona jugadores elegibles para un reto
+ * @param {Array} players - Lista de jugadores en la sala (puede incluir digitales y manuales)
+ * @param {Array} recentPlayers - IDs de jugadores que han participado recientemente
+ * @returns {Array} - Jugadores elegibles
+ */
+function selectEligiblePlayers(players, recentPlayers = []) {
+  // Filtrar jugadores elegibles:
+  // - Jugadores digitales: conectados y con cartón válido
+  // - Jugadores manuales: siempre elegibles si tienen cardNumber (identificados por no tener isConnected)
+  const eligible = players.filter(p => {
+    const hasValidCard = p.cardNumber !== undefined && p.cardNumber !== null;
+
+    // Si es jugador manual (no tiene isConnected o es undefined), solo verificar cartón
+    if (p.isConnected === undefined) {
+      return hasValidCard;
+    }
+
+    // Si es jugador digital, verificar que esté conectado Y tenga cartón
+    return p.isConnected && hasValidCard;
+  });
+
+  logger.info(`[CHALLENGE] Total eligible players: ${eligible.length} of ${players.length}`);
+
+  if (eligible.length === 0) {
+    return [];
+  }
+
+  // Si hay jugadores que no han participado recientemente, preferir esos
+  const notRecent = eligible.filter(p => {
+    const playerId = p._id ? p._id.toString() : p.playerId;
+    // Verificar si el playerId está en recentPlayers (puede ser ObjectId o String)
+    return !recentPlayers.some(recentId => {
+      const recentIdStr = typeof recentId === 'string' ? recentId : recentId.toString();
+      return recentIdStr === playerId;
+    });
+  });
+
+  if (notRecent.length > 0) {
+    return notRecent;
+  }
+
+  // Si todos han participado recientemente, retornar todos los elegibles
+  return eligible;
+}
+
+/**
+ * Selecciona un jugador aleatorio de la lista de elegibles
+ */
+function selectRandomPlayer(eligiblePlayers) {
+  if (!eligiblePlayers || eligiblePlayers.length === 0) {
+    return null;
+  }
+
+  const randomIndex = Math.floor(Math.random() * eligiblePlayers.length);
+  return eligiblePlayers[randomIndex];
+}
+
+/**
+ * Verifica si es momento de lanzar un reto basado en la frecuencia configurada
+ */
+function shouldTriggerChallenge(numbersSinceChallenge, challengeFrequency) {
+  return numbersSinceChallenge >= (challengeFrequency || GAME_CONSTANTS.CHALLENGE_FREQUENCY);
+}
+
+/**
+ * Crea el objeto de datos del reto para emitir al cliente
+ */
+function createChallengeData(challengeType, selectedPlayer, challenge) {
+  const baseData = {
+    type: challengeType,
+    player: {
+      id: selectedPlayer._id,
+      name: selectedPlayer.name,
+      isManual: selectedPlayer.isManual || false,
+      cardNumber: selectedPlayer.cardNumber
+    },
+    duration: GAME_CONSTANTS.CHALLENGE_DURATION
+  };
+
+  // Para trivia, incluir pregunta, opciones y respuesta correcta
+  if (challengeType === GAME_CONSTANTS.CHALLENGE_TYPES.TRIVIA) {
+    baseData.data = {
+      question: challenge.question,
+      options: challenge.options,
+      correct: challenge.correct
+    };
+  }
+  // Para karaoke, incluir datos adicionales y duración más larga
+  else if (challengeType === GAME_CONSTANTS.CHALLENGE_TYPES.KARAOKE) {
+    baseData.data = challenge.text;
+    baseData.karaokeId = challenge.karaokeId;
+    baseData.title = challenge.title;
+    baseData.artist = challenge.artist;
+    baseData.localFile = challenge.localFile;
+    baseData.duration = 300; // 5 minutos máximo para karaoke (el video controlará el fin real)
+  }
+  // Para otros tipos (dance, sing, group)
+  else {
+    baseData.data = challenge.text || challenge;
+    baseData.text = challenge.text;
+    baseData.deezerId = challenge.deezerId;
+  }
+
+  return baseData;
+}
+
+module.exports = {
+  getNextChallengeType,
+  selectRandomChallenge,
+  selectEligiblePlayers,
+  selectRandomPlayer,
+  shouldTriggerChallenge,
+  createChallengeData,
+  initializeChallengePools,
+  shuffleArray
+};

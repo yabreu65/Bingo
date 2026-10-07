@@ -1,0 +1,192 @@
+.card-selection {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+}
+
+.card-selection-container {
+  width: 100%;
+  max-width: 500px;
+  background: white;
+  border-radius: 20px;
+  padding: 40px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+  animation: slideUp 0.4s ease-out;
+}
+
+@keyframes slideUp {
+  from {
+    opacity: 0;
+    transform: translateY(30px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.christmas-header {
+  text-align: center;
+  margin-bottom: 30px;
+}
+
+.christmas-header h1 {
+  font-size: 2em;
+  margin: 0 0 10px 0;
+  background: linear-gradient(135deg, #c94b4b 0%, #4b134f 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.christmas-header .subtitle {
+  color: #6b7280;
+  font-size: 1.1em;
+  margin: 0;
+}
+
+.room-info-badge {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 15px;
+  background: linear-gradient(135deg, #f3f4f6 0%, #e5e7eb 100%);
+  border-radius: 12px;
+  margin-bottom: 30px;
+  font-size: 0.9em;
+  font-weight: 600;
+  color: #4b5563;
+}
+
+.card-selection-form {
+  margin-bottom: 30px;
+}
+
+.card-number-input-wrapper {
+  margin-bottom: 20px;
+}
+
+.card-number-input-wrapper label {
+  display: block;
+  font-weight: 600;
+  color: #1f2937;
+  margin-bottom: 8px;
+  font-size: 1.1em;
+}
+
+.card-number-input {
+  width: 100%;
+  padding: 15px 20px;
+  font-size: 1.5em;
+  text-align: center;
+  border: 3px solid #e5e7eb;
+  border-radius: 12px;
+  transition: all 0.3s ease;
+  font-weight: bold;
+  color: #1f2937;
+}
+
+.card-number-input:focus {
+  outline: none;
+  border-color: #667eea;
+  box-shadow: 0 0 0 4px rgba(102, 126, 234, 0.1);
+}
+
+.card-number-input::placeholder {
+  color: #9ca3af;
+  font-weight: normal;
+}
+
+.card-number-input-wrapper small {
+  display: block;
+  color: #6b7280;
+  font-size: 0.85em;
+  margin-top: 8px;
+  text-align: center;
+}
+
+.select-card-btn {
+  width: 100%;
+  padding: 16px;
+  font-size: 1.1em;
+  font-weight: 600;
+  color: white;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  border: none;
+  border-radius: 12px;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
+}
+
+.select-card-btn:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(102, 126, 234, 0.5);
+}
+
+.select-card-btn:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+.select-card-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.error-message {
+  padding: 12px;
+  background: #fee2e2;
+  border-left: 4px solid #ef4444;
+  border-radius: 8px;
+  color: #dc2626;
+  margin-bottom: 20px;
+  font-size: 0.95em;
+}
+
+.card-info-box {
+  background: linear-gradient(135deg, #dbeafe 0%, #bfdbfe 100%);
+  border-radius: 12px;
+  padding: 20px;
+  border-left: 4px solid #3b82f6;
+}
+
+.card-info-box h3 {
+  margin: 0 0 12px 0;
+  color: #1e40af;
+  font-size: 1em;
+}
+
+.card-info-box ul {
+  margin: 0;
+  padding-left: 20px;
+  color: #1e3a8a;
+}
+
+.card-info-box li {
+  margin-bottom: 8px;
+  font-size: 0.9em;
+  line-height: 1.5;
+}
+
+.card-info-box li:last-child {
+  margin-bottom: 0;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+  .card-selection-container {
+    padding: 30px 20px;
+  }
+
+  .christmas-header h1 {
+    font-size: 1.6em;
+  }
+
+  .card-number-input {
+    font-size: 1.3em;
+  }
+}

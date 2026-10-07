@@ -1,0 +1,32 @@
+# Dependencies
+node_modules/
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+
+# Build and coverage output
+dist/
+coverage/
+*.tsbuildinfo
+
+# Runtime data and logs
+backend/logs/
+backend/uploads/
+*.log
+
+# Local tooling and OS files
+.DS_Store
+.vscode/
+.idea/
+.claude/settings.local.json
+
+# Local/generated helper artifacts
+*.bak
+*.bak2
+*.local
+
+# Local multimedia assets (kept outside Git until deployment storage is defined)
+bingo-react/public/music/**/*.mp4
+bingo-react/public/music/**/*.mp3

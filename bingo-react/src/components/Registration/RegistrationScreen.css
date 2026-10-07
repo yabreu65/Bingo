@@ -1,0 +1,190 @@
+.registration-screen {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  padding: 20px;
+  position: relative;
+  z-index: 10;
+}
+
+.registration-container {
+  background: rgba(255, 255, 255, 0.95);
+  border-radius: 20px;
+  padding: 40px;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
+  max-width: 600px;
+  width: 100%;
+  color: #333;
+}
+
+.registration-container h1 {
+  text-align: center;
+  color: #8b0000;
+  font-size: 2.5em;
+  margin-bottom: 10px;
+  text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+.subtitle {
+  text-align: center;
+  color: #2d5016;
+  margin-bottom: 30px;
+  font-size: 1.2em;
+}
+
+.input-group {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 20px;
+}
+
+.player-input {
+  flex: 1;
+  padding: 15px;
+  border: 2px solid #2d5016;
+  border-radius: 10px;
+  font-size: 1.1em;
+  outline: none;
+  transition: border-color 0.3s;
+}
+
+.player-input:focus {
+  border-color: #8b0000;
+}
+
+.btn {
+  padding: 15px 30px;
+  border: none;
+  border-radius: 10px;
+  font-size: 1.1em;
+  font-weight: bold;
+  cursor: pointer;
+  transition: all 0.3s;
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.2);
+}
+
+.btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 15px rgba(0, 0, 0, 0.3);
+}
+
+.btn:active {
+  transform: translateY(0);
+}
+
+.btn-add {
+  background: #2d5016;
+  color: white;
+}
+
+.btn-add:hover {
+  background: #3d6020;
+}
+
+.btn-start {
+  background: #8b0000;
+  color: white;
+  width: 100%;
+  margin-top: 20px;
+  font-size: 1.3em;
+}
+
+.btn-start:hover {
+  background: #a00000;
+}
+
+.btn-start:disabled {
+  background: #ccc;
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.error-message {
+  background: #fee;
+  color: #c33;
+  padding: 10px;
+  border-radius: 5px;
+  margin-bottom: 15px;
+  text-align: center;
+  border: 1px solid #fcc;
+}
+
+.players-list {
+  background: rgba(45, 80, 22, 0.1);
+  border-radius: 10px;
+  padding: 20px;
+  margin-top: 20px;
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.players-list h3 {
+  color: #8b0000;
+  margin-bottom: 15px;
+}
+
+.no-players {
+  text-align: center;
+  color: #999;
+  padding: 20px 0;
+}
+
+.players-items {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.player-item {
+  background: white;
+  padding: 10px 15px;
+  border-radius: 8px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+}
+
+.player-item span {
+  font-weight: bold;
+  color: #2d5016;
+}
+
+.btn-remove {
+  background: #8b0000;
+  color: white;
+  border: none;
+  padding: 5px 15px;
+  border-radius: 5px;
+  cursor: pointer;
+  font-size: 0.9em;
+  transition: background 0.3s;
+}
+
+.btn-remove:hover {
+  background: #a00000;
+}
+
+.player-count {
+  text-align: center;
+  font-size: 1.2em;
+  color: #2d5016;
+  font-weight: bold;
+  margin-top: 15px;
+}
+
+@media (max-width: 768px) {
+  .registration-container {
+    padding: 20px;
+  }
+
+  .registration-container h1 {
+    font-size: 2em;
+  }
+
+  .input-group {
+    flex-direction: column;
+  }
+}

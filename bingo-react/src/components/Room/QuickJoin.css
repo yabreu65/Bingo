@@ -1,0 +1,193 @@
+.quick-join-container {
+  min-height: 100vh;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 20px;
+  background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+}
+
+.quick-join-card {
+  background: linear-gradient(135deg, rgba(30, 41, 59, 0.95) 0%, rgba(15, 23, 42, 0.95) 100%);
+  backdrop-filter: blur(20px);
+  border-radius: 30px;
+  padding: 40px;
+  max-width: 500px;
+  width: 100%;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+  border: 2px solid rgba(251, 191, 36, 0.3);
+}
+
+.quick-join-header {
+  text-align: center;
+  margin-bottom: 30px;
+}
+
+.christmas-title {
+  font-size: 2.5em;
+  font-weight: 900;
+  background: linear-gradient(135deg, #dc2626 0%, #fbbf24 50%, #059669 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  margin: 0 0 10px 0;
+}
+
+.quick-join-subtitle {
+  font-size: 1.2em;
+  color: #94a3b8;
+  margin: 0;
+}
+
+.room-code-display {
+  background: linear-gradient(135deg, rgba(59, 130, 246, 0.3) 0%, rgba(30, 64, 175, 0.3) 100%);
+  border: 2px solid rgba(59, 130, 246, 0.5);
+  border-radius: 15px;
+  padding: 20px;
+  text-align: center;
+  margin-bottom: 30px;
+}
+
+.room-label {
+  font-size: 1.1em;
+  color: #94a3b8;
+  margin-right: 10px;
+}
+
+.room-code-value {
+  font-size: 2em;
+  font-weight: 900;
+  color: #fbbf24;
+  letter-spacing: 3px;
+  text-shadow: 0 0 20px rgba(251, 191, 36, 0.5);
+}
+
+.quick-join-form {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.form-group label {
+  font-size: 1.1em;
+  font-weight: 600;
+  color: #fbbf24;
+}
+
+.form-group input {
+  padding: 15px 20px;
+  font-size: 1.1em;
+  border: 2px solid rgba(251, 191, 36, 0.3);
+  border-radius: 12px;
+  background: rgba(15, 23, 42, 0.8);
+  color: white;
+  transition: all 0.3s;
+}
+
+.form-group input:focus {
+  outline: none;
+  border-color: #fbbf24;
+  box-shadow: 0 0 20px rgba(251, 191, 36, 0.3);
+}
+
+.form-group input::placeholder {
+  color: #64748b;
+}
+
+.form-group input:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.error-message {
+  background: linear-gradient(135deg, rgba(220, 38, 38, 0.3) 0%, rgba(153, 27, 27, 0.3) 100%);
+  border: 2px solid rgba(220, 38, 38, 0.5);
+  color: #fca5a5;
+  padding: 15px;
+  border-radius: 12px;
+  text-align: center;
+  font-weight: 600;
+}
+
+.join-button {
+  background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+  color: white;
+  border: none;
+  padding: 18px 30px;
+  font-size: 1.3em;
+  font-weight: 700;
+  border-radius: 15px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  transition: all 0.3s;
+  box-shadow: 0 5px 20px rgba(16, 185, 129, 0.3);
+  margin-top: 10px;
+}
+
+.join-button:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 30px rgba(16, 185, 129, 0.5);
+}
+
+.join-button:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+.join-button:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
+.button-icon {
+  font-size: 1.2em;
+}
+
+.spinner-small {
+  width: 20px;
+  height: 20px;
+  border: 3px solid rgba(255, 255, 255, 0.3);
+  border-top-color: white;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.quick-join-footer {
+  text-align: center;
+  margin-top: 30px;
+  padding-top: 20px;
+  border-top: 2px solid rgba(251, 191, 36, 0.2);
+}
+
+.quick-join-footer p {
+  color: #94a3b8;
+  font-size: 1em;
+  margin: 0;
+}
+
+/* Responsive */
+@media (max-width: 600px) {
+  .quick-join-card {
+    padding: 30px 20px;
+  }
+
+  .christmas-title {
+    font-size: 2em;
+  }
+
+  .room-code-value {
+    font-size: 1.6em;
+  }
+}

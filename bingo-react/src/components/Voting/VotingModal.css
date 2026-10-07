@@ -1,0 +1,239 @@
+/* VotingModal.css */
+
+.voting-modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(0, 0, 0, 0.92);
+  z-index: 3000;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  animation: fadeIn 0.3s ease;
+}
+
+.voting-modal-content {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  border-radius: 25px;
+  padding: 40px;
+  max-width: 600px;
+  width: 90%;
+  text-align: center;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.8);
+  animation: slideUp 0.5s ease;
+  color: white;
+}
+
+.voting-header {
+  margin-bottom: 30px;
+}
+
+.voting-header h2 {
+  font-size: 2.2em;
+  margin-bottom: 15px;
+  text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.3);
+}
+
+.voting-timer {
+  font-size: 1.8em;
+  font-weight: bold;
+  color: #ffd700;
+  text-shadow: 0 0 10px rgba(255, 215, 0, 0.5);
+}
+
+.voting-performer {
+  background: rgba(255, 255, 255, 0.15);
+  padding: 25px;
+  border-radius: 15px;
+  margin-bottom: 30px;
+  backdrop-filter: blur(10px);
+}
+
+.performer-name {
+  font-size: 2em;
+  font-weight: bold;
+  margin-bottom: 15px;
+}
+
+.challenge-badge {
+  display: inline-block;
+  background: rgba(255, 215, 0, 0.3);
+  padding: 8px 20px;
+  border-radius: 25px;
+  font-size: 1.1em;
+  font-weight: bold;
+  margin-bottom: 10px;
+}
+
+.challenge-text {
+  font-size: 1.1em;
+  opacity: 0.9;
+  margin-top: 10px;
+}
+
+.voting-stars {
+  padding: 20px 0;
+}
+
+.voting-question {
+  font-size: 1.5em;
+  margin-bottom: 25px;
+  font-weight: 500;
+}
+
+.stars-container {
+  display: flex;
+  justify-content: center;
+  gap: 10px;
+  margin-bottom: 20px;
+}
+
+.star-button {
+  background: rgba(255, 255, 255, 0.1);
+  border: 3px solid rgba(255, 255, 255, 0.3);
+  border-radius: 15px;
+  padding: 15px;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  color: rgba(255, 255, 255, 0.5);
+}
+
+.star-button:hover:not(:disabled) {
+  transform: scale(1.15) translateY(-5px);
+  background: rgba(255, 215, 0, 0.2);
+  border-color: #ffd700;
+  color: #ffd700;
+}
+
+.star-button.active {
+  color: #ffd700;
+  border-color: #ffd700;
+  background: rgba(255, 215, 0, 0.2);
+}
+
+.star-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.star-labels {
+  min-height: 30px;
+}
+
+.star-description {
+  font-size: 1.3em;
+  font-weight: bold;
+  color: #ffd700;
+  text-shadow: 0 0 10px rgba(255, 215, 0, 0.5);
+}
+
+.voting-confirmed {
+  padding: 30px;
+}
+
+.vote-stars {
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+  margin-bottom: 20px;
+}
+
+.vote-stars .star-filled {
+  color: #ffd700;
+  filter: drop-shadow(0 0 10px rgba(255, 215, 0, 0.8));
+}
+
+.vote-stars .star-empty {
+  color: rgba(255, 255, 255, 0.3);
+}
+
+.vote-description {
+  font-size: 1.8em;
+  font-weight: bold;
+  color: #ffd700;
+  margin-bottom: 20px;
+}
+
+.vote-success {
+  background: rgba(76, 175, 80, 0.3);
+  padding: 15px 30px;
+  border-radius: 10px;
+  font-size: 1.3em;
+  font-weight: bold;
+  color: #4caf50;
+  border: 2px solid #4caf50;
+}
+
+.voting-waiting {
+  padding: 40px;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 15px;
+  margin: 20px 0;
+}
+
+.voting-waiting p {
+  font-size: 1.5em;
+  margin: 10px 0;
+}
+
+.voting-waiting .text-sm {
+  font-size: 1.1em;
+  opacity: 0.8;
+}
+
+.voting-footer {
+  margin-top: 20px;
+}
+
+.timeout-message {
+  color: #ff6b6b;
+  font-size: 1.2em;
+  font-weight: bold;
+}
+
+/* Animations */
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes slideUp {
+  from {
+    transform: translateY(100px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+  .voting-modal-content {
+    padding: 25px;
+  }
+
+  .voting-header h2 {
+    font-size: 1.6em;
+  }
+
+  .performer-name {
+    font-size: 1.5em;
+  }
+
+  .stars-container {
+    gap: 5px;
+  }
+
+  .star-button {
+    padding: 10px;
+  }
+
+  .star-button svg {
+    width: 40px !important;
+    height: 40px !important;
+  }
+}

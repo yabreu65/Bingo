@@ -1,0 +1,140 @@
+.bingo-card {
+  background: white;
+  border-radius: 15px;
+  padding: 20px;
+  box-shadow: 0 5px 20px rgba(0, 0, 0, 0.3);
+  max-width: 500px;
+  margin: 0 auto;
+}
+
+.bingo-card-compact {
+  padding: 10px;
+  max-width: 300px;
+}
+
+.bingo-header {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 5px;
+  margin-bottom: 10px;
+}
+
+.bingo-letter {
+  text-align: center;
+  font-size: 2em;
+  font-weight: bold;
+  padding: 10px;
+  border-radius: 10px;
+  color: white;
+  text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.3);
+}
+
+.bingo-card-compact .bingo-letter {
+  font-size: 1.3em;
+  padding: 5px;
+}
+
+.bingo-letter-B { background: #e74c3c; }
+.bingo-letter-I { background: #3498db; }
+.bingo-letter-N { background: #2ecc71; }
+.bingo-letter-G { background: #f39c12; }
+.bingo-letter-O { background: #9b59b6; }
+
+.bingo-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.bingo-row {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 5px;
+}
+
+.bingo-cell {
+  aspect-ratio: 1;
+  background: white;
+  border: 3px solid #2d5016;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.8em;
+  font-weight: bold;
+  color: #333;
+  position: relative;
+  transition: all 0.3s;
+  cursor: default;
+}
+
+.bingo-cell.clickable {
+  cursor: pointer;
+}
+
+.bingo-card-compact .bingo-cell {
+  font-size: 1.2em;
+  border-width: 2px;
+}
+
+.bingo-cell.marked {
+  background: #2ecc71;
+  border-color: #27ae60;
+  color: white;
+  transform: scale(0.95);
+}
+
+.bingo-cell.free {
+  background: #ffd700;
+  border-color: #f39c12;
+}
+
+.bingo-cell.free.marked {
+  background: #2ecc71;
+}
+
+.free-text {
+  font-size: 0.6em;
+  font-weight: bold;
+  color: #333;
+}
+
+.cell-number {
+  user-select: none;
+}
+
+.mark-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 2em;
+  color: white;
+  text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.5);
+  pointer-events: none;
+}
+
+.bingo-card-compact .mark-overlay {
+  font-size: 1.5em;
+}
+
+/* Animación al marcar */
+@keyframes markCell {
+  0% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.1);
+  }
+  100% {
+    transform: scale(0.95);
+  }
+}
+
+.bingo-cell.marked {
+  animation: markCell 0.3s ease;
+}
