@@ -62,11 +62,24 @@ const validateEnv = () => {
 
   // Validaciones adicionales
   if (env.JWT_SECRET.length < 32) {
-    console.warn('⚠️  WARNING: JWT_SECRET debería tener al menos 32 caracteres para mayor seguridad');
+    const message = 'JWT_SECRET must contain at least 32 characters';
+    if (env.NODE_ENV === 'production') {
+      throw new Error(message);
+    }
+    console.warn(`⚠️ WARNING: ${message}`);
   }
 
-  if (env.JWT_SECRET === 'tu_clave_secreta_muy_segura_aqui_cambiar_en_produccion') {
-    console.warn('⚠️  WARNING: JWT_SECRET está usando el valor por defecto. Cámbialo en producción!');
+  const weakSecrets = [
+    'tu_clave_secreta_muy_segura_aqui',
+    'tu_clave_secreta_muy_segura_aqui_cambiar_en_produccion',
+    'your-super-secret-jwt-key-change-this'
+  ];
+  if (weakSecrets.includes(env.JWT_SECRET)) {
+    const message = 'JWT_SECRET is using a documented placeholder value';
+    if (env.NODE_ENV === 'production') {
+      throw new Error(message);
+    }
+    console.warn(`⚠️ WARNING: ${message}`);
   }
 
   if (env.NODE_ENV === 'production' && env.FRONTEND_URL.includes('localhost')) {

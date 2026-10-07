@@ -98,8 +98,9 @@ app.use(helmet({
 }));
 
 app.use(cors(corsOptions));
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+// Keep JSON/form payloads bounded; multipart recording uploads are limited by multer.
+app.use(express.json({ limit: '100kb' }));
+app.use(express.urlencoded({ extended: true, limit: '100kb' }));
 app.use('/uploads', express.static('uploads'));
 
 // Request logging middleware

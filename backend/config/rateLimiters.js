@@ -2,13 +2,16 @@ const rateLimit = require('express-rate-limit');
 const slowDown = require('express-slow-down');
 const { rateLimitErrorResponse } = require('../utils/errorResponses');
 
+const isProduction = process.env.NODE_ENV === 'production';
+
 /**
  * Rate limiter estricto para creación de salas
- * Máximo 100 salas por hora por IP (aumentado para testing y desarrollo)
+ * Production: maximum 5 rooms per hour per IP. Development stays permissive
+ * so local testing and shared LAN events are not blocked.
  */
 const createRoomLimiter = rateLimit({
   windowMs: 60 * 60 * 1000, // 1 hora
-  max: 100, // 100 requests por ventana
+  max: isProduction ? 5 : 100,
   standardHeaders: true, // Return rate limit info in `RateLimit-*` headers
   legacyHeaders: false, // Disable `X-RateLimit-*` headers
   handler: (req, res) => {
@@ -20,11 +23,12 @@ const createRoomLimiter = rateLimit({
 
 /**
  * Rate limiter para unirse a salas
- * Máximo 5000 joins por hora por IP (aumentado para eventos con muchos usuarios)
+ * Production: maximum 100 joins per hour per IP. This protects the public
+ * endpoint while still supporting players behind the same household NAT.
  */
 const joinRoomLimiter = rateLimit({
   windowMs: 60 * 60 * 1000, // 1 hora
-  max: 5000, // 5000 requests por ventana (aumentado para múltiples dispositivos en misma red)
+  max: isProduction ? 100 : 5000,
   standardHeaders: true,
   legacyHeaders: false,
   handler: (req, res) => {
@@ -35,11 +39,11 @@ const joinRoomLimiter = rateLimit({
 
 /**
  * Rate limiter general para endpoints públicos
- * Máximo 10000 requests por 15 minutos (aumentado para juegos con muchos jugadores)
+ * Production: maximum 300 requests per 15 minutes per IP.
  */
 const generalApiLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutos
-  max: 10000, // 10000 requests por ventana
+  max: isProduction ? 300 : 10000,
   standardHeaders: true,
   legacyHeaders: false,
   handler: (req, res) => {
@@ -61,11 +65,11 @@ const speedLimiter = slowDown({
 
 /**
  * Rate limiter para selección de cartones
- * Máximo 5000 cambios de cartón por minuto
+ * Production: maximum 120 card changes per minute.
  */
 const selectCardLimiter = rateLimit({
   windowMs: 60 * 1000, // 1 minuto
-  max: 5000, // 5000 requests por minuto (aumentado para permitir muchos jugadores simultáneos)
+  max: isProduction ? 120 : 5000,
   standardHeaders: true,
   legacyHeaders: false,
   handler: (req, res) => {
