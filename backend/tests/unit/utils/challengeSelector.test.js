@@ -28,6 +28,22 @@ describe('challengeSelector utils', () => {
   });
 
   describe('selectRandomChallenge', () => {
+    test('prefers the room snapshot over the legacy pool', () => {
+      const availablePools = {
+        trivia: [{ question: 'Managed question', options: ['A', 'B'], correct: 1 }]
+      };
+
+      const result = selectRandomChallenge('trivia', availablePools);
+
+      expect(result.challenge).toEqual({
+        question: 'Managed question',
+        options: ['A', 'B'],
+        correct: 1,
+        deezerId: null
+      });
+      expect(availablePools.trivia).toHaveLength(0);
+    });
+
     it('should select a challenge from the pool', () => {
       const challengeType = GAME_CONSTANTS.CHALLENGE_TYPES.TRIVIA;
       const result = selectRandomChallenge(challengeType);

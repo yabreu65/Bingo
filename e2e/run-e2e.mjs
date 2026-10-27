@@ -508,6 +508,12 @@ async function main() {
       'trivia'
     );
     const triviaPage = triviaChallenge.page;
+    const managedTriviaGame = await gameForRoom();
+    assert.equal(
+      managedTriviaGame?.activeChallenge?.data?.question,
+      '¿Qué número representa la letra O?',
+      'The first trivia challenge must use the managed room catalog'
+    );
 
     const options = triviaPage.locator('.trivia-options button');
     await options.first().waitFor({ state: 'visible', timeout: 5000 });

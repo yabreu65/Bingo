@@ -79,7 +79,10 @@ function getNextChallengeType(lastChallengeType, enabledTypes = null) {
  * @returns {Object} - Challenge seleccionado y pools actualizados
  */
 function selectRandomChallenge(challengeType, availablePools) {
-  const sourcePool = CHALLENGE_POOLS[challengeType] || availablePools?.[challengeType];
+  const configuredPool = availablePools?.[challengeType];
+  const sourcePool = Array.isArray(configuredPool) && configuredPool.length > 0
+    ? configuredPool
+    : CHALLENGE_POOLS[challengeType];
 
   if (!Array.isArray(sourcePool)) {
     logger.warn(`Challenge type "${challengeType}" is not supported`);

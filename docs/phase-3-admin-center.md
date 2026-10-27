@@ -13,7 +13,7 @@ El organizador de una sala puede administrar contenidos y configuración sin edi
 - `backend/utils/adminCatalog.js`: validación, límites y adaptación al contrato legacy de challenges.
 - `bingo-react/src/components/Organizer/AdminCenter.jsx`: interfaz real integrada al dashboard del organizador.
 
-Cuando una sala activa contenido administrado, el motor crea un snapshot de los pools en `Game.availablePools`. La edición posterior no cambia una ronda ya iniciada ni expone respuestas correctas en eventos públicos.
+Cuando una sala activa contenido administrado, el motor crea un snapshot de los pools en `Game.availablePools` y la selección prioriza ese snapshot sobre los catálogos legacy. La edición posterior no cambia una ronda ya iniciada ni expone respuestas correctas en eventos públicos. El E2E visual verifica que la primera trivia usa la pregunta administrada.
 
 ## Autorización
 

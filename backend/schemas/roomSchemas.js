@@ -32,7 +32,15 @@ const createRoomSchema = z.object({
       eventName: z.string().max(160).optional(),
       resultVisibility: z.enum(['public', 'organizer']).optional(),
       activePlaylist: objectIdSchema.nullable().optional(),
-      managedContentEnabled: z.boolean().optional()
+      managedContentEnabled: z.boolean().optional(),
+      enabledChallengeTypes: z.object({
+        trivia: z.boolean().optional(),
+        riddle: z.boolean().optional(),
+        dance: z.boolean().optional(),
+        sing: z.boolean().optional(),
+        group: z.boolean().optional(),
+        karaoke: z.boolean().optional()
+      }).optional()
     }).optional()
   })
 });
@@ -121,7 +129,15 @@ const updateConfigSchema = z.object({
       eventName: z.string().max(160).optional(),
       resultVisibility: z.enum(['public', 'organizer']).optional(),
       activePlaylist: objectIdSchema.nullable().optional(),
-      managedContentEnabled: z.boolean().optional()
+      managedContentEnabled: z.boolean().optional(),
+      enabledChallengeTypes: z.object({
+        trivia: z.boolean().optional(),
+        riddle: z.boolean().optional(),
+        dance: z.boolean().optional(),
+        sing: z.boolean().optional(),
+        group: z.boolean().optional(),
+        karaoke: z.boolean().optional()
+      }).optional()
     })
   })
 });
