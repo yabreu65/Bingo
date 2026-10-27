@@ -25,6 +25,10 @@ const playerSchema = new mongoose.Schema({
   socketId: {
     type: String
   },
+  guestCapabilityHash: {
+    type: String,
+    select: false
+  },
   cardNumber: {
     type: Number,
     min: 1,
@@ -88,12 +92,19 @@ playerSchema.virtual('displayName').get(function() {
 /**
  * Asegurar que los virtuals se incluyan en JSON
  */
+const stripPrivatePlayerFields = (doc, ret) => {
+  delete ret.__v;
+  delete ret.guestCapabilityHash;
+  return ret;
+};
+
 playerSchema.set('toJSON', {
   virtuals: true,
-  transform: function(doc, ret) {
-    delete ret.__v;
-    return ret;
-  }
+  transform: stripPrivatePlayerFields
+});
+
+playerSchema.set('toObject', {
+  transform: stripPrivatePlayerFields
 });
 
 /**
@@ -109,10 +120,10 @@ playerSchema.pre('save', async function(next) {
         this.name = user.name;
       }
     } catch (error) {
-      console.error('Error al sincronizar nombre de usuario:', error);
+      return next(error);
     }
   }
-  next();
+  return next();
 });
 
 module.exports = mongoose.model('Player', playerSchema);

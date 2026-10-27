@@ -266,6 +266,35 @@ describe('room-bound guest host capability', () => {
     }));
   });
 
+  test('allows only the bound TV role to start its permitted tie-break actions', async () => {
+    jest.useFakeTimers();
+    const room = makeRoom();
+    const game = {
+      tieBreakActive: true,
+      tieCandidates: ['performer-1'],
+      save: jest.fn().mockResolvedValue(undefined)
+    };
+    Room.findOne.mockResolvedValue(room);
+    jest.spyOn(Game, 'findById').mockResolvedValue(game);
+    Player.findById.mockResolvedValue({ _id: 'performer-1', name: 'Performer' });
+    const tvSocket = makeSocket('tv-socket');
+    tvSocket.roomCode = room.code;
+    tvSocket.playerId = 'tv-display';
+    tvSocket.tvAuthorized = true;
+
+    await handleStartTiebreakPerformance(io, tvSocket)({
+      roomCode: room.code, performerId: 'performer-1'
+    });
+    await handleStartTiebreakVoting(io, tvSocket)({ roomCode: room.code });
+
+    expect(tvSocket.emit).toHaveBeenCalledWith('tiebreak-performance-confirmed', {
+      performerId: 'performer-1', status: 'started'
+    });
+    expect(game.tieBreakStatus).toBe('voting');
+    expect(game.save).toHaveBeenCalledTimes(1);
+    expect(io.to).toHaveBeenCalledWith(room.code);
+  });
+
   test('rejects manual-BINGO verification before finishing a game or announcing a winner', async () => {
     const room = makeRoom();
     Room.findOne.mockReturnValue({ populate: jest.fn().mockResolvedValue(room) });
@@ -286,6 +315,58 @@ describe('room-bound guest host capability', () => {
     expect(socket.emit).toHaveBeenCalledWith('error', expect.objectContaining({
       error: expect.objectContaining({ code: 'INSUFFICIENT_PERMISSIONS' })
     }));
+  });
+
+  test('requires a host to verify the registered manual player identity', async () => {
+    const room = {
+      ...makeRoom(),
+      manualPlayers: [{
+        playerId: 'manual-1',
+        playerName: 'Paper Player',
+        cardNumber: 186
+      }],
+      currentGame: 'game-1'
+    };
+    const game = {
+      status: 'playing',
+      winners: [],
+      startTime: new Date(),
+      save: jest.fn().mockResolvedValue(undefined)
+    };
+    Room.findOne.mockReturnValue({ populate: jest.fn().mockResolvedValue(room) });
+    const findGame = jest.spyOn(Game, 'findById').mockResolvedValue(game);
+    const socket = makeSocket('host');
+
+    await handleVerifyBingoManual(io, socket)({
+      roomCode: room.code,
+      playerName: 'Forged Player',
+      cardNumber: 200,
+      playerId: 'manual-forged',
+      hostCapability: 'room-secret'
+    });
+
+    expect(findGame).not.toHaveBeenCalled();
+    expect(room.save).not.toHaveBeenCalled();
+    expect(io.to).not.toHaveBeenCalled();
+
+    await handleVerifyBingoManual(io, socket)({
+      roomCode: room.code,
+      playerName: 'Paper Player',
+      cardNumber: 186,
+      playerId: 'manual-1',
+      hostCapability: 'room-secret'
+    });
+
+    expect(game.winners).toEqual([expect.objectContaining({
+      playerName: 'Paper Player',
+      cardNumber: 186,
+      playerId: 'manual-1',
+      isManualPlayer: true
+    })]);
+    expect(game.save).toHaveBeenCalledTimes(1);
+    expect(room.gameState).toBe('finished');
+    expect(room.save).toHaveBeenCalledTimes(1);
+    expect(io.to).toHaveBeenCalledWith(room.code);
   });
 
   test('rejects unauthorized kick before loading or mutating a player', async () => {

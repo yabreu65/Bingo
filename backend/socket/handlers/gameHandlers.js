@@ -36,7 +36,15 @@ const { updateRoomActivity } = require('../../utils/roomActivity');
  */
 async function immediateNextNumber(io, roomCode) {
   const room = await Room.findOne({ code: roomCode });
+  if (!room?.currentGame) {
+    logger.warn(`[${roomCode}] Cannot call an immediate number without an active game`);
+    return;
+  }
   const game = await Game.findById(room.currentGame);
+  if (!game) {
+    logger.warn(`[${roomCode}] Cannot call an immediate number because the game is missing`);
+    return;
+  }
 
   if (!hasAvailableNumbers(game)) {
     logger.warn(`[${roomCode}] No available numbers for immediate call`);
@@ -159,6 +167,14 @@ async function triggerChallenge(io, roomCode) {
   const { challenge, updatedPools } = selectRandomChallenge(nextType, game.availablePools);
   if (!challenge) {
     logger.warn(`[${roomCode}] No challenge available for type ${nextType}`);
+    game.availablePools = initializeChallengePools();
+    game.lastChallengeType = null;
+    await game.save();
+    room.gameState = 'playing';
+    await room.save();
+    io.to(roomCode).emit('game-state-changed', { state: 'playing' });
+    await scheduleRoomInterval(io, roomCode);
+    ensureWatchdog(roomCode, (rc) => scheduleRoomInterval(io, rc), room.config);
     return;
   }
 
@@ -261,28 +277,33 @@ async function triggerChallenge(io, roomCode) {
 
   // Después de 30 segundos, completar el reto
   setTimeout(async () => {
-    clearInterval(countdownInterval);
+    try {
+      clearInterval(countdownInterval);
 
-    const updatedRoom = await Room.findOne({ code: roomCode });
-    if (!updatedRoom) return;
+      const updatedRoom = await Room.findOne({ code: roomCode });
+      if (!updatedRoom) return;
 
-    const updatedGame = await Game.findById(updatedRoom.currentGame);
-    if (!updatedGame) return;
+      const updatedGame = await Game.findById(updatedRoom.currentGame);
+      if (!updatedGame) return;
 
-    updatedGame.activeChallenge = null;
-    await updatedGame.save();
+      updatedGame.activeChallenge = null;
+      await updatedGame.save();
 
-    updatedRoom.gameState = 'playing';
-    await updatedRoom.save();
+      updatedRoom.gameState = 'playing';
+      await updatedRoom.save();
 
     // IMPORTANTE: Emitir challenge-complete PRIMERO para que el frontend
     // actualice el flag antes de recibir game-state-changed
-    io.to(roomCode).emit('challenge-complete', { success: true });
-    io.to(roomCode).emit('game-state-changed', { state: 'playing' });
+      io.to(roomCode).emit('challenge-complete', { success: true });
+      io.to(roomCode).emit('challenge-completed', { success: true });
+      io.to(roomCode).emit('game-state-changed', { state: 'playing' });
 
-    await immediateNextNumber(io, roomCode);
-    await scheduleRoomInterval(io, roomCode);
-    ensureWatchdog(roomCode, (rc) => scheduleRoomInterval(io, rc), updatedRoom.config);
+      await immediateNextNumber(io, roomCode);
+      await scheduleRoomInterval(io, roomCode);
+      ensureWatchdog(roomCode, (rc) => scheduleRoomInterval(io, rc), updatedRoom.config);
+    } catch (error) {
+      logger.error(`[${roomCode}] Error completing challenge asynchronously:`, error);
+    }
   }, GAME_CONSTANTS.CHALLENGE_DURATION * 1000);
   } catch (error) {
     logger.error(`[${roomCode}] ❌ CRITICAL ERROR in triggerChallenge:`, error);
@@ -311,6 +332,11 @@ async function scheduleRoomInterval(io, roomCode) {
   logger.info(`[${roomCode}] Setting up interval timer`);
 
   const room = await Room.findOne({ code: roomCode }).populate('players');
+  if (!room) {
+    logger.warn(`[${roomCode}] Room not found, clearing interval`);
+    clearRoomInterval(roomCode);
+    return;
+  }
   const intervalMs = getIntervalMs(room.config);
 
   // Log info sobre jugadores
@@ -416,7 +442,10 @@ async function scheduleRoomInterval(io, roomCode) {
 function handleStartGame(io, socket) {
   return async (data) => {
     try {
-      const { roomCode } = data;
+      const { roomCode } = data || {};
+      if (typeof roomCode !== 'string' || !/^[A-Z0-9]{6}$/.test(roomCode)) {
+        return socket.emit('error', { message: 'Código de sala inválido' });
+      }
 
       logger.info(`[${roomCode}] Game start requested`);
 
@@ -470,7 +499,7 @@ function handleStartGame(io, socket) {
     } catch (error) {
       const errorRoomCode = data?.roomCode || 'unknown';
       logger.error(`[${errorRoomCode}] Error in start-game:`, error);
-      socket.emit('error', { message: error.message });
+      socket.emit('error', { message: 'No se pudo iniciar el juego' });
     }
   };
 }
@@ -481,7 +510,11 @@ function handleStartGame(io, socket) {
 function handleGameStateChange(io, socket) {
   return async (data) => {
     try {
-      const { roomCode, state } = data;
+      const { roomCode, state } = data || {};
+      const validStates = new Set(['waiting', 'playing', 'paused', 'finished']);
+      if (typeof roomCode !== 'string' || !validStates.has(state)) {
+        return socket.emit('error', { message: 'Estado de juego inválido' });
+      }
 
       const room = await Room.findOne({ code: roomCode });
 
@@ -499,10 +532,12 @@ function handleGameStateChange(io, socket) {
         io.to(roomCode).emit('game-state-changed', { state });
 
         logger.logGameEvent(roomCode, `Game state changed to: ${state}`);
+      } else {
+        socket.emit('error', { message: 'Sala no encontrada' });
       }
     } catch (error) {
       logger.error('Error in game-state-change:', error);
-      socket.emit('error', { message: error.message });
+      socket.emit('error', { message: 'No se pudo cambiar el estado del juego' });
     }
   };
 }
@@ -542,7 +577,7 @@ function handleResetGame(io, socket) {
       logger.logGameEvent(roomCode, 'Game reset');
     } catch (error) {
       logger.error('Error in reset-game:', error);
-      socket.emit('error', { message: error.message });
+      socket.emit('error', { message: 'No se pudo reiniciar el juego' });
     }
   };
 }
@@ -564,7 +599,7 @@ function handleStartCountdown(io, socket) {
       logger.logGameEvent(roomCode, 'Countdown started');
     } catch (error) {
       logger.error('Error in start-countdown:', error);
-      socket.emit('error', { message: error.message });
+      socket.emit('error', { message: 'No se pudo iniciar la cuenta regresiva' });
     }
   };
 }
@@ -597,7 +632,7 @@ function handlePauseGame(io, socket) {
       logger.logGameEvent(roomCode, 'Game paused by TV display');
     } catch (error) {
       logger.error('Error in pause-game:', error);
-      socket.emit('error', { message: error.message });
+      socket.emit('error', { message: 'No se pudo pausar el juego' });
     }
   };
 }
@@ -630,7 +665,7 @@ function handleResumeGame(io, socket) {
       logger.logGameEvent(roomCode, 'Game resumed by TV display');
     } catch (error) {
       logger.error('Error in resume-game:', error);
-      socket.emit('error', { message: error.message });
+      socket.emit('error', { message: 'No se pudo reanudar el juego' });
     }
   };
 }
@@ -641,7 +676,12 @@ function handleResumeGame(io, socket) {
 function handleLaunchEvent(io, socket) {
   return async (data) => {
     try {
-      const { roomCode, type, text } = data;
+      const { roomCode, type, text } = data || {};
+      if (typeof roomCode !== 'string' || !/^[A-Z0-9]{6}$/.test(roomCode) ||
+          typeof type !== 'string' || type.length > 40 ||
+          (text !== undefined && (typeof text !== 'string' || text.length > 500))) {
+        return socket.emit('error', { message: 'Datos del evento inválidos' });
+      }
       const room = await Room.findOne({ code: roomCode }).populate('players');
       if (!(await canControlRoom(socket, room, data))) {
         return emitPermissionError(socket);

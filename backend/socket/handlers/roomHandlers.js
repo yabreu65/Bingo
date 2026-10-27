@@ -3,6 +3,9 @@ const Player = require('../../models/Player');
 const Game = require('../../models/Game');
 const logger = require('../../config/logger');
 const { isRoomHost, emitPermissionError } = require('../../middleware/socketAuthMiddleware');
+const { createPlayerCapabilityHash, isPlayerCapability } = require('../../utils/playerCapability');
+const { stripGuestCapabilityHashes } = require('../../utils/publicData');
+const { matchesTvCapability } = require('../../utils/tvCapability');
 const { clearAllRoomTimers } = require('../utils/roomTimer');
 
 /**
@@ -37,27 +40,57 @@ async function broadcastRoomInfo(io, roomCode) {
 function handleJoinRoom(io, socket) {
   return async (data, callback) => {
     try {
-      const { roomCode, playerId, hostCapability } = data;
+      const { roomCode, playerId, hostCapability, playerCapability } = data || {};
       const requestedRoomCode = typeof roomCode === 'string' ? roomCode.toUpperCase() : '';
       const boundRoomCode = typeof socket.roomCode === 'string' ? socket.roomCode.toUpperCase() : '';
-      if ((socket.roomCode && boundRoomCode !== requestedRoomCode) ||
-          (socket.playerId && socket.playerId !== playerId)) {
+      if (!requestedRoomCode || !playerId ||
+          (socket.roomCode && boundRoomCode !== requestedRoomCode) ||
+          (socket.playerId && socket.playerId.toString() !== playerId.toString())) {
         if (callback) callback({ success: false, error: 'Socket ya está vinculado a otro jugador o sala' });
         return;
       }
 
-      const room = await Room.findOne({ code: roomCode }).populate('players');
+      const room = await Room.findOne({ code: requestedRoomCode })
+        .select('+hostCapabilityHash +tvCapabilityHash')
+        .populate('players');
       if (!room) {
         if (callback) callback({ success: false, error: 'Sala no encontrada' });
         return;
       }
 
-      if (playerId !== 'tv-display') {
+      if (playerId === 'tv-display') {
+        if (!matchesTvCapability(data?.tvCapability, room.tvCapabilityHash, room._id)) {
+          if (callback) callback({ success: false, error: 'Credencial de TV inválida' });
+          return;
+        }
+        socket.tvAuthorized = true;
+      } else {
+        socket.tvAuthorized = false;
         const player = await Player.findById(playerId);
         const playerRoomId = player?.room?._id || player?.room;
-        if (!player || playerRoomId?.toString() !== room._id.toString()) {
+        const isListedInRoom = room.players.some((roomPlayer) => {
+          const listedId = roomPlayer?._id || roomPlayer;
+          return listedId?.toString() === playerId.toString();
+        });
+        if (!player || playerRoomId?.toString() !== room._id.toString() || !isListedInRoom) {
           if (callback) callback({ success: false, error: 'Jugador no pertenece a la sala' });
           return;
+        }
+
+        const isHostPlayer = player.isHost && room.host?.toString() === player._id.toString();
+        let guestCapabilityHash;
+        if (isHostPlayer) {
+          const authorized = await isRoomHost({ user: null }, room, hostCapability);
+          if (!authorized) {
+            if (callback) callback({ success: false, error: 'Credencial de anfitrión inválida' });
+            return;
+          }
+        } else {
+          if (player.isHost || !isPlayerCapability(playerCapability)) {
+            if (callback) callback({ success: false, error: 'Credencial de jugador inválida' });
+            return;
+          }
+          guestCapabilityHash = createPlayerCapabilityHash(playerCapability, room._id, player._id);
         }
 
         const previousSocketId = player.socketId;
@@ -66,12 +99,12 @@ function handleJoinRoom(io, socket) {
           : null;
         let authorizedHostReclaim = false;
 
-        if (player.isHost && previousSocketId !== socket.id) {
-          authorizedHostReclaim = await isRoomHost({ user: null }, room, hostCapability);
+        if (isHostPlayer && previousSocketId !== socket.id) {
+          authorizedHostReclaim = true;
           const previousSocketMatchesPlayer = previousSocket &&
             previousSocket.roomCode?.toUpperCase() === room.code.toUpperCase() &&
             previousSocket.playerId?.toString() === player._id.toString();
-          if (!authorizedHostReclaim || (previousSocket && !previousSocketMatchesPlayer)) {
+          if (previousSocket && !previousSocketMatchesPlayer) {
             if (callback) callback({ success: false, error: 'Jugador ya conectado' });
             return;
           }
@@ -85,8 +118,13 @@ function handleJoinRoom(io, socket) {
         const socketOwnershipFilter = previousSocketId
           ? { socketId: previousSocketId }
           : { $or: [{ socketId: { $exists: false } }, { socketId: null }] };
-        const claimFilter = { _id: player._id, room: room._id, ...socketOwnershipFilter };
-        if (authorizedHostReclaim) claimFilter.isHost = true;
+        const claimFilter = {
+          _id: player._id,
+          room: room._id,
+          isHost: isHostPlayer,
+          ...socketOwnershipFilter
+        };
+        if (!isHostPlayer) claimFilter.guestCapabilityHash = guestCapabilityHash;
         const claimedPlayer = await Player.findOneAndUpdate(
           claimFilter,
           { $set: { socketId: socket.id, isConnected: true } },
@@ -106,7 +144,7 @@ function handleJoinRoom(io, socket) {
 
       io.to(room.code).emit('player-joined', {
         playerId,
-        players: room.players
+        players: stripGuestCapabilityHashes(room.players)
       });
 
       await broadcastRoomInfo(io, room.code);
@@ -121,9 +159,9 @@ function handleJoinRoom(io, socket) {
       }
     } catch (error) {
       logger.error('Error in join-room:', error);
-      socket.emit('error', { message: error.message });
+      socket.emit('error', { message: 'No se pudo ingresar a la sala' });
       if (callback) {
-        callback({ success: false, error: error.message });
+        callback({ success: false, error: 'No se pudo ingresar a la sala' });
       }
     }
   };
@@ -164,11 +202,12 @@ function handleLeaveRoom(io, socket) {
       socket.leave(roomCode);
       socket.roomCode = undefined;
       socket.playerId = undefined;
+      socket.tvAuthorized = false;
 
       const updatedRoom = await Room.findOne({ code: roomCode }).populate('players');
       io.to(roomCode).emit('player-left', {
         playerId,
-        players: updatedRoom ? updatedRoom.players : []
+        players: stripGuestCapabilityHashes(updatedRoom ? updatedRoom.players : [])
       });
 
       await broadcastRoomInfo(io, roomCode);
@@ -178,7 +217,7 @@ function handleLeaveRoom(io, socket) {
       });
     } catch (error) {
       logger.error('Error in leave-room:', error);
-      socket.emit('error', { message: error.message });
+      socket.emit('error', { message: 'No se pudo dejar la sala' });
     }
   };
 }
@@ -236,7 +275,7 @@ function handleCloseRoom(io, socket) {
       }
     } catch (error) {
       logger.error('Error closing room:', error);
-      socket.emit('error', { message: error.message });
+      socket.emit('error', { message: 'No se pudo cerrar la sala' });
     }
   };
 }
@@ -271,7 +310,7 @@ function handleDeleteAllRooms(io, socket) {
       });
     } catch (error) {
       logger.error('Error deleting all rooms:', error);
-      socket.emit('error', { message: error.message });
+      socket.emit('error', { message: 'No se pudieron eliminar las salas' });
     }
   };
 }
@@ -300,12 +339,15 @@ function handleKickPlayer(io, socket) {
           return emitPermissionError(socket);
         }
 
+        const kickedSocketId = player.socketId;
         player.isConnected = false;
+        player.socketId = null;
         await player.save();
 
         // Notificar al jugador expulsado
-        if (player.socketId) {
-          io.to(player.socketId).emit('kicked-from-room');
+        if (kickedSocketId) {
+          io.to(kickedSocketId).emit('kicked-from-room');
+          io.sockets?.sockets?.get(kickedSocketId)?.disconnect(true);
         }
 
         // Notificar a la sala
@@ -322,7 +364,7 @@ function handleKickPlayer(io, socket) {
       }
     } catch (error) {
       logger.error('Error kicking player:', error);
-      socket.emit('error', { message: error.message });
+      socket.emit('error', { message: 'No se pudo expulsar al jugador' });
     }
   };
 }

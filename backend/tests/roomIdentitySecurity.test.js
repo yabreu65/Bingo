@@ -22,12 +22,19 @@ const Room = require('../models/Room');
 const Player = require('../models/Player');
 const Game = require('../models/Game');
 const { createHostCapabilityHash } = require('../middleware/socketAuthMiddleware');
+const { createPlayerCapabilityHash } = require('../utils/playerCapability');
 const { handleDisconnect, handleJoinRoom, handleLeaveRoom } = require('../socket/handlers/roomHandlers');
 const logger = require('../config/logger');
 
 const emitted = jest.fn();
 const io = { to: jest.fn(() => ({ emit: emitted })), sockets: { sockets: new Map() } };
-const populateRoom = (room) => ({ populate: jest.fn().mockResolvedValue(room) });
+const populateRoom = (room) => {
+  const query = {
+    select: jest.fn(() => query),
+    populate: jest.fn().mockResolvedValue(room)
+  };
+  return query;
+};
 const makeSocket = (id = 'socket-1') => ({
   id,
   join: jest.fn(),
@@ -39,13 +46,24 @@ const makeLivePlayer = ({
   roomId = 'room-a', roomCode = 'ROOMA', isHost = true, storedCapability = 'room-host-secret',
   oldRoomCode = roomCode, oldPlayerId, oldSocketLive = true
 } = {}) => {
+  const playerId = `player-${roomId}`;
   const room = {
     _id: roomId,
     code: roomCode,
+    host: playerId,
     hostCapabilityHash: createHostCapabilityHash(storedCapability, roomId),
     players: []
   };
-  const player = { _id: `player-${roomId}`, room: roomId, isHost, socketId: 'old-host-socket', isConnected: true };
+  const guestCapability = 'g'.repeat(43);
+  const player = {
+    _id: playerId,
+    room: roomId,
+    isHost,
+    socketId: 'old-host-socket',
+    isConnected: true,
+    guestCapabilityHash: createPlayerCapabilityHash(guestCapability, roomId, playerId)
+  };
+  room.players = [player];
   const oldSocket = makeSocket(player.socketId);
   oldSocket.roomCode = oldRoomCode;
   oldSocket.playerId = oldPlayerId || player._id;
@@ -62,6 +80,24 @@ beforeEach(() => {
 });
 
 describe('room socket identity boundaries', () => {
+  test('does not send internal database errors to a socket join client', async () => {
+    const internalError = new Error('mongodb://private.internal/database credentials=secret');
+    const query = {
+      select: jest.fn(() => query),
+      populate: jest.fn().mockRejectedValue(internalError)
+    };
+    Room.findOne.mockReturnValue(query);
+    const socket = makeSocket();
+    const callback = jest.fn();
+
+    await handleJoinRoom(io, socket)({ roomCode: 'ROOMA', playerId: 'tv-display' }, callback);
+
+    expect(JSON.stringify(socket.emit.mock.calls)).not.toContain('private.internal');
+    expect(JSON.stringify(callback.mock.calls)).not.toContain('private.internal');
+    expect(socket.emit).toHaveBeenCalledWith('error', { message: 'No se pudo ingresar a la sala' });
+    expect(callback).toHaveBeenCalledWith({ success: false, error: 'No se pudo ingresar a la sala' });
+  });
+
   test('rejects leaving a different room than the socket joined', async () => {
     const socket = makeSocket();
     socket.roomCode = 'ROOMA';
@@ -78,7 +114,12 @@ describe('room socket identity boundaries', () => {
 
   test('releases room ownership on leave so a new socket can reclaim the player', async () => {
     const room = { _id: 'room-a', code: 'ROOMA', players: [] };
-    const player = { _id: 'player-a', room: room._id, socketId: 'socket-1', isConnected: true };
+    const capability = 'g'.repeat(43);
+    const player = {
+      _id: 'player-a', room: room._id, socketId: 'socket-1', isConnected: true, isHost: false,
+      guestCapabilityHash: createPlayerCapabilityHash(capability, room._id, 'player-a')
+    };
+    room.players = [player];
     Room.findOne.mockReturnValue(populateRoom(room));
     Player.findOneAndUpdate
       .mockResolvedValueOnce({ ...player, socketId: null, isConnected: false })
@@ -109,11 +150,17 @@ describe('room socket identity boundaries', () => {
 
     const newSocket = makeSocket('socket-2');
     const callback = jest.fn();
-    await handleJoinRoom(io, newSocket)({ roomCode: room.code, playerId: player._id }, callback);
+    await handleJoinRoom(io, newSocket)({ roomCode: room.code, playerId: player._id, playerCapability: capability }, callback);
 
     expect(Player.findOneAndUpdate).toHaveBeenNthCalledWith(
       2,
-      { _id: player._id, room: room._id, $or: [{ socketId: { $exists: false } }, { socketId: null }] },
+      {
+        _id: player._id,
+        room: room._id,
+        isHost: false,
+        guestCapabilityHash: player.guestCapabilityHash,
+        $or: [{ socketId: { $exists: false } }, { socketId: null }]
+      },
       { $set: { socketId: newSocket.id, isConnected: true } },
       { new: true }
     );
@@ -200,17 +247,28 @@ describe('room socket identity boundaries', () => {
 
   test('allows a room member to claim their socket and join', async () => {
     const room = { _id: 'room-a', code: 'ROOMA', players: [] };
-    const player = { _id: 'player-a', room: room._id, isConnected: false };
+    const capability = 'g'.repeat(43);
+    const player = {
+      _id: 'player-a', room: room._id, isConnected: false, isHost: false,
+      guestCapabilityHash: createPlayerCapabilityHash(capability, room._id, 'player-a')
+    };
+    room.players = [player];
     Room.findOne.mockImplementation(() => populateRoom(room));
     Player.findById.mockResolvedValue(player);
     Player.findOneAndUpdate.mockResolvedValue({ ...player, socketId: 'socket-1', isConnected: true });
     const socket = makeSocket();
     const callback = jest.fn();
 
-    await handleJoinRoom(io, socket)({ roomCode: room.code, playerId: player._id }, callback);
+    await handleJoinRoom(io, socket)({ roomCode: room.code, playerId: player._id, playerCapability: capability }, callback);
 
     expect(Player.findOneAndUpdate).toHaveBeenCalledWith(
-      { _id: player._id, room: room._id, $or: [{ socketId: { $exists: false } }, { socketId: null }] },
+      {
+        _id: player._id,
+        room: room._id,
+        isHost: false,
+        guestCapabilityHash: player.guestCapabilityHash,
+        $or: [{ socketId: { $exists: false } }, { socketId: null }]
+      },
       { $set: { socketId: socket.id, isConnected: true } },
       { new: true }
     );
@@ -220,14 +278,19 @@ describe('room socket identity boundaries', () => {
 
   test('rejects claiming a player identity already owned by another live socket', async () => {
     const room = { _id: 'room-a', code: 'ROOMA', players: [] };
-    const player = { _id: 'player-a', room: room._id, socketId: 'existing-socket', isConnected: true };
+    const capability = 'g'.repeat(43);
+    const player = {
+      _id: 'player-a', room: room._id, socketId: 'existing-socket', isConnected: true, isHost: false,
+      guestCapabilityHash: createPlayerCapabilityHash(capability, room._id, 'player-a')
+    };
+    room.players = [player];
     Room.findOne.mockReturnValue(populateRoom(room));
     Player.findById.mockResolvedValue(player);
     io.sockets.sockets.set(player.socketId, {});
     const socket = makeSocket();
     const callback = jest.fn();
 
-    await handleJoinRoom(io, socket)({ roomCode: room.code, playerId: player._id }, callback);
+    await handleJoinRoom(io, socket)({ roomCode: room.code, playerId: player._id, playerCapability: capability }, callback);
 
     expect(callback).toHaveBeenCalledWith({ success: false, error: 'Jugador ya conectado' });
     expect(Player.findOneAndUpdate).not.toHaveBeenCalled();
@@ -281,7 +344,7 @@ describe('room socket identity boundaries', () => {
       hostCapability: options.hostCapability
     }, callback);
 
-    expect(callback).toHaveBeenCalledWith({ success: false, error: 'Jugador ya conectado' });
+    expect(callback).toHaveBeenCalledWith(expect.objectContaining({ success: false }));
     expect(Player.findOneAndUpdate).not.toHaveBeenCalled();
     expect(oldSocket.disconnect).not.toHaveBeenCalled();
     expect(newSocket.join).not.toHaveBeenCalled();

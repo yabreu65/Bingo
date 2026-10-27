@@ -25,7 +25,11 @@ describe('room host capability REST flow', () => {
     savedRooms = [];
     jest.spyOn(Room, 'generateUniqueCode').mockResolvedValue('ABC123');
     jest.spyOn(Room.prototype, 'save').mockImplementation(async function saveRoom() {
-      savedRooms.push({ id: this._id, hostCapabilityHash: this.hostCapabilityHash });
+      savedRooms.push({
+        id: this._id,
+        hostCapabilityHash: this.hostCapabilityHash,
+        tvCapabilityHash: this.tvCapabilityHash
+      });
       return this;
     });
     jest.spyOn(Room.prototype, 'populate').mockImplementation(function populateRoom() {
@@ -48,10 +52,17 @@ describe('room host capability REST flow', () => {
     expect(response.status).toBe(200);
     expect(response.body.hostCapability).toEqual(expect.any(String));
     expect(response.body.hostCapability).toHaveLength(43);
+    expect(response.body.tvCapability).toEqual(expect.any(String));
+    expect(response.body.tvCapability).toHaveLength(43);
     expect(response.body.room.hostCapabilityHash).toBeUndefined();
+    expect(response.body.room.tvCapabilityHash).toBeUndefined();
     expect(savedRooms).toHaveLength(1);
     expect(savedRooms[0].hostCapabilityHash).toBe(
       createHostCapabilityHash(response.body.hostCapability, savedRooms[0].id)
+    );
+    expect(savedRooms[0].tvCapabilityHash).toBe(
+      require('crypto').createHash('sha256')
+        .update(`${savedRooms[0].id}:${response.body.tvCapability}`).digest('hex')
     );
   });
 
@@ -137,9 +148,10 @@ describe('room host capability REST flow', () => {
   });
 
   test('rejects REST game start without room capability before creating or starting a game', async () => {
+    const roomId = '0123456789abcdef01234567';
     const room = {
-      _id: 'room-a',
-      hostCapabilityHash: createHostCapabilityHash('host-secret', 'room-a'),
+      _id: roomId,
+      hostCapabilityHash: createHostCapabilityHash('host-secret', roomId),
       save: jest.fn().mockResolvedValue(undefined)
     };
     jest.spyOn(Room, 'findById').mockReturnValue({ select: jest.fn().mockResolvedValue(room) });
@@ -157,9 +169,10 @@ describe('room host capability REST flow', () => {
 
   test('accepts the room capability for REST game start', async () => {
     const capability = 'start-secret';
+    const roomId = 'abcdef0123456789abcdef01';
     const room = {
-      _id: 'room-a',
-      hostCapabilityHash: createHostCapabilityHash(capability, 'room-a'),
+      _id: roomId,
+      hostCapabilityHash: createHostCapabilityHash(capability, roomId),
       save: jest.fn().mockResolvedValue(undefined)
     };
     jest.spyOn(Room, 'findById').mockReturnValue({ select: jest.fn().mockResolvedValue(room) });

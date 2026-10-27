@@ -6,13 +6,24 @@ async function isHost(socket, room, data) {
   return isRoomHost(socket, room, data?.hostCapability);
 }
 
+const isValidRoomCode = (roomCode) =>
+  typeof roomCode === 'string' && /^[A-Z0-9]{6}$/.test(roomCode);
+const isValidTime = (value) =>
+  Number.isFinite(value) && value >= 0 && value <= 24 * 60 * 60;
+const isValidSongId = (value) =>
+  (Number.isInteger(value) && value >= 1) ||
+  (typeof value === 'string' && value.trim().length > 0 && value.length <= 200);
+
 /**
  * Handler para reproducir música
  */
 function handleMusicPlay(io, socket) {
   return async (data) => {
     try {
-      const { roomCode, songId, currentTime } = data;
+      const { roomCode, songId, currentTime = 0 } = data || {};
+      if (!isValidRoomCode(roomCode) || !isValidSongId(songId) || !isValidTime(currentTime)) {
+        return socket.emit('error', { message: 'Datos de reproducción inválidos' });
+      }
 
       const room = await Room.findOne({ code: roomCode });
       if (!room) {
@@ -26,14 +37,14 @@ function handleMusicPlay(io, socket) {
 
       room.musicState.isPlaying = true;
       room.musicState.currentSongId = songId;
-      room.musicState.currentTime = currentTime || 0;
+      room.musicState.currentTime = currentTime;
       room.musicState.lastUpdated = new Date();
       await room.save();
 
       io.to(roomCode).emit('music-sync', {
         isPlaying: true,
         currentSongId: songId,
-        currentTime: currentTime || 0
+        currentTime
       });
 
       logger.info(`[${roomCode}] Music play`, {
@@ -42,7 +53,7 @@ function handleMusicPlay(io, socket) {
       });
     } catch (error) {
       logger.error('Error in music-play:', error);
-      socket.emit('error', { message: error.message });
+      socket.emit('error', { message: 'No se pudo iniciar la música' });
     }
   };
 }
@@ -53,7 +64,10 @@ function handleMusicPlay(io, socket) {
 function handleMusicPause(io, socket) {
   return async (data) => {
     try {
-      const { roomCode, currentTime } = data;
+      const { roomCode, currentTime = 0 } = data || {};
+      if (!isValidRoomCode(roomCode) || !isValidTime(currentTime)) {
+        return socket.emit('error', { message: 'Datos de pausa inválidos' });
+      }
 
       const room = await Room.findOne({ code: roomCode });
       if (!room) {
@@ -81,7 +95,7 @@ function handleMusicPause(io, socket) {
       });
     } catch (error) {
       logger.error('Error in music-pause:', error);
-      socket.emit('error', { message: error.message });
+      socket.emit('error', { message: 'No se pudo pausar la música' });
     }
   };
 }
@@ -92,7 +106,10 @@ function handleMusicPause(io, socket) {
 function handleMusicSongChange(io, socket) {
   return async (data) => {
     try {
-      const { roomCode, songId } = data;
+      const { roomCode, songId } = data || {};
+      if (!isValidRoomCode(roomCode) || !isValidSongId(songId)) {
+        return socket.emit('error', { message: 'Datos de canción inválidos' });
+      }
 
       const room = await Room.findOne({ code: roomCode });
       if (!room) {
@@ -120,7 +137,7 @@ function handleMusicSongChange(io, socket) {
       });
     } catch (error) {
       logger.error('Error in music-song-change:', error);
-      socket.emit('error', { message: error.message });
+      socket.emit('error', { message: 'No se pudo cambiar la canción' });
     }
   };
 }
@@ -131,7 +148,10 @@ function handleMusicSongChange(io, socket) {
 function handleMusicVolumeChange(io, socket) {
   return async (data) => {
     try {
-      const { roomCode, volume } = data;
+      const { roomCode, volume } = data || {};
+      if (!isValidRoomCode(roomCode) || !Number.isFinite(volume) || volume < 0 || volume > 1) {
+        return socket.emit('error', { message: 'Volumen inválido' });
+      }
 
       const room = await Room.findOne({ code: roomCode });
       if (!room) {
@@ -154,7 +174,7 @@ function handleMusicVolumeChange(io, socket) {
       });
     } catch (error) {
       logger.error('Error in music-volume-change:', error);
-      socket.emit('error', { message: error.message });
+      socket.emit('error', { message: 'No se pudo cambiar el volumen' });
     }
   };
 }

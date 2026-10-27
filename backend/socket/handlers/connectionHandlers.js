@@ -2,6 +2,19 @@ const Room = require('../../models/Room');
 const Game = require('../../models/Game');
 const Player = require('../../models/Player');
 const logger = require('../../config/logger');
+const { isRoomHost } = require('../../middleware/socketAuthMiddleware');
+const { stripGuestCapabilityHashes, stripTriviaAnswers } = require('../../utils/publicData');
+
+const socketMatchesIdentity = (socket, data) => {
+  const requestedRoom = typeof data?.roomCode === 'string' ? data.roomCode.toUpperCase() : '';
+  return !!socket.roomCode && !!socket.playerId &&
+    socket.playerId !== 'tv-display' &&
+    requestedRoom === socket.roomCode.toUpperCase() &&
+    data?.playerId?.toString() === socket.playerId.toString();
+};
+const failCallback = (callback, message) => {
+  if (typeof callback === 'function') callback({ success: false, error: message });
+};
 
 /**
  * Handler para ping/pong (heartbeat)
@@ -19,22 +32,29 @@ function handlePing(io, socket) {
 function handleVerifyRoom(io, socket) {
   return async (data, callback) => {
     try {
-      const { roomCode, playerId } = data;
-
-      const room = await Room.findOne({ code: roomCode });
-      if (!room) {
-        return callback({ success: false, error: 'Sala no encontrada' });
+      if (!socketMatchesIdentity(socket, data)) {
+        return failCallback(callback, 'No tienes permisos para verificar esta sala');
       }
 
-      const isInRoom = room.players.some(p => p.toString() === playerId);
-      if (!isInRoom) {
-        return callback({ success: false, error: 'Jugador no está en la sala' });
-      }
+      const room = await Room.findOne({ code: socket.roomCode });
+      if (!room) return failCallback(callback, 'Sala no encontrada');
 
-      callback({ success: true, inRoom: true });
+      const isInRoom = room.players.some((roomPlayer) => {
+        const listedId = roomPlayer?._id || roomPlayer;
+        return listedId?.toString() === socket.playerId.toString();
+      });
+      const owner = isInRoom ? await Player.findOne({
+        _id: socket.playerId,
+        room: room._id,
+        socketId: socket.id,
+        isConnected: true
+      }) : null;
+      if (!owner) return failCallback(callback, 'Jugador no está conectado a esta sala');
+
+      return callback({ success: true, inRoom: true });
     } catch (error) {
       logger.error('Error verifying room:', error);
-      callback({ success: false, error: error.message });
+      return failCallback(callback, 'No se pudo verificar la sala');
     }
   };
 }
@@ -45,19 +65,27 @@ function handleVerifyRoom(io, socket) {
 function handleSyncGameState(io, socket) {
   return async (data, callback) => {
     try {
-      const { roomCode, playerId } = data;
-
+      if (!socketMatchesIdentity(socket, data)) {
+        return failCallback(callback, 'No tienes permisos para sincronizar este jugador');
+      }
+      const roomCode = socket.roomCode;
+      const playerId = socket.playerId;
       logger.info(`[${roomCode}] Syncing game state for player ${playerId}`);
 
       const room = await Room.findOne({ code: roomCode }).populate('players');
-      if (!room) {
-        return callback({ success: false, error: 'Sala no encontrada' });
-      }
+      if (!room) return failCallback(callback, 'Sala no encontrada');
 
-      const player = await Player.findById(playerId);
-      if (!player) {
-        return callback({ success: false, error: 'Jugador no encontrado' });
-      }
+      const isListedInRoom = room.players.some((roomPlayer) => {
+        const listedId = roomPlayer?._id || roomPlayer;
+        return listedId?.toString() === playerId.toString();
+      });
+      const player = isListedInRoom ? await Player.findOne({
+        _id: playerId,
+        room: room._id,
+        socketId: socket.id,
+        isConnected: true
+      }) : null;
+      if (!player) return failCallback(callback, 'Jugador no conectado a esta sala');
 
       const game = room.currentGame ? await Game.findById(room.currentGame) : null;
 
@@ -71,13 +99,13 @@ function handleSyncGameState(io, socket) {
           playerId: player._id,
           playerName: player.name,
           bingoCard: player.bingoCard,
-          markedCells: player.markedCells || []
+          markedCells: player.bingoCard?.markedCells || []
         }
       };
 
-      // Si hay un challenge activo
+      // Si hay un challenge activo, no enviar la respuesta correcta al cliente jugador.
       if (game?.activeChallenge) {
-        syncData.activeChallenge = game.activeChallenge;
+        syncData.activeChallenge = stripTriviaAnswers(game.activeChallenge);
       }
 
       // Si hay tie-break activo
@@ -102,7 +130,7 @@ function handleSyncGameState(io, socket) {
 
     } catch (error) {
       logger.error('Error syncing game state:', error);
-      callback({ success: false, error: error.message });
+      return failCallback(callback, 'No se pudo sincronizar el estado del juego');
     }
   };
 }
@@ -113,20 +141,38 @@ function handleSyncGameState(io, socket) {
 function handleSyncDashboard(io, socket) {
   return async (data, callback) => {
     try {
-      const { roomCode } = data;
+      const roomCode = socket.roomCode;
+      const requestedRoom = typeof data?.roomCode === 'string' ? data.roomCode.toUpperCase() : '';
+      if (!roomCode || !socket.playerId || requestedRoom !== roomCode.toUpperCase()) {
+        return failCallback(callback, 'No tienes permisos para sincronizar este dashboard');
+      }
 
       logger.info(`[${roomCode}] Syncing dashboard state`);
 
-      const room = await Room.findOne({ code: roomCode }).populate('players');
-      if (!room) {
-        return callback({ success: false, error: 'Sala no encontrada' });
+      const room = await Room.findOne({ code: roomCode })
+        .select('+hostCapabilityHash')
+        .populate('players');
+      if (!room) return failCallback(callback, 'Sala no encontrada');
+
+      const roomHostId = room.host?._id || room.host;
+      if (roomHostId?.toString() !== socket.playerId.toString() ||
+          !(await isRoomHost(socket, room, data?.hostCapability))) {
+        return failCallback(callback, 'No tienes permisos para sincronizar este dashboard');
       }
+      const hostPlayer = await Player.findOne({
+        _id: socket.playerId,
+        room: room._id,
+        isHost: true,
+        socketId: socket.id,
+        isConnected: true
+      });
+      if (!hostPlayer) return failCallback(callback, 'Anfitrión no conectado a esta sala');
 
       const game = room.currentGame ? await Game.findById(room.currentGame) : null;
 
       // Preparar datos de sincronización del dashboard
       const syncData = {
-        room: room,
+        room: stripGuestCapabilityHashes(room),
         gameState: room.gameState,
         currentNumber: game?.currentNumber || null,
         calledNumbers: game?.calledNumbers || [],
@@ -157,7 +203,7 @@ function handleSyncDashboard(io, socket) {
 
     } catch (error) {
       logger.error('Error syncing dashboard state:', error);
-      callback({ success: false, error: error.message });
+      return failCallback(callback, 'No se pudo sincronizar el dashboard');
     }
   };
 }

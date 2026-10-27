@@ -9,37 +9,41 @@ const logger = require('../../config/logger');
 function handleMarkCell(io, socket) {
   return async (data) => {
     try {
-      const { roomCode, playerId, row, col } = data;
+      const roomCode = socket.roomCode;
+      const playerId = socket.playerId;
+      const requestedRoomCode = typeof data?.roomCode === 'string' ? data.roomCode.toUpperCase() : '';
+      if (!roomCode || !playerId || playerId === 'tv-display' ||
+          requestedRoomCode !== roomCode.toUpperCase() ||
+          data?.playerId?.toString() !== playerId.toString()) {
+        return socket.emit('error', { message: 'No tienes permisos para marcar esta celda' });
+      }
+      const { row, col } = data;
+      if (!Number.isInteger(row) || row < 0 || row > 4 || !Number.isInteger(col) || col < 0 || col > 4) {
+        return socket.emit('error', { message: 'Celda inválida' });
+      }
 
       const room = await Room.findOne({ code: roomCode });
-      if (!room) {
-        return socket.emit('error', { message: 'Sala no encontrada' });
-      }
+      if (!room) return socket.emit('error', { message: 'Sala no encontrada' });
+      const ownerFilter = {
+        _id: playerId,
+        room: room._id,
+        socketId: socket.id,
+        isConnected: true
+      };
+      const player = await Player.findOne(ownerFilter);
+      if (!player) return socket.emit('error', { message: 'No tienes permisos para marcar esta celda' });
 
-      const game = room.currentGame ? await Game.findById(room.currentGame) : null;
-      const player = await Player.findById(playerId);
-
-      if (!player) {
-        return socket.emit('error', { message: 'Jugador no encontrado' });
-      }
-
-      // Obtener número en la celda seleccionada
       const cellValue = player.bingoCard?.matrix?.[row]?.[col];
-
       if (!cellValue || cellValue === 'BINGO') {
         return socket.emit('error', { message: 'Celda inválida' });
       }
 
-      // Validar contra números cantados si hay juego activo
+      const game = room.currentGame ? await Game.findById(room.currentGame) : null;
       if (game && Array.isArray(game.calledNumbers) && !game.calledNumbers.includes(cellValue)) {
         return socket.emit('error', { message: 'Número no ha sido cantado' });
       }
 
-      // Verificar si ya está marcada
-      const marked = Array.isArray(player.bingoCard.markedCells)
-        ? player.bingoCard.markedCells
-        : [];
-
+      const marked = Array.isArray(player.bingoCard.markedCells) ? player.bingoCard.markedCells : [];
       const alreadyMarked = marked.some((m) => {
         if (!m) return false;
         if (Array.isArray(m)) return m[0] === row && m[1] === col;
@@ -47,18 +51,26 @@ function handleMarkCell(io, socket) {
       });
 
       if (!alreadyMarked) {
-        marked.push({ row, col });
-        player.bingoCard.markedCells = marked;
-        player.stats.numbersMarked = (player.stats.numbersMarked || 0) + 1;
-        await player.save();
+        const updatedPlayer = await Player.findOneAndUpdate(
+          ownerFilter,
+          {
+            $set: {
+              'bingoCard.markedCells': [...marked, { row, col }],
+              'stats.numbersMarked': (player.stats?.numbersMarked || 0) + 1
+            }
+          },
+          { new: true }
+        );
+        if (!updatedPlayer) {
+          return socket.emit('error', { message: 'No tienes permisos para marcar esta celda' });
+        }
 
         io.to(roomCode).emit('cell-marked', { playerId, row, col });
-
-        logger.info(`[${roomCode}] Cell marked - Player: ${player.name}, Position: [${row},${col}], Value: ${cellValue}, Total marked: ${marked.length}/25`);
+        logger.info(`[${roomCode}] Cell marked - Player: ${player.name}, Position: [${row},${col}], Value: ${cellValue}, Total marked: ${marked.length + 1}/25`);
       }
     } catch (error) {
       logger.error('Error in mark-cell:', error);
-      socket.emit('error', { message: error.message });
+      socket.emit('error', { message: 'No se pudo marcar la celda' });
     }
   };
 }
@@ -69,22 +81,30 @@ function handleMarkCell(io, socket) {
 function handleUpdatePoints(io, socket) {
   return async (data) => {
     try {
-      const { roomCode, playerId, points } = data;
-
-      const player = await Player.findById(playerId);
-
-      if (!player) {
-        return socket.emit('error', { message: 'Jugador no encontrado' });
+      const roomCode = socket.roomCode;
+      const playerId = socket.playerId;
+      const requestedRoomCode = typeof data?.roomCode === 'string' ? data.roomCode.toUpperCase() : '';
+      const points = data?.points;
+      if (!roomCode || !playerId || playerId === 'tv-display' ||
+          requestedRoomCode !== roomCode.toUpperCase() ||
+          data?.playerId?.toString() !== playerId.toString() ||
+          !Number.isInteger(points) || points < -1000 || points > 1000) {
+        return socket.emit('error', { message: 'No tienes permisos para actualizar estos puntos' });
       }
 
-      player.stats.points += points;
-      await player.save();
+      const room = await Room.findOne({ code: roomCode });
+      if (!room) return socket.emit('error', { message: 'Sala no encontrada' });
+      const player = await Player.findOneAndUpdate(
+        { _id: playerId, room: room._id, socketId: socket.id, isConnected: true },
+        { $inc: { 'stats.points': points } },
+        { new: true }
+      );
+      if (!player) return socket.emit('error', { message: 'No tienes permisos para actualizar estos puntos' });
 
       io.to(roomCode).emit('points-updated', {
         playerId,
         newPoints: player.stats.points
       });
-
       logger.info(`[${roomCode}] Points updated`, {
         playerId,
         pointsAdded: points,
@@ -92,7 +112,7 @@ function handleUpdatePoints(io, socket) {
       });
     } catch (error) {
       logger.error('Error in update-points:', error);
-      socket.emit('error', { message: error.message });
+      socket.emit('error', { message: 'No se pudieron actualizar los puntos' });
     }
   };
 }

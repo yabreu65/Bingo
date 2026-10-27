@@ -7,6 +7,13 @@ const { clearAllRoomTimers } = require('../utils/roomTimer');
 const { isRoomHost, emitPermissionError } = require('../../middleware/socketAuthMiddleware');
 
 const canControlRoom = (socket, room, data) => isRoomHost(socket, room, data?.hostCapability);
+const canControlTiebreak = async (socket, room, data) => {
+  if (await canControlRoom(socket, room, data)) return true;
+  const requestedRoom = typeof data?.roomCode === 'string' ? data.roomCode.toUpperCase() : '';
+  return socket.playerId === 'tv-display' && socket.tvAuthorized === true &&
+    !!socket.roomCode && socket.roomCode.toUpperCase() === requestedRoom &&
+    room?.code?.toUpperCase() === requestedRoom;
+};
 const votingHandlers = require('./votingHandlers');
 const votingService = require('../../services/votingService');
 const EventEmitter = require('events');
@@ -45,8 +52,24 @@ async function finishGameWithWinner(io, room, game, player, bingoType) {
 }
 
 async function runTieBreak(io, socket, room) {
+  if (!room?.currentGame) {
+    logger.warn(`[${room?.code || 'unknown'}] Tie-break requested without an active game`);
+    return;
+  }
   const game = await Game.findById(room.currentGame);
+  if (!game) {
+    logger.warn(`[${room.code}] Tie-break requested for a missing game`);
+    return;
+  }
   const candidates = Array.isArray(game.tieCandidates) ? game.tieCandidates.slice() : [];
+
+  if (candidates.length === 0) {
+    game.tieBreakActive = false;
+    game.tieBreakStatus = null;
+    game.tieWindowEnds = null;
+    await game.save();
+    return;
+  }
 
   if (candidates.length <= 1) {
     const soloId = candidates[0];
@@ -146,11 +169,31 @@ async function runTieBreak(io, socket, room) {
 function handleClaimBingo(io, socket) {
   return async (data) => {
     try {
-      const { roomCode, playerId, bingoType } = data;
+      const roomCode = socket.roomCode;
+      const playerId = socket.playerId;
+      const requestedRoomCode = typeof data?.roomCode === 'string' ? data.roomCode.toUpperCase() : '';
+      if (!roomCode || !playerId || playerId === 'tv-display' ||
+          requestedRoomCode !== roomCode.toUpperCase() ||
+          data?.playerId?.toString() !== playerId.toString()) {
+        return socket.emit('error', { message: 'No tienes permisos para reclamar BINGO' });
+      }
+      const { bingoType } = data;
+      if (bingoType !== 'full') {
+        return socket.emit('error', { message: 'Tipo de BINGO inválido' });
+      }
 
       const room = await Room.findOne({ code: roomCode }).populate('players');
       if (!room) {
         return socket.emit('error', { message: 'Sala no encontrada' });
+      }
+
+      const player = await Player.findOneAndUpdate(
+        { _id: playerId, room: room._id, socketId: socket.id, isConnected: true },
+        { $set: { socketId: socket.id } },
+        { new: true }
+      );
+      if (!player) {
+        return socket.emit('error', { message: 'No tienes permisos para reclamar BINGO' });
       }
 
       const game = room.currentGame ? await Game.findById(room.currentGame) : null;
@@ -161,11 +204,6 @@ function handleClaimBingo(io, socket) {
       if (game.status === 'finished' || room.gameState === 'finished') {
         io.to(roomCode).emit('bingo-rejected', { playerId, bingoType });
         return;
-      }
-
-      const player = await Player.findById(playerId);
-      if (!player) {
-        return socket.emit('error', { message: 'Jugador no encontrado' });
       }
 
       io.to(roomCode).emit('bingo-claimed', { playerId, bingoType });
@@ -219,13 +257,17 @@ function handleClaimBingo(io, socket) {
       logger.logGameEvent(roomCode, 'Tie-break window started');
 
       setTimeout(async () => {
-        const freshRoom = await Room.findOne({ code: roomCode });
-        if (!freshRoom) return;
-        await runTieBreak(io, socket, freshRoom);
+        try {
+          const freshRoom = await Room.findOne({ code: roomCode });
+          if (!freshRoom) return;
+          await runTieBreak(io, socket, freshRoom);
+        } catch (error) {
+          logger.error('Error starting tie-break asynchronously:', error);
+        }
       }, 5000);
     } catch (error) {
       logger.error('Error in claim-bingo:', error);
-      socket.emit('error', { message: error.message });
+      socket.emit('error', { message: 'No se pudo reclamar el bingo' });
     }
   };
 }
@@ -236,7 +278,13 @@ function handleClaimBingo(io, socket) {
 function handleCallNumber(io, socket) {
   return async (data) => {
     try {
-      const { roomCode, number, nextSongIndex } = data;
+      const { roomCode, number, nextSongIndex } = data || {};
+      if (typeof roomCode !== 'string' || !/^[A-Z0-9]{6}$/.test(roomCode) ||
+          !Number.isInteger(number) || number < 1 || number > 75 ||
+          (nextSongIndex !== undefined &&
+            (!Number.isInteger(nextSongIndex) || nextSongIndex < 0))) {
+        return socket.emit('error', { message: 'Datos de número inválidos' });
+      }
 
       const room = await Room.findOne({ code: roomCode });
       if (!room) {
@@ -249,6 +297,9 @@ function handleCallNumber(io, socket) {
       const game = await Game.findById(room.currentGame);
       if (!game) {
         return socket.emit('error', { message: 'Juego no encontrado' });
+      }
+      if (!Array.isArray(game.availableNumbers) || !game.availableNumbers.includes(number)) {
+        return socket.emit('error', { message: 'El número ya fue cantado o no es válido' });
       }
 
       game.calledNumbers.push(number);
@@ -276,7 +327,7 @@ function handleCallNumber(io, socket) {
       });
     } catch (error) {
       logger.error('Error in call-number:', error);
-      socket.emit('error', { message: error.message });
+      socket.emit('error', { message: 'No se pudo llamar al número' });
     }
   };
 }
@@ -287,10 +338,20 @@ function handleCallNumber(io, socket) {
 function handleStartTiebreakPerformance(io, socket) {
   return async (data) => {
     try {
-      const { roomCode, performerId } = data;
+      const { roomCode, performerId } = data || {};
+      if (typeof roomCode !== 'string' || !/^[A-Z0-9]{6}$/.test(roomCode) ||
+          typeof performerId !== 'string' || performerId.length === 0) {
+        return socket.emit('error', { message: 'Datos de desempate inválidos' });
+      }
       const room = await Room.findOne({ code: roomCode });
-      if (!(await canControlRoom(socket, room, data))) {
+      if (!(await canControlTiebreak(socket, room, data))) {
         return emitPermissionError(socket);
+      }
+
+      const game = await Game.findById(room.currentGame);
+      if (!game?.tieBreakActive || !Array.isArray(game.tieCandidates) ||
+          !game.tieCandidates.some((candidateId) => candidateId.toString() === performerId)) {
+        return socket.emit('error', { message: 'El candidato de desempate no es válido' });
       }
 
       logger.info(`[${roomCode}] Organizador inició performance para ${performerId}`);
@@ -306,7 +367,7 @@ function handleStartTiebreakPerformance(io, socket) {
       });
     } catch (error) {
       logger.error('Error in start-tiebreak-performance:', error);
-      socket.emit('error', { message: error.message });
+      socket.emit('error', { message: 'No se pudo iniciar la actuación de desempate' });
     }
   };
 }
@@ -325,7 +386,7 @@ function handleStartTiebreakVoting(io, socket) {
       if (!room) {
         return socket.emit('error', { message: 'Sala no encontrada' });
       }
-      if (!(await canControlRoom(socket, room, data))) {
+      if (!(await canControlTiebreak(socket, room, data))) {
         return emitPermissionError(socket);
       }
 
@@ -371,7 +432,7 @@ function handleStartTiebreakVoting(io, socket) {
 
     } catch (error) {
       logger.error('Error in start-tiebreak-voting:', error);
-      socket.emit('error', { message: error.message });
+      socket.emit('error', { message: 'No se pudo iniciar la votación de desempate' });
     }
   };
 }
@@ -403,6 +464,15 @@ async function finalizeTiebreakVoting(io, room, game, candidatesInfo) {
 
     // Ordenar por promedio
     results.sort((a, b) => b.average - a.average);
+
+    if (results.length === 0) {
+      game.tieBreakActive = false;
+      game.tieCandidates = [];
+      game.tieWindowEnds = null;
+      game.tieBreakStatus = null;
+      await game.save();
+      return;
+    }
 
     const winnerInfo = results[0];
     const winner = await Player.findById(winnerInfo.performerId);
@@ -436,18 +506,39 @@ async function finalizeTiebreakVoting(io, room, game, candidatesInfo) {
 function handleCastTiebreakVote(io, socket) {
   return async (data) => {
     try {
-      const { roomCode, voterId, performerId, stars } = data;
+      const { voterId, performerId, stars } = data || {};
+      const roomCode = socket.roomCode;
+      const requestedRoom = typeof data?.roomCode === 'string' ? data.roomCode.toUpperCase() : '';
+      if (!roomCode || !socket.playerId || socket.playerId === 'tv-display' ||
+          requestedRoom !== roomCode.toUpperCase() ||
+          voterId?.toString() !== socket.playerId.toString() ||
+          !Number.isInteger(stars) || stars < 1 || stars > 5) {
+        return socket.emit('error', { message: 'No tienes permisos para emitir este voto' });
+      }
 
-      logger.info(`[${roomCode}] Voto tie-break: ${voterId} → ${performerId}: ${stars} estrellas`);
+      logger.info(`[${roomCode}] Tie-break vote submitted by current socket owner`);
 
       const room = await Room.findOne({ code: roomCode });
       if (!room) {
         return socket.emit('error', { message: 'Sala no encontrada' });
       }
+      const voter = await Player.findOne({
+        _id: socket.playerId,
+        room: room._id,
+        socketId: socket.id,
+        isConnected: true
+      });
+      if (!voter) return socket.emit('error', { message: 'No tienes permisos para emitir este voto' });
 
       const game = await Game.findById(room.currentGame);
       if (!game) {
         return socket.emit('error', { message: 'Juego no encontrado' });
+      }
+
+      if (!Array.isArray(game.tieCandidates) || !game.tieCandidates.some(
+        candidateId => candidateId.toString() === performerId?.toString()
+      )) {
+        return socket.emit('error', { message: 'Candidato de desempate inválido' });
       }
 
       // Guardar voto en el juego
@@ -457,11 +548,11 @@ function handleCastTiebreakVote(io, socket) {
 
       // Verificar si ya votó por este candidato
       const existingVoteIndex = game.tieBreakVotes.findIndex(
-        v => v.voterId.toString() === voterId && v.performerId.toString() === performerId
+        v => v.voterId.toString() === voter._id.toString() && v.performerId.toString() === performerId.toString()
       );
 
       const vote = {
-        voterId,
+        voterId: voter._id,
         performerId,
         stars,
         timestamp: new Date()
@@ -495,7 +586,7 @@ function handleCastTiebreakVote(io, socket) {
 
     } catch (error) {
       logger.error('Error in cast-tiebreak-vote:', error);
-      socket.emit('error', { message: error.message });
+      socket.emit('error', { message: 'No se pudo registrar el voto de desempate' });
     }
   };
 }
@@ -504,23 +595,48 @@ function handleCastTiebreakVote(io, socket) {
  * Handler para verificar BINGO de jugador manual (con cartón impreso)
  */
 function handleVerifyBingoManual(io, socket) {
-  return async (data) => {
+  return async (data, ack) => {
     try {
       const { roomCode, playerName, cardNumber, playerId } = data;
+      const requestedRoomCode = typeof roomCode === 'string' ? roomCode.toUpperCase() : '';
 
-      logger.info(`[${roomCode}] BINGO manual verificado: ${playerName} (Cartón #${cardNumber})`);
+      logger.info(`[${requestedRoomCode}] BINGO manual verification requested`);
 
-      const room = await Room.findOne({ code: roomCode }).populate('players');
+      const room = await Room.findOne({ code: requestedRoomCode }).populate('players');
       if (!room) {
-        return socket.emit('error', { message: 'Sala no encontrada' });
+        const error = { message: 'Sala no encontrada' };
+        ack?.({ success: false, error: error.message });
+        return socket.emit('error', error);
       }
       if (!(await canControlRoom(socket, room, data))) {
-        return emitPermissionError(socket);
+        return emitPermissionError(socket, ack);
+      }
+
+      const requestedPlayerId = typeof playerId === 'string' ? playerId.trim() : '';
+      const requestedPlayerName = typeof playerName === 'string' ? playerName.trim() : '';
+      if (!requestedPlayerId || !requestedPlayerName ||
+          !Number.isInteger(cardNumber) || cardNumber < 186 || cardNumber > 200) {
+        const error = 'Los datos del jugador manual no son válidos';
+        ack?.({ success: false, error });
+        return socket.emit('error', { message: error });
+      }
+
+      const manualPlayer = (room.manualPlayers || []).find((player) =>
+        player.playerId === requestedPlayerId &&
+        player.playerName === requestedPlayerName &&
+        player.cardNumber === cardNumber
+      );
+      if (!manualPlayer) {
+        const error = 'El jugador manual no pertenece a esta sala';
+        ack?.({ success: false, error });
+        return socket.emit('error', { message: error });
       }
 
       const game = await Game.findById(room.currentGame);
       if (!game) {
-        return socket.emit('error', { message: 'Juego no encontrado' });
+        const error = { message: 'Juego no encontrado' };
+        ack?.({ success: false, error: error.message });
+        return socket.emit('error', error);
       }
 
       // Finalizar juego con jugador manual como ganador
@@ -529,9 +645,9 @@ function handleVerifyBingoManual(io, socket) {
       game.duration = game.startTime ? (game.endTime - game.startTime) : undefined;
       game.winners = Array.isArray(game.winners) ? game.winners : [];
       game.winners.push({
-        playerName: playerName,
-        cardNumber: cardNumber,
-        playerId: playerId,
+        playerName: manualPlayer.playerName,
+        cardNumber: manualPlayer.cardNumber,
+        playerId: manualPlayer.playerId,
         isManualPlayer: true,
         achievement: 'full',
         timestamp: new Date()
@@ -545,30 +661,39 @@ function handleVerifyBingoManual(io, socket) {
 
       // Emitir eventos de BINGO verificado
       io.to(room.code).emit('bingo-verified-manual', {
-        playerName,
-        cardNumber,
-        playerId,
+        playerName: manualPlayer.playerName,
+        cardNumber: manualPlayer.cardNumber,
+        playerId: manualPlayer.playerId,
         bingoType: 'full'
       });
 
       io.to(room.code).emit('game-state-changed', { state: 'finished' });
 
       io.to(room.code).emit('game-finished', {
-        winnerName: playerName,
-        cardNumber: cardNumber,
+        winnerName: manualPlayer.playerName,
+        cardNumber: manualPlayer.cardNumber,
         isManualPlayer: true,
         achievement: 'full'
       });
 
       logger.logGameEvent(room.code, 'BINGO manual verificado', {
-        playerName,
-        cardNumber,
-        playerId
+        playerName: manualPlayer.playerName,
+        cardNumber: manualPlayer.cardNumber,
+        playerId: manualPlayer.playerId
+      });
+
+      ack?.({
+        success: true,
+        playerName: manualPlayer.playerName,
+        cardNumber: manualPlayer.cardNumber,
+        playerId: manualPlayer.playerId
       });
 
     } catch (error) {
       logger.error('Error in verify-bingo-manual:', error);
-      socket.emit('error', { message: error.message });
+      const message = 'No se pudo verificar el bingo manual';
+      ack?.({ success: false, error: message });
+      socket.emit('error', { message });
     }
   };
 }
