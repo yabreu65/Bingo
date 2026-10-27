@@ -217,18 +217,29 @@ async function assertForbiddenFromPlayer(page, roomCode, playerCapability) {
     });
     const manualBody = await manualResponse.json();
 
+    const adminResponse = await fetch(url + '/api/admin/rooms/' + code + '/contents', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-player-capability': capability },
+      body: JSON.stringify({ kind: 'dance', statement: 'Unauthorized admin content' })
+    });
+    const adminBody = await adminResponse.json();
+
     return {
       config: { status: configResponse.status, body: configBody },
-      manual: { status: manualResponse.status, body: manualBody }
+      manual: { status: manualResponse.status, body: manualBody },
+      admin: { status: adminResponse.status, body: adminBody }
     };
   }, { url: backendURL, code: roomCode, capability: playerCapability });
 
   assert.equal(result.config.status, 403, 'Player modified config: ' + JSON.stringify(result.config));
   assert.equal(result.manual.status, 403, 'Player assigned manual card: ' + JSON.stringify(result.manual));
+  assert.equal(result.admin.status, 403, 'Player modified admin catalog: ' + JSON.stringify(result.admin));
   const configError = result.config.body.error?.message || result.config.body.error || result.config.body.message;
   const manualError = result.manual.body.error?.message || result.manual.body.error || result.manual.body.message;
+  const adminError = result.admin.body.error?.message || result.admin.body.error || result.admin.body.message;
   assert.match(String(configError), /permiso/i);
   assert.match(String(manualError), /permiso/i);
+  assert.match(String(adminError), /permiso/i);
 }
 
 async function openAuthorizedSocket(payload) {
@@ -318,6 +329,27 @@ async function main() {
     const roomCode = hostSession.roomCode;
     await configureRoom(hostPage, roomCode, hostSession.hostCapability, { challengeFrequency: 10 });
     console.log('  room ' + roomCode + ' created with isolated config');
+
+    console.log('E2E 1b/10: organizer creates managed content through the browser');
+    await hostPage.getByRole('button', { name: /Centro de Administración/ }).click();
+    await waitForBody(hostPage, /Centro de Administración/);
+    await hostPage.getByLabel('Tipo').selectOption('trivia');
+    await hostPage.getByLabel('Título').fill('Trivia administrada E2E');
+    await hostPage.getByLabel('Consigna').fill('¿Qué número representa la letra O?');
+    const adminForm = hostPage.locator('.admin-card').first();
+    await adminForm.locator('input').nth(1).fill('61-75');
+    await adminForm.locator('input').nth(2).fill('16-30');
+    await adminForm.getByLabel('Índice correcto').fill('0');
+    await adminForm.getByRole('button', { name: /Guardar/ }).click();
+    await waitForBody(hostPage, /Contenido guardado/);
+    const managedContent = await hostPage.evaluate(async ({ url, code, capability }) => {
+      const response = await fetch(url + '/api/admin/rooms/' + code + '/contents?kind=trivia', { headers: { 'x-room-host-capability': capability } });
+      return { status: response.status, body: await response.json() };
+    }, { url: backendURL, code: roomCode, capability: hostSession.hostCapability });
+    assert.equal(managedContent.status, 200);
+    assert.equal(managedContent.body.items[0].statement, '¿Qué número representa la letra O?');
+    await hostPage.getByRole('button', { name: /Cerrar/ }).click();
+    console.log('  managed trivia was persisted and returned by the authorized catalog API');
 
     console.log('E2E 2/10: independent players join and select cards');
     const joinPlayer = async (page, name, cardNumber) => {

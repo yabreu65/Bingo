@@ -7,10 +7,11 @@ import { API_URL } from '../../config/api';
 import { QRCodeSVG } from 'qrcode.react';
 // eslint-disable-next-line no-unused-vars
 import { motion, AnimatePresence } from 'framer-motion';
-import { Play, Pause, RefreshCw, Users, Link as LinkIcon, Tv, X, Search, Crown, Mic, Music, Gift, Target, Clock, Video, Eye, CheckCircle, XCircle } from 'lucide-react';
+import { Play, Pause, RefreshCw, Users, Link as LinkIcon, Tv, X, Search, Crown, Mic, Music, Gift, Target, Clock, Video, Eye, CheckCircle, XCircle, Settings } from 'lucide-react';
 import RecordingChallenge from '../Recording/RecordingChallenge';
 import { getShareableUrl } from '../../utils/networkUtils';
 import { createTVDisplayURL, openTVDisplay } from '../../utils/tvAuthorization';
+import AdminCenter from './AdminCenter';
 import {
   CARD_MATRIX_VERSION,
   checkBingoWithCalledNumbers,
@@ -428,6 +429,7 @@ export default function OrganizerDashboard({ roomData }) {
   // Estados para validador de BINGO manual
   const [showBingoValidator, setShowBingoValidator] = useState(false);
   const [validatingPlayer, setValidatingPlayer] = useState(null);
+  const [showAdminCenter, setShowAdminCenter] = useState(false);
 
   // Conectar al socket room cuando el componente se monta
   useEffect(() => {
@@ -856,6 +858,13 @@ export default function OrganizerDashboard({ roomData }) {
               Sala: <span className="font-mono text-indigo-400 font-bold text-xl">{roomState.code}</span>
             </p>
           </div>
+          <ActionButton
+            icon={<Settings size={18} />}
+            label={showAdminCenter ? 'Cerrar administración' : 'Centro de Administración'}
+            onClick={() => setShowAdminCenter(current => !current)}
+            variant="secondary"
+            className="!w-auto"
+          />
           <motion.div
             className={`flex items-center gap-3 px-6 py-3 rounded-full text-white font-bold text-lg ${currentStatus.color} shadow-xl`}
             animate={{ scale: [1, 1.05, 1] }}
@@ -865,6 +874,15 @@ export default function OrganizerDashboard({ roomData }) {
             {currentStatus.text}
           </motion.div>
         </motion.header>
+
+        {showAdminCenter && (
+          <AdminCenter
+            roomData={roomData}
+            room={roomState}
+            onClose={() => setShowAdminCenter(false)}
+            onRoomUpdated={(updatedRoom) => setRoomState(previous => normalizeRoomState(updatedRoom, previous.code))}
+          />
+        )}
 
         {/* STATS CARDS - FILA COMPLETA */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
