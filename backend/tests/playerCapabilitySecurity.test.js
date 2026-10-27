@@ -186,7 +186,14 @@ describe('guest player capability HTTP boundary', () => {
 
   test('never serializes a guest capability hash from public room populations', async () => {
     const room = makeRoom({
-      players: [{ _id: 'aaaaaaaaaaaaaaaaaaaaaaaa', name: 'Guest A', guestCapabilityHash: 'private-hash-value' }]
+      players: [{
+        _id: 'aaaaaaaaaaaaaaaaaaaaaaaa',
+        name: 'Guest A',
+        guestCapabilityHash: 'private-hash-value',
+        bingoCard: { matrix: [[99]], markedCells: [[0, 0]] },
+        socketId: 'private-socket',
+        isConnected: true
+      }]
     });
     jest.spyOn(Room, 'findOne').mockReturnValue(asQuery(room));
 
@@ -195,6 +202,8 @@ describe('guest player capability HTTP boundary', () => {
     expect(response.status).toBe(200);
     expect(JSON.stringify(response.body)).not.toContain('private-hash-value');
     expect(JSON.stringify(response.body)).not.toContain('guestCapabilityHash');
+    expect(JSON.stringify(response.body)).not.toContain('bingoCard');
+    expect(JSON.stringify(response.body)).not.toContain('private-socket');
   });
 });
 

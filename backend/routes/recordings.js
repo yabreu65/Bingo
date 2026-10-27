@@ -12,6 +12,7 @@ const logger = require('../config/logger');
 const { optionalAuth } = require('../middleware/authMiddleware');
 const { isRoomHost } = require('../middleware/socketAuthMiddleware');
 const { matchesPlayerCapability } = require('../utils/playerCapability');
+const { matchesTvCapability } = require('../utils/tvCapability');
 
 const OBJECT_ID_PATTERN = /^[a-f\d]{24}$/i;
 const ROOM_CODE_PATTERN = /^[A-Z0-9]{6}$/;
@@ -109,6 +110,35 @@ async function findRecordingActor(req, room, playerId) {
   )) return null;
 
   return { room, player, role: 'player' };
+}
+
+async function findRecordingRoom(roomCode) {
+  return Room.findOne({ code: roomCode.toUpperCase() })
+    .select('+hostCapabilityHash +tvCapabilityHash');
+}
+
+async function authorizeRecordingRead(req, room, playerId = null) {
+  if (!room) return false;
+  if (req.user?.role === 'admin') return true;
+  if (await isRoomHost(req, room, req.get('x-room-host-capability'))) return true;
+  if (matchesTvCapability(
+    req.get('x-tv-capability'), room.tvCapabilityHash, room._id
+  )) return true;
+
+  const actorId = req.get('x-player-id');
+  if (!isObjectId(actorId) || (playerId && !sameId(playerId, actorId))) return false;
+  const player = await Player.findById(actorId).select('+guestCapabilityHash');
+  return !!player && sameId(player.room, room._id) &&
+    room.players?.some((roomPlayer) => sameId(roomPlayer, player._id)) &&
+    matchesPlayerCapability(
+      req.get('x-player-capability'), player.guestCapabilityHash, room._id, player._id
+    );
+}
+
+async function requireRecordingRead(req, res, room, playerId = null) {
+  if (await authorizeRecordingRead(req, room, playerId)) return true;
+  res.status(403).json({ success: false, message: 'No tienes permisos para acceder a esta grabación' });
+  return false;
 }
 
 async function authorizeRecordingUpload(req, res, next) {
@@ -215,13 +245,15 @@ router.post('/upload', optionalAuth, authorizeRecordingUpload, upload.single('re
 
 // GET /api/recordings/game/:roomCode
 // Obtiene todas las grabaciones de un juego
-router.get('/game/:roomCode', async (req, res) => {
+router.get('/game/:roomCode', optionalAuth, async (req, res) => {
   try {
     const { roomCode } = req.params;
     if (!ROOM_CODE_PATTERN.test(roomCode.toUpperCase())) {
       return res.status(400).json({ success: false, message: 'La sala no es válida' });
     }
-    const recordings = await Recording.getGameRecordings(roomCode);
+    const room = await findRecordingRoom(roomCode);
+    if (!await requireRecordingRead(req, res, room)) return;
+    const recordings = await Recording.getGameRecordings(roomCode.toUpperCase());
 
     res.json({
       success: true,
@@ -241,10 +273,13 @@ router.get('/game/:roomCode', async (req, res) => {
 
 // GET /api/recordings/player/:playerId
 // Obtiene todas las grabaciones de un jugador
-router.get('/player/:playerId', async (req, res) => {
+router.get('/player/:playerId', optionalAuth, async (req, res) => {
   try {
     const { playerId } = req.params;
     if (!isObjectId(playerId)) return sendInvalidRecordingId(res);
+    const room = await Room.findOne({ players: playerId })
+      .select('+hostCapabilityHash +tvCapabilityHash');
+    if (!await requireRecordingRead(req, res, room, playerId)) return;
     const recordings = await Recording.getPlayerRecordings(playerId);
 
     res.json({
@@ -265,7 +300,7 @@ router.get('/player/:playerId', async (req, res) => {
 
 // GET /api/recordings/:id/stream
 // Stream de video para reproducción
-router.get('/:id/stream', async (req, res) => {
+router.get('/:id/stream', optionalAuth, async (req, res) => {
   try {
     if (!isObjectId(req.params.id)) return sendInvalidRecordingId(res);
     const recording = await Recording.findById(req.params.id);
@@ -276,6 +311,9 @@ router.get('/:id/stream', async (req, res) => {
         message: 'Grabación no encontrada'
       });
     }
+
+    const room = await findRecordingRoom(recording.roomCode);
+    if (!await requireRecordingRead(req, res, room, recording.playerId)) return;
 
     const filepath = path.join(uploadsDir, recording.filename);
 
@@ -341,7 +379,7 @@ router.get('/:id/stream', async (req, res) => {
 
 // GET /api/recordings/:id
 // Obtiene información de una grabación
-router.get('/:id', async (req, res) => {
+router.get('/:id', optionalAuth, async (req, res) => {
   try {
     if (!isObjectId(req.params.id)) return sendInvalidRecordingId(res);
     const recording = await Recording.findById(req.params.id);
@@ -352,6 +390,9 @@ router.get('/:id', async (req, res) => {
         message: 'Grabación no encontrada'
       });
     }
+
+    const room = await findRecordingRoom(recording.roomCode);
+    if (!await requireRecordingRead(req, res, room, recording.playerId)) return;
 
     res.json({
       success: true,
@@ -370,7 +411,7 @@ router.get('/:id', async (req, res) => {
 
 // POST /api/recordings/:id/like
 // Da like a una grabación
-router.post('/:id/like', async (req, res) => {
+router.post('/:id/like', optionalAuth, async (req, res) => {
   try {
     if (!isObjectId(req.params.id)) return sendInvalidRecordingId(res);
     const recording = await Recording.findById(req.params.id);
@@ -381,6 +422,9 @@ router.post('/:id/like', async (req, res) => {
         message: 'Grabación no encontrada'
       });
     }
+
+    const room = await findRecordingRoom(recording.roomCode);
+    if (!await requireRecordingRead(req, res, room)) return;
 
     await recording.incrementLikes();
 
@@ -401,7 +445,7 @@ router.post('/:id/like', async (req, res) => {
 
 // DELETE /api/recordings/:id/like
 // Quita like de una grabación
-router.delete('/:id/like', async (req, res) => {
+router.delete('/:id/like', optionalAuth, async (req, res) => {
   try {
     if (!isObjectId(req.params.id)) return sendInvalidRecordingId(res);
     const recording = await Recording.findById(req.params.id);
@@ -412,6 +456,9 @@ router.delete('/:id/like', async (req, res) => {
         message: 'Grabación no encontrada'
       });
     }
+
+    const room = await findRecordingRoom(recording.roomCode);
+    if (!await requireRecordingRead(req, res, room)) return;
 
     await recording.decrementLikes();
 
@@ -482,14 +529,16 @@ router.delete('/:id', optionalAuth, async (req, res) => {
 
 // GET /api/recordings/game/:roomCode/stats
 // Estadísticas de grabaciones de un juego
-router.get('/game/:roomCode/stats', async (req, res) => {
+router.get('/game/:roomCode/stats', optionalAuth, async (req, res) => {
   try {
     const { roomCode } = req.params;
     if (!ROOM_CODE_PATTERN.test(roomCode.toUpperCase())) {
       return res.status(400).json({ success: false, message: 'La sala no es válida' });
     }
 
-    const recordings = await Recording.find({ roomCode });
+    const room = await findRecordingRoom(roomCode);
+    if (!await requireRecordingRead(req, res, room)) return;
+    const recordings = await Recording.find({ roomCode: roomCode.toUpperCase() });
 
     const stats = {
       total: recordings.length,

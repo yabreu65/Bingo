@@ -14,7 +14,7 @@ const {
   createPlayerCapabilityHash,
   isPlayerCapability
 } = require('../utils/playerCapability');
-const { stripGuestCapabilityHashes, stripTriviaAnswers } = require('../utils/publicData');
+const { stripGuestCapabilityHashes, stripTriviaAnswers, stripPrivatePlayerData } = require('../utils/publicData');
 const { createTvCapability, createTvCapabilityHash } = require('../utils/tvCapability');
 const { matchesPlayerCapability } = require('../utils/playerCapability');
 const {
@@ -64,7 +64,7 @@ router.post('/create', createRoomLimiter, speedLimiter, validateRequest(createRo
 
     res.json({
       success: true,
-      room: stripGuestCapabilityHashes(await room.populate('players')),
+      room: stripPrivatePlayerData(stripGuestCapabilityHashes(await room.populate('players'))),
       player: stripGuestCapabilityHashes(hostPlayer),
       hostCapability,
       tvCapability
@@ -124,7 +124,7 @@ router.post('/join', joinRoomLimiter, speedLimiter, validateRequest(joinRoomSche
 
     res.json({
       success: true,
-      room: stripGuestCapabilityHashes(await room.populate('players')),
+      room: stripPrivatePlayerData(stripGuestCapabilityHashes(await room.populate('players'))),
       player: stripGuestCapabilityHashes(player),
       playerCapability
     });
@@ -147,7 +147,7 @@ router.get('/:code', generalApiLimiter, validateRequest(getRoomSchema), async (r
     if (room.config?.activePlaylist && typeof room.populate === 'function') {
       await room.populate({ path: 'config.activePlaylist', populate: { path: 'tracks' } });
     }
-    res.json({ room: stripTriviaAnswers(stripGuestCapabilityHashes(room)) });
+    res.json({ room: stripTriviaAnswers(stripPrivatePlayerData(stripGuestCapabilityHashes(room))) });
   } catch (error) {
     logger.error('Error getting room:', error);
     res.status(500).json({ error: 'Error interno del servidor' });
@@ -362,10 +362,10 @@ router.post('/:code/reconnect', generalApiLimiter, validateRequest(reconnectSche
     // Si es host y no tiene cartón, generar un cartón opcional para el organizador
     res.json({
       success: true,
-      room: stripTriviaAnswers(stripGuestCapabilityHashes({
+      room: stripTriviaAnswers(stripPrivatePlayerData(stripGuestCapabilityHashes({
         ...room.toObject(),
         players: room.players
-      })),
+      }))),
       player: stripGuestCapabilityHashes(connectedPlayer),
       calledNumbers,
       currentNumber,

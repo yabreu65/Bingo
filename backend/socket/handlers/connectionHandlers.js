@@ -3,7 +3,7 @@ const Game = require('../../models/Game');
 const Player = require('../../models/Player');
 const logger = require('../../config/logger');
 const { isRoomHost } = require('../../middleware/socketAuthMiddleware');
-const { stripGuestCapabilityHashes, stripTriviaAnswers } = require('../../utils/publicData');
+const { stripGuestCapabilityHashes, stripTriviaAnswers, stripPrivatePlayerData } = require('../../utils/publicData');
 
 const socketMatchesIdentity = (socket, data) => {
   const requestedRoom = typeof data?.roomCode === 'string' ? data.roomCode.toUpperCase() : '';
@@ -173,7 +173,7 @@ function handleSyncDashboard(io, socket) {
 
       // Preparar datos de sincronización del dashboard
       const syncData = {
-        room: stripGuestCapabilityHashes(room),
+        room: stripPrivatePlayerData(stripGuestCapabilityHashes(room)),
         gameState: room.gameState,
         currentNumber: game?.currentNumber || null,
         calledNumbers: game?.calledNumbers || [],

@@ -119,7 +119,11 @@ describe('recording authorization boundary', () => {
     });
 
   test('returns 416 for malformed ranges without incrementing views', async () => {
+    mockRoom();
+    mockPlayer();
     const recording = {
+      playerId,
+      roomCode: 'ROOMA1',
       filename: 'existing.webm',
       mimeType: 'video/webm',
       incrementViews: jest.fn().mockResolvedValue(undefined)
@@ -130,11 +134,27 @@ describe('recording authorization boundary', () => {
 
     const response = await request(app)
       .get(`/api/recordings/${recordingId}/stream`)
+      .set('x-player-id', playerId)
+      .set('x-player-capability', 'p'.repeat(43))
       .set('Range', 'bytes=1000-');
 
     expect(response.status).toBe(416);
     expect(response.headers['content-range']).toBe('bytes */100');
     expect(recording.incrementViews).not.toHaveBeenCalled();
+  });
+
+  test('rejects unauthenticated recording access before touching storage', async () => {
+    mockRoom();
+    Recording.findById.mockResolvedValue({
+      playerId,
+      roomCode: 'ROOMA1',
+      filename: 'private.webm'
+    });
+
+    const response = await request(app).get(`/api/recordings/${recordingId}/stream`);
+
+    expect(response.status).toBe(403);
+    expect(Room.findOne).toHaveBeenCalled();
   });
 
   test.each([

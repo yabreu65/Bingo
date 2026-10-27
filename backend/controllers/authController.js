@@ -1,12 +1,13 @@
 const jwt = require('jsonwebtoken');
+const crypto = require('crypto');
 const User = require('../models/User');
 
 /**
  * Generar JWT token
  */
-const generateToken = (userId, expiresIn = '7d') => {
+const generateToken = (userId, authVersion = 0, expiresIn = '7d') => {
   return jwt.sign(
-    { userId },
+    { userId, authVersion },
     process.env.JWT_SECRET,
     { expiresIn }
   );
@@ -15,12 +16,23 @@ const generateToken = (userId, expiresIn = '7d') => {
 /**
  * Generar refresh token
  */
-const generateRefreshToken = (userId) => {
+const generateRefreshToken = (userId, authVersion = 0) => {
   return jwt.sign(
-    { userId, type: 'refresh' },
+    { userId, authVersion, type: 'refresh' },
     process.env.JWT_SECRET,
     { expiresIn: '30d' }
   );
+};
+
+const hashRefreshToken = (token) => crypto.createHash('sha256').update(token).digest('hex');
+
+const issueTokens = async (user) => {
+  const authVersion = user.authVersion || 0;
+  const token = generateToken(user._id, authVersion);
+  const refreshToken = generateRefreshToken(user._id, authVersion);
+  user.refreshTokenHash = hashRefreshToken(refreshToken);
+  await user.save();
+  return { token, refreshToken };
 };
 
 /**
@@ -54,12 +66,9 @@ exports.register = async (req, res) => {
     await user.save();
 
     // Generar tokens
-    const token = generateToken(user._id);
-    const refreshToken = generateRefreshToken(user._id);
-
     // Actualizar último login
     user.lastLogin = new Date();
-    await user.save();
+    const { token, refreshToken } = await issueTokens(user);
 
     res.status(201).json({
       success: true,
@@ -133,12 +142,9 @@ exports.login = async (req, res) => {
     }
 
     // Generar tokens
-    const token = generateToken(user._id);
-    const refreshToken = generateRefreshToken(user._id);
-
     // Actualizar último login
     user.lastLogin = new Date();
-    await user.save();
+    const { token, refreshToken } = await issueTokens(user);
 
     res.json({
       success: true,
@@ -235,9 +241,10 @@ exports.refreshToken = async (req, res) => {
     }
 
     // Verificar que el usuario existe
-    const user = await User.findById(decoded.userId);
+    const user = await User.findById(decoded.userId).select('+refreshTokenHash');
 
-    if (!user || !user.isActive) {
+    if (!user || !user.isActive || decoded.authVersion !== (user.authVersion || 0) ||
+        !user.refreshTokenHash || user.refreshTokenHash !== hashRefreshToken(refreshToken)) {
       return res.status(401).json({
         success: false,
         error: {
@@ -248,8 +255,7 @@ exports.refreshToken = async (req, res) => {
     }
 
     // Generar nuevos tokens
-    const newToken = generateToken(user._id);
-    const newRefreshToken = generateRefreshToken(user._id);
+    const { token: newToken, refreshToken: newRefreshToken } = await issueTokens(user);
 
     res.json({
       success: true,
@@ -276,8 +282,11 @@ exports.refreshToken = async (req, res) => {
  */
 exports.logout = async (req, res) => {
   try {
-    // En una implementación más robusta, aquí se invalidaría el token
-    // agregándolo a una lista negra en Redis o similar
+    const user = await User.findById(req.user.userId).select('+refreshTokenHash');
+    if (!user) return res.status(401).json({ success: false, message: 'Usuario no encontrado' });
+    user.authVersion = (user.authVersion || 0) + 1;
+    user.refreshTokenHash = null;
+    await user.save();
 
     res.json({
       success: true,
@@ -387,6 +396,8 @@ exports.changePassword = async (req, res) => {
 
     // Actualizar contraseña
     user.password = newPassword;
+    user.authVersion = (user.authVersion || 0) + 1;
+    user.refreshTokenHash = null;
     await user.save();
 
     res.json({

@@ -4,7 +4,7 @@ const Game = require('../../models/Game');
 const logger = require('../../config/logger');
 const { isRoomHost, emitPermissionError } = require('../../middleware/socketAuthMiddleware');
 const { createPlayerCapabilityHash, isPlayerCapability } = require('../../utils/playerCapability');
-const { stripGuestCapabilityHashes } = require('../../utils/publicData');
+const { stripGuestCapabilityHashes, stripPrivatePlayerData } = require('../../utils/publicData');
 const { matchesTvCapability } = require('../../utils/tvCapability');
 const { clearAllRoomTimers } = require('../utils/roomTimer');
 
@@ -144,7 +144,7 @@ function handleJoinRoom(io, socket) {
 
       io.to(room.code).emit('player-joined', {
         playerId,
-        players: stripGuestCapabilityHashes(room.players)
+        players: stripPrivatePlayerData(stripGuestCapabilityHashes(room.players))
       });
 
       await broadcastRoomInfo(io, room.code);
@@ -207,7 +207,7 @@ function handleLeaveRoom(io, socket) {
       const updatedRoom = await Room.findOne({ code: roomCode }).populate('players');
       io.to(roomCode).emit('player-left', {
         playerId,
-        players: stripGuestCapabilityHashes(updatedRoom ? updatedRoom.players : [])
+        players: stripPrivatePlayerData(stripGuestCapabilityHashes(updatedRoom ? updatedRoom.players : []))
       });
 
       await broadcastRoomInfo(io, roomCode);

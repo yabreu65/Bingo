@@ -109,9 +109,18 @@ describe('HTTP error disclosure boundaries', () => {
 
   test('does not include internal details in recording errors', async () => {
     const internalError = new Error('database secret: player recording query');
+    Room.findOne.mockReturnValue({
+      select: jest.fn().mockResolvedValue({
+        _id: 'room-a',
+        hostCapabilityHash: require('../middleware/socketAuthMiddleware')
+          .createHostCapabilityHash('host-secret', 'room-a')
+      })
+    });
     Recording.getPlayerRecordings.mockRejectedValue(internalError);
 
-    const response = await request(app).get('/api/recordings/player/2123456789abcdef01234567');
+    const response = await request(app)
+      .get('/api/recordings/player/2123456789abcdef01234567')
+      .set('x-room-host-capability', 'host-secret');
 
     expect(response.status).toBe(500);
     expect(response.body.error).toBe('Error interno del servidor');

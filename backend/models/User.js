@@ -103,6 +103,19 @@ const userSchema = new mongoose.Schema({
     default: true
   },
 
+  // Incremented to revoke all JWTs issued before a logout or password change.
+  authVersion: {
+    type: Number,
+    default: 0
+  },
+
+  // Only a hash is persisted; the raw refresh token is returned once to the client.
+  refreshTokenHash: {
+    type: String,
+    select: false,
+    default: null
+  },
+
   lastLogin: {
     type: Date,
     default: null

@@ -40,7 +40,8 @@ const requireAuth = async (req, res, next) => {
       // Verificar que el usuario existe y está activo
       const user = await User.findById(decoded.userId);
 
-      if (!user || !user.isActive) {
+      if (!user || !user.isActive ||
+          (decoded.authVersion !== undefined && decoded.authVersion !== (user.authVersion || 0))) {
         return res.status(401).json({
           success: false,
           error: {
@@ -191,7 +192,8 @@ const optionalAuth = async (req, res, next) => {
       if (decoded.type !== 'refresh') {
         const user = await User.findById(decoded.userId);
 
-        if (user && user.isActive) {
+        if (user && user.isActive &&
+            (decoded.authVersion === undefined || decoded.authVersion === (user.authVersion || 0))) {
           req.user = {
             userId: user._id,
             email: user.email,

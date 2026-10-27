@@ -92,3 +92,32 @@ jobs:
           name: e2e-diagnostics
           path: e2e/artifacts/
           if-no-files-found: warn
+
+  phase4-smoke:
+    name: Phase 4 load smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - name: Install backend dependencies
+        working-directory: backend
+        run: npm ci
+      - name: Run isolated protocol smoke
+        working-directory: e2e
+        env:
+          PHASE4_PLAYERS: 10
+        run: npm run test:phase4
+      - name: Upload Phase 4 report
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase4-load-report
+          path: e2e/artifacts/phase4/
+          if-no-files-found: warn

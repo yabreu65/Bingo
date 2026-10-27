@@ -38,4 +38,23 @@ const stripGuestCapabilityHashes = (value) => {
   return safeValue;
 };
 
-module.exports = { stripGuestCapabilityHashes, stripTriviaAnswers };
+// Room-level responses are public to every participant. A player's card and
+// marks are private state and are returned only through the player's own
+// authenticated/capability-bound response.
+const stripPrivatePlayerData = (value) => {
+  if (Array.isArray(value)) return value.map(stripPrivatePlayerData);
+  if (!value || typeof value !== 'object') return value;
+
+  if (typeof value.toJSON === 'function') {
+    return stripPrivatePlayerData(value.toJSON());
+  }
+
+  const safeValue = {};
+  for (const [key, nestedValue] of Object.entries(value)) {
+    if (key === 'bingoCard' || key === 'socketId') continue;
+    safeValue[key] = stripPrivatePlayerData(nestedValue);
+  }
+  return safeValue;
+};
+
+module.exports = { stripGuestCapabilityHashes, stripTriviaAnswers, stripPrivatePlayerData };
