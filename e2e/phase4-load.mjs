@@ -20,12 +20,15 @@ const execFileAsync = promisify(execFile);
 const BASE_URL = process.env.PHASE4_BASE_URL || 'http://127.0.0.1:5102';
 const PLAYER_COUNT = Number.parseInt(process.env.PHASE4_PLAYERS || '50', 10);
 const SEED = Number.parseInt(process.env.PHASE4_SEED || '20261027', 10);
+const RUN_MINIGAMES = process.env.PHASE4_MINIGAMES === '1';
+const RUN_RESTART = process.env.PHASE4_RESTART === '1';
 const OUTPUT_DIR = process.env.PHASE4_OUTPUT_DIR || join(root, 'e2e/artifacts/phase4');
 const REQUEST_TIMEOUT_MS = 15000;
 const TEST_JWT_SECRET = 'phase4-local-only-secret-please-do-not-reuse';
 
 assert.equal(Number.isInteger(PLAYER_COUNT) && PLAYER_COUNT >= 2 && PLAYER_COUNT <= 50, true, 'PHASE4_PLAYERS must be between 2 and 50');
 assert.match(BASE_URL, /^http:\/\/127\.0\.0\.1:\d+$/, 'Phase 4 must use a loopback HTTP endpoint');
+assert.equal(!RUN_RESTART || RUN_MINIGAMES, true, 'PHASE4_RESTART requires PHASE4_MINIGAMES=1');
 
 const monotonic = () => Number(process.hrtime.bigint()) / 1e6;
 const percentile = (values, p) => {
@@ -46,7 +49,7 @@ async function waitForCondition(load, predicate, label, timeout = 15000) {
 }
 
 const metrics = {
-  config: { players: PLAYER_COUNT, seed: SEED, baseUrl: BASE_URL, mode: 'local-protocol' },
+  config: { players: PLAYER_COUNT, seed: SEED, baseUrl: BASE_URL, mode: 'local-protocol', minigames: RUN_MINIGAMES, restart: RUN_RESTART },
   startedAt: new Date().toISOString(),
   operations: { joins: 0, cardSelections: 0, socketJoins: 0, numbersCalled: 0, marksSent: 0, reconnects: 0 },
   errors: [],
@@ -55,7 +58,8 @@ const metrics = {
   resources: {
     backend: { samples: 0, peakRssMb: null, peakCpuPercent: null, finalRssMb: null },
     simulator: { finalRssMb: null }
-  }
+  },
+  minigames: { attempted: [], completed: [], errors: [] }
 };
 
 async function request(path, options = {}) {
@@ -152,6 +156,10 @@ async function main() {
     clients.push(host.socket);
     await emitWithAck(host.socket, 'join-room', { roomCode, playerId: host.id, hostCapability: host.capability });
     metrics.operations.socketJoins += 1;
+    let tvSocket = connectClient();
+    clients.push(tvSocket);
+    await emitWithAck(tvSocket, 'join-room', { roomCode, playerId: 'tv-display', tvCapability: created.tvCapability });
+    metrics.operations.socketJoins += 1;
 
     const players = [];
     for (let index = 0; index < PLAYER_COUNT; index += 1) {
@@ -198,6 +206,99 @@ async function main() {
     const game = await Game.findOne({ room: persistedRoom._id });
     assert.ok(game, 'game was not persisted');
 
+    let restarted = false;
+    const restartBackend = async () => {
+      if (restarted) return;
+      restarted = true;
+      for (const client of players) client.socket.disconnect();
+      host.socket.disconnect();
+      tvSocket.disconnect();
+      await sleep(250);
+      await stopBackend(backend.child);
+      backend = await startBackend(mongo.getUri());
+
+      host.socket = connectClient();
+      clients.push(host.socket);
+      await emitWithAck(host.socket, 'join-room', { roomCode, playerId: host.id, hostCapability: host.capability });
+      metrics.operations.socketJoins += 1;
+      tvSocket = connectClient();
+      clients.push(tvSocket);
+      await emitWithAck(tvSocket, 'join-room', { roomCode, playerId: 'tv-display', tvCapability: created.tvCapability });
+      metrics.operations.socketJoins += 1;
+      for (const client of players) {
+        client.socket = connectClient();
+        clients.push(client.socket);
+        client.receivedNumbers = new Set();
+        client.socket.on('number-called', data => {
+          if (!data?.number || client.receivedNumbers.has(data.number)) {
+            if (client.receivedNumbers.has(data?.number)) metrics.events.duplicates += 1;
+            return;
+          }
+          client.receivedNumbers.add(data.number);
+          metrics.events.numbersReceived += 1;
+          const receivedAt = monotonic();
+          metrics.latenciesMs.numberPropagation.push(receivedAt - (client.lastNumberSentAt || receivedAt));
+          if (!client.matrix) return;
+          for (let row = 0; row < 5; row += 1) for (let col = 0; col < 5; col += 1) {
+            if (client.matrix[col]?.[row] === data.number) {
+              client.socket.emit('mark-cell', { roomCode, playerId: client.id, row, col });
+              metrics.operations.marksSent += 1;
+            }
+          }
+        });
+        await emitWithAck(client.socket, 'join-room', { roomCode, playerId: client.id, playerCapability: client.capability });
+        metrics.operations.socketJoins += 1;
+        await emitWithAck(client.socket, 'sync-game-state', { roomCode, playerId: client.id });
+      }
+
+      const recoveredRoom = await Room.findOne({ code: roomCode });
+      const recoveredPlayers = await Player.find({ room: recoveredRoom._id }).lean();
+      assert.equal(recoveredPlayers.length, PLAYER_COUNT + 1, 'player count changed after backend restart');
+      assert.ok(recoveredPlayers.every(player => player.cardNumber == null || player.bingoCard?.markedCells), 'card or marks missing after restart');
+      metrics.restart = { status: 'PASS', recoveredPlayers: recoveredPlayers.length, recoveredGameState: recoveredRoom.gameState };
+    };
+
+    if (RUN_MINIGAMES) {
+      const challengeTypes = ['trivia', 'riddle', 'dance', 'sing', 'group', 'karaoke'];
+      for (const type of challengeTypes) {
+        metrics.minigames.attempted.push(type);
+        host.socket.emit('launch-event', { roomCode, type, hostCapability: host.capability });
+        try {
+          const active = await waitForCondition(
+            () => Game.findOne({ room: persistedRoom._id }).lean(),
+            current => current?.activeChallenge?.type === type,
+            `${type} challenge`
+          );
+          const challenge = active.activeChallenge;
+          const participants = type === 'group'
+            ? players
+            : players.filter(client => client.id.toString() === challenge.player.toString());
+          assert.ok(participants.length > 0, `${type} challenge selected no connected participant`);
+          if (RUN_RESTART && type === 'group') await restartBackend();
+          if (type === 'karaoke') {
+            tvSocket.emit('karaoke-video-end', { roomCode });
+          } else {
+            await Promise.all(participants.map(client => {
+              client.socket.emit('challenge-complete', { roomCode, playerId: client.id, challengeId: challenge.id, type });
+              return Promise.resolve();
+            }));
+          }
+          await waitForCondition(
+            () => Game.findOne({ room: persistedRoom._id }).lean(),
+            current => !current?.activeChallenge && (
+              type === 'karaoke' ||
+              current?.gameEvents?.some(event => event.type === 'challenge_completed' && event.data?.challengeType === type)
+            ),
+            `${type} challenge completion`
+          );
+          metrics.minigames.completed.push(type);
+        } catch (error) {
+          metrics.minigames.errors.push({ type, error: error.message });
+          throw error;
+        }
+      }
+    }
+
     for (let number = 1; number <= 75; number += 1) {
       const sentAt = monotonic();
       for (const client of players) client.lastNumberSentAt = sentAt;
@@ -238,14 +339,15 @@ async function main() {
       metrics.operations.reconnects += 1;
     }
     const recovered = await Promise.all(reconnectTarget.map(client => Player.findById(client.id)));
-    assert.equal(recovered.filter(Boolean).length, 10);
-    assert.equal(new Set(recovered.map(player => player._id.toString())).size, 10);
+    assert.equal(recovered.filter(Boolean).length, reconnectTarget.length);
+    assert.equal(new Set(recovered.map(player => player._id.toString())).size, reconnectTarget.length);
 
     metrics.finishedAt = new Date().toISOString();
     metrics.result = { status: 'PASS', roomCode, connectedPlayers: PLAYER_COUNT, gameId: finalGame._id.toString(), winner: target.id.toString(), reconnections: metrics.operations.reconnects };
   } catch (error) {
     metrics.finishedAt = new Date().toISOString();
     metrics.result = { status: 'FAIL', error: error.message };
+    if (backend?.logs) console.error(`PHASE4 BACKEND TAIL:\n${backend.logs.join('').slice(-5000)}`);
     throw error;
   } finally {
     if (resourceTimer) clearInterval(resourceTimer);
