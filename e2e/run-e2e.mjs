@@ -789,19 +789,56 @@ async function main() {
       session.bingoCard.matrix.flat().filter((value) => value !== 'BINGO')
     );
     const cardValues = [...new Set(cardValuesByPlayer.flat())];
+    const callNumberReliably = async (number) => {
+      for (let attempt = 1; attempt <= 3; attempt += 1) {
+        const currentGame = await Game.findById(currentGameId);
+        if (!currentGame || !['active', 'playing'].includes(currentGame.status)) {
+          throw new Error(`Cannot call ${number}: game status is ${currentGame?.status || 'missing'}`);
+        }
+        if (!currentGame.availableNumbers.includes(number)) return;
+
+        await ensureHostControlSocket();
+        let onNumberCalled;
+        let onError;
+        const eventOutcome = new Promise((resolvePromise) => {
+          onNumberCalled = (payload) => resolvePromise({ type: 'number-called', payload });
+          onError = (payload) => resolvePromise({ type: 'error', payload });
+          hostControlSocket.once('number-called', onNumberCalled);
+          hostControlSocket.once('error', onError);
+        });
+        hostControlSocket.emit('call-number', {
+          roomCode,
+          number,
+          hostCapability: hostSession.hostCapability
+        });
+
+        const outcome = await Promise.race([
+          eventOutcome,
+          new Promise((resolvePromise) => setTimeout(() => resolvePromise({ type: 'timeout' }), 5000))
+        ]);
+        hostControlSocket.off('number-called', onNumberCalled);
+        hostControlSocket.off('error', onError);
+        let persistedGame;
+        try {
+          persistedGame = await waitForMongoDocument(
+            () => Game.findById(currentGameId),
+            (game) => game?.calledNumbers?.includes(number) ||
+              !['active', 'playing'].includes(game?.status),
+            `number ${number} to be persisted`,
+            5000
+          );
+        } catch (error) {
+          if (attempt === 3) throw error;
+          continue;
+        }
+        if (persistedGame.calledNumbers?.includes(number)) return;
+        if (outcome.type === 'error' && attempt === 3) {
+          throw new Error(`Calling ${number} failed: ${JSON.stringify(outcome.payload)}`);
+        }
+      }
+    };
     for (const number of cardValues) {
-      const currentGame = await Game.findById(currentGameId);
-      if (currentGame && !currentGame.availableNumbers.includes(number)) continue;
-      await ensureHostControlSocket();
-      const numberCalled = new Promise((resolvePromise) => {
-        hostControlSocket.once('number-called', resolvePromise);
-      });
-      hostControlSocket.emit('call-number', {
-        roomCode,
-        number,
-        hostCapability: hostSession.hostCapability
-      });
-      await numberCalled;
+      await callNumberReliably(number);
     }
     const markFullCard = async (page, session) => {
       await page.waitForFunction(
