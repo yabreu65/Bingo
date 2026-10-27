@@ -232,7 +232,7 @@ function handleClaimBingo(io, socket) {
         return socket.emit('error', { message: 'No tienes permisos para reclamar BINGO' });
       }
       const { bingoType } = data;
-      if (bingoType !== 'full') {
+      if (!['line', 'fourCorners', 'centralCross', 'full'].includes(bingoType)) {
         return socket.emit('error', { message: 'Tipo de BINGO inválido' });
       }
 

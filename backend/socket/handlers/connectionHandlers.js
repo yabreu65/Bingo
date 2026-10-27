@@ -92,6 +92,7 @@ function handleSyncGameState(io, socket) {
       // Preparar datos de sincronización
       const syncData = {
         roomCode: room.code,
+        gameMode: room.config?.gameMode || game?.gameMode || 'full',
         gameState: room.gameState,
         currentNumber: game?.currentNumber || null,
         calledNumbers: game?.calledNumbers || [],

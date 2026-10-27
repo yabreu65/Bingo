@@ -18,6 +18,9 @@ const PlayerCardView = ({ roomData }) => {
     ) || []
   );
   const [gameState, setGameState] = useState(roomData.gameState || 'waiting');
+  const [gameMode, setGameMode] = useState(
+    roomData.room?.config?.gameMode || roomData.gameMode || 'full'
+  );
   const [activeEvent, setActiveEvent] = useState(null);
   const [activeChallenge, setActiveChallenge] = useState(null);
   const [triviaResult, setTriviaResult] = useState(null);
@@ -66,6 +69,9 @@ const PlayerCardView = ({ roomData }) => {
     if (data.gameState) {
       setGameState(data.gameState);
     }
+    if (data.gameMode) {
+      setGameMode(data.gameMode);
+    }
 
     // Actualizar número actual
     if (data.currentNumber !== undefined) {
@@ -113,7 +119,11 @@ const PlayerCardView = ({ roomData }) => {
 
   const handleCellMarked = useCallback((data) => {
     if (data.playerId === roomData.playerId) {
-      setMarkedCells((prev) => [...prev, { row: data.row, col: data.col }]);
+      setMarkedCells((prev) => (
+        prev.some((cell) => cell.row === data.row && cell.col === data.col)
+          ? prev
+          : [...prev, { row: data.row, col: data.col }]
+      ));
     }
   }, [roomData.playerId]);
 
@@ -264,6 +274,11 @@ const PlayerCardView = ({ roomData }) => {
   const handleCellClick = (row, col, value) => {
     if (value === 'BINGO') return;
 
+    if (gameState !== 'playing') {
+      toast.error('La partida no permite marcar ahora');
+      return;
+    }
+
     // Verificar si el número ha sido cantado
     if (!calledNumbers.includes(value)) {
       toast.error('Este número aún no ha sido cantado');
@@ -277,7 +292,6 @@ const PlayerCardView = ({ roomData }) => {
     }
 
     // Marcar celda
-    setMarkedCells((prev) => [...prev, { row, col }]);
     socket?.emit('mark-cell', {
       roomCode: roomData.roomCode,
       playerId: roomData.playerId,
@@ -295,7 +309,7 @@ const PlayerCardView = ({ roomData }) => {
       socket?.emit('claim-bingo', {
         roomCode: roomData.roomCode,
         playerId: roomData.playerId,
-        bingoType: roomData.room?.config?.gameMode || 'full'
+        bingoType: gameMode
       });
     }
   };
@@ -313,7 +327,6 @@ const PlayerCardView = ({ roomData }) => {
 
   const card = roomData.bingoCard.matrix;
   const matrixVersion = roomData.bingoCard.matrixVersion || CARD_MATRIX_VERSION;
-  const gameMode = roomData.room?.config?.gameMode || 'full';
   const gameModeLabels = {
     line: 'LÍNEA',
     fourCorners: '4 ESQUINAS',

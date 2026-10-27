@@ -396,15 +396,18 @@ const ManualBingoValidator = ({ isOpen, onClose, player, calledNumbers, gameMode
 
 // --- Componente Principal del Dashboard ---
 
+const normalizeRoomState = (room, roomCode) => ({
+  ...(room || {}),
+  code: room?.code || roomCode || '',
+  config: room?.config || {},
+  players: Array.isArray(room?.players) ? room.players : []
+});
+
 export default function OrganizerDashboard({ roomData }) {
   const { socket, joinRoom } = useSocket();
 
   // Estados del componente con valores por defecto seguros
-  const [roomState, setRoomState] = useState(roomData.room || {
-    players: [],
-    code: roomData.roomCode || '',
-    config: {}
-  });
+  const [roomState, setRoomState] = useState(() => normalizeRoomState(roomData.room, roomData.roomCode));
   const [gameState, setGameState] = useState(roomData.room?.gameStarted ? 'playing' : 'waiting');
   const [currentNumber, setCurrentNumber] = useState(null);
   const [calledNumbers, setCalledNumbers] = useState([]);
@@ -446,7 +449,7 @@ export default function OrganizerDashboard({ roomData }) {
             // Actualizar todos los estados con los datos sincronizados
             const { room, gameState: newGameState, currentNumber: syncedNumber, calledNumbers: syncedNumbers } = syncResponse.data;
 
-            if (room) setRoomState(room);
+            if (room) setRoomState((previous) => normalizeRoomState(room, previous.code));
             if (newGameState) setGameState(newGameState);
             if (syncedNumber !== undefined) setCurrentNumber(syncedNumber);
             if (syncedNumbers) setCalledNumbers(syncedNumbers);
@@ -472,7 +475,9 @@ export default function OrganizerDashboard({ roomData }) {
   useEffect(() => {
     if (!socket) return;
 
-    const handleRoomUpdate = (updatedRoom) => setRoomState(updatedRoom);
+    const handleRoomUpdate = (updatedRoom) => {
+      setRoomState((previous) => normalizeRoomState(updatedRoom, previous.code));
+    };
     const handleNumberCalled = (data) => {
       setCurrentNumber(data.number);
       setCalledNumbers(prev => [data.number, ...prev]);

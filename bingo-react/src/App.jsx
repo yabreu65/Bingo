@@ -190,7 +190,7 @@ function App() {
           currentNumber: session.currentNumber || null,
           calledNumbers: session.calledNumbers || [],
           gameState: session.gameState || 'waiting',
-          room: roomInfo // Datos de la sala para CardSelection
+          room: roomInfo || session.room || (session.gameMode ? { config: { gameMode: session.gameMode } } : null)
         });
 
         // Solo marcar como seleccionado si realmente tiene cartón o es host
@@ -233,6 +233,14 @@ function App() {
         currentNumber: roomData.currentNumber,
         calledNumbers: roomData.calledNumbers,
         gameState: roomData.gameState,
+        gameMode: roomData.room?.config?.gameMode,
+        room: roomData.room
+          ? {
+              code: roomData.room.code,
+              name: roomData.room.name,
+              config: roomData.room.config
+            }
+          : undefined,
         timestamp: Date.now()
       };
       localStorage.setItem(STORAGE_KEY, JSON.stringify(session));
