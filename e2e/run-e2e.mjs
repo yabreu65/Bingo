@@ -30,7 +30,8 @@ function startProcess(name, command, args, cwd, env) {
   const child = spawn(command, args, {
     cwd,
     env: { ...process.env, ...env },
-    stdio: ['ignore', 'pipe', 'pipe']
+    stdio: ['ignore', 'pipe', 'pipe'],
+    detached: process.platform !== 'win32'
   });
   const output = [];
   logs.set(name, output);
@@ -42,10 +43,22 @@ function startProcess(name, command, args, cwd, env) {
 
 async function stopProcess(child) {
   if (!child || child.exitCode !== null) return;
-  child.kill('SIGTERM');
+  const signal = (name) => {
+    if (process.platform !== 'win32' && child.pid) {
+      try {
+        process.kill(-child.pid, name);
+        return;
+      } catch (error) {
+        if (error.code !== 'ESRCH') throw error;
+      }
+    }
+    child.kill(name);
+  };
+
+  signal('SIGTERM');
   await new Promise((resolvePromise) => {
     const timer = setTimeout(() => {
-      child.kill('SIGKILL');
+      signal('SIGKILL');
       resolvePromise();
     }, 3000);
     child.once('exit', () => {
@@ -53,6 +66,8 @@ async function stopProcess(child) {
       resolvePromise();
     });
   });
+  child.stdout?.destroy();
+  child.stderr?.destroy();
 }
 
 async function waitForHttp(url, timeout = 30000) {
