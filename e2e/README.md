@@ -20,6 +20,6 @@ It never reads or writes the backend `.env` database. Set `PLAYWRIGHT_CHROMIUM_P
 
 ## Coverage
 
-The suite covers room creation/configuration, independent player/card assignment, TV authorization, Socket.IO number/music synchronization, automatic trivia and answer propagation, invalid bingo rejection, organizer-only REST authorization, player session reconnection, and the player voting modal with a disposable in-memory tie-break fixture.
+The suite covers room creation/configuration, independent player/card assignment, TV authorization, Socket.IO number/music synchronization, automatic trivia and answer propagation, invalid bingo rejection, a valid 24-number bingo completion, organizer-only REST authorization, player session reconnection, and the player voting modal with a disposable in-memory tie-break fixture.
 
-The successful-bingo winner path remains a separate scenario because completing a real card requires the full 24-number draw and the production flow intentionally pauses for challenges; the existing backend integration tests cover winner/tie-break state transitions.
+The tie-break performance loop is represented by a disposable fixture that starts the voting phase directly; this keeps the browser suite bounded while the existing backend integration tests cover the complete performance and winner state transitions.

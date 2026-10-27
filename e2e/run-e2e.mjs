@@ -126,8 +126,8 @@ function findChromiumExecutable() {
   throw new Error('No Chromium executable found. Set PLAYWRIGHT_CHROMIUM_PATH or run npx playwright install chromium.');
 }
 
-async function configureRoom(hostPage, roomCode, hostCapability) {
-  const result = await hostPage.evaluate(async ({ url, code, capability }) => {
+async function configureRoom(hostPage, roomCode, hostCapability, overrides = {}) {
+  const result = await hostPage.evaluate(async ({ url, code, capability, overrides: configOverrides }) => {
     const response = await fetch(url + '/api/rooms/' + code + '/config', {
       method: 'PATCH',
       headers: {
@@ -138,12 +138,13 @@ async function configureRoom(hostPage, roomCode, hostCapability) {
         config: {
           timeBetweenNumbers: 5,
           challengeFrequency: 1,
-          tieBreakEnabled: true
+          tieBreakEnabled: true,
+          ...configOverrides
         }
       })
     });
     return { status: response.status, body: await response.json() };
-  }, { url: backendURL, code: roomCode, capability: hostCapability });
+  }, { url: backendURL, code: roomCode, capability: hostCapability, overrides });
 
   assert.equal(result.status, 200, 'Room config failed: ' + JSON.stringify(result));
   assert.equal(result.body.success, true);
@@ -208,6 +209,7 @@ async function main() {
   const chromiumPath = findChromiumExecutable();
   const mongo = await MongoMemoryServer.create();
   const mongoUri = mongo.getUri('bingo-e2e');
+  await mongoose.connect(mongoUri);
 
   startProcess('backend', process.execPath, ['server.js'], backendDir, {
     NODE_ENV: 'test',
@@ -228,6 +230,7 @@ async function main() {
   });
 
   let browser;
+  let hostControlSocket;
   let votingSocket;
   const contexts = [];
   try {
@@ -245,7 +248,7 @@ async function main() {
     const playerAPage = await playerAContext.newPage();
     const playerBPage = await playerBContext.newPage();
 
-    console.log('E2E 1/8: organizer creates and configures a room');
+    console.log('E2E 1/10: organizer creates and configures a room');
     await hostPage.goto(baseURL);
     await hostPage.getByRole('button', { name: /Comenzar a Jugar/ }).click({ force: true });
     await hostPage.getByRole('button', { name: /Crear Sala/ }).click();
@@ -261,7 +264,7 @@ async function main() {
     await configureRoom(hostPage, roomCode, hostSession.hostCapability);
     console.log('  room ' + roomCode + ' created with isolated config');
 
-    console.log('E2E 2/8: independent players join and select cards');
+    console.log('E2E 2/10: independent players join and select cards');
     const joinPlayer = async (page, name, cardNumber) => {
       await page.goto(baseURL + '/?room=' + roomCode);
       await page.getByLabel('Tu Nombre').fill(name);
@@ -281,7 +284,7 @@ async function main() {
     assert.match(await hostPage.locator('body').innerText(), /3/);
     console.log('  players joined with cards 1 and 2');
 
-    console.log('E2E 3/8: TV popup authorization, game start, Socket.IO and music resource');
+    console.log('E2E 3/10: TV popup authorization, game start, Socket.IO and music resource');
     const popupPromise = hostPage.waitForEvent('popup', { timeout: 10000 });
     await hostPage.getByRole('button', { name: /Abrir TV/ }).click();
     const tvPage = await popupPromise;
@@ -305,7 +308,7 @@ async function main() {
     assert.ok(playerNumber, 'Player did not receive a called number');
     console.log('  Socket.IO synchronized number ' + playerNumber + '; TV music source ' + musicSource);
 
-    console.log('E2E 4/8: automatic trivia challenge, answer flow and public synchronization');
+    console.log('E2E 4/10: automatic trivia challenge, answer flow and public synchronization');
     const scenarioPages = [['player-a', playerAPage], ['player-b', playerBPage], ['tv', tvPage], ['host', hostPage]];
     const challengeTarget = await waitForTextOrPages(scenarioPages, /¡RETO!|Challenge Activo|TRIVIA|Pregunta/i, 12000);
     const challengePage = challengeTarget.name === 'player-a' ? playerAPage :
@@ -321,7 +324,7 @@ async function main() {
     }
     console.log('  challenge observed on ' + challengeTarget.name);
 
-    console.log('E2E 5/8: invalid bingo declaration is rejected');
+    console.log('E2E 5/10: invalid bingo declaration is rejected');
     await waitForBody(playerAPage, /En Juego/, 8000);
     await playerAPage.evaluate(() => { window.confirm = () => true; });
     await playerAPage.getByRole('button', { name: /CANTAR BINGO/ }).click({ force: true });
@@ -329,11 +332,68 @@ async function main() {
     assert.match(await playerAPage.locator('body').innerText(), /BINGO rechazado|BINGO reclamado|Números cantados/);
     console.log('  incomplete card claim was handled without ending the game');
 
-    console.log('E2E 6/8: organizer-only REST operations reject player capabilities');
+    console.log('E2E 6/10: organizer-only REST operations reject player capabilities');
     await assertForbiddenFromPlayer(playerBPage, roomCode, playerBSession.playerCapability);
     console.log('  config and manual-card escalation rejected with HTTP 403');
 
-    console.log('E2E 7/8: player disconnects and reconnects with scoped session');
+    console.log('E2E 7/10: valid bingo claim finishes the game');
+    await configureRoom(hostPage, roomCode, hostSession.hostCapability, {
+      challengeFrequency: 10,
+      tieBreakEnabled: false
+    });
+    await waitForBody(playerAPage, /En Juego/, 10000);
+
+    const roomForDraw = await Room.findOne({ code: roomCode });
+    assert.ok(roomForDraw?.currentGame, 'Room has no current game for bingo draw');
+    const currentGameId = roomForDraw.currentGame;
+
+    hostControlSocket = await openAuthorizedSocket({
+      roomCode,
+      playerId: hostSession.playerId,
+      hostCapability: hostSession.hostCapability
+    });
+    const playerCardValues = playerASession.bingoCard.matrix
+      .flat()
+      .filter((value) => value !== 'BINGO');
+    for (const number of playerCardValues) {
+      const currentGame = await Game.findById(currentGameId);
+      if (currentGame && !currentGame.availableNumbers.includes(number)) continue;
+      const numberCalled = new Promise((resolvePromise) => {
+        hostControlSocket.once('number-called', resolvePromise);
+      });
+      hostControlSocket.emit('call-number', {
+        roomCode,
+        number,
+        hostCapability: hostSession.hostCapability
+      });
+      await numberCalled;
+    }
+    await playerAPage.waitForFunction(
+      () => document.querySelectorAll('.bingo-card-cell.available').length >= 24,
+      { timeout: 10000 }
+    );
+    for (let index = 0; index < 24; index += 1) {
+      await playerAPage.locator('.bingo-card-cell.available').first().click({ force: true });
+    }
+    await playerAPage.waitForFunction(async ({ url, id, capability }) => {
+      const response = await fetch(url + '/api/players/' + id, {
+        headers: { 'x-player-capability': capability }
+      });
+      const data = await response.json();
+      return data.player?.bingoCard?.markedCells?.length === 25;
+    }, {
+      url: backendURL,
+      id: playerASession.playerId,
+      capability: playerASession.playerCapability
+    }, { timeout: 10000 });
+    await playerAPage.evaluate(() => { window.confirm = () => true; });
+    await playerAPage.getByRole('button', { name: /CANTAR BINGO/ }).click({ force: true });
+    await waitForBody(playerAPage, /Finalizado|BINGO verificado/, 10000);
+    console.log('  24 called card values were marked and the valid bingo was verified');
+    hostControlSocket.disconnect();
+    hostControlSocket = null;
+
+    console.log('E2E 8/10: player disconnects and reconnects with scoped session');
     const savedPlayerBSession = await playerBPage.evaluate((key) => JSON.parse(localStorage.getItem(key)), storageKey);
     await playerBContext.close();
     const reconnectContext = await browser.newContext();
@@ -352,8 +412,7 @@ async function main() {
     );
     console.log('  player session reconnected with the same capability and card');
 
-    console.log('E2E 8/9: tie-break voting modal and vote ownership');
-    await mongoose.connect(mongoUri);
+    console.log('E2E 9/10: tie-break voting modal and vote ownership');
     const roomDocument = await Room.findOne({ code: roomCode });
     assert.ok(roomDocument?.currentGame, 'Room has no current game for voting fixture');
     const gameDocument = await Game.findById(roomDocument.currentGame);
@@ -376,7 +435,7 @@ async function main() {
     await waitForBody(playerAPage, /Votado|Voto registrado/);
     console.log('  players received the voting modal and a scoped vote was accepted');
 
-    console.log('E2E 9/9: TV, players and organizer remain active after recovery');
+    console.log('E2E 10/10: TV, players and organizer remain active after recovery');
     await waitForBody(hostPage, /Jugadores Activos/);
     await waitForBody(tvPage, /Bingo Bailable/);
     await waitForBody(reconnectPage, /Números cantados|En Juego/);
@@ -385,6 +444,7 @@ async function main() {
     await tvPage.close();
     console.log('E2E PASS: complete organizer/player/TV flow and critical security/recovery scenarios');
   } finally {
+    if (hostControlSocket) hostControlSocket.disconnect();
     if (votingSocket) votingSocket.disconnect();
     if (mongoose.connection.readyState !== 0) await mongoose.disconnect().catch(() => {});
     for (const context of contexts) {
