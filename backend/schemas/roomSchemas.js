@@ -1,4 +1,5 @@
 const { z } = require('zod');
+const objectIdSchema = z.string().regex(/^[a-fA-F0-9]{24}$/, 'El ID debe ser un ObjectId válido');
 
 /**
  * Schema para crear una sala
@@ -75,8 +76,7 @@ const selectCardSchema = z.object({
   }),
 
   body: z.object({
-    playerId: z.string()
-      .min(1, 'El ID del jugador es requerido'),
+    playerId: objectIdSchema,
 
     cardNumber: z.number()
       .int('El número de cartón debe ser un entero')
@@ -125,8 +125,7 @@ const reconnectSchema = z.object({
   }),
 
   body: z.object({
-    playerId: z.string()
-      .min(1, 'El ID del jugador es requerido')
+    playerId: objectIdSchema
   })
 });
 
