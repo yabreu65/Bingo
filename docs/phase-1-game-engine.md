@@ -72,12 +72,20 @@ marcado, reclamos, persistencia y autorización al backend.
 
 Las pruebas de unidad cubren la estructura y unicidad de los 200 cartones, la
 orientación, los cuatro patrones, números no llamados y permisos. La suite E2E
-usa MongoMemoryServer, Chromium de Playwright y servicios locales aislados; lee
-las 25 celdas visibles, marca tres casillas de filas y columnas distintas,
-comprueba persistencia, reconexión, seguridad, TV, trivia, desempate y votación.
+usa MongoMemoryServer, Chromium de Playwright y servicios locales aislados. Antes
+del flujo funcional, una prueba de paridad compara los 200 cartones y las cuatro
+modalidades entre los módulos reales de frontend y backend. Después, el flujo
+visual lee las 25 celdas visibles, marca tres casillas de filas y columnas
+distintas, comprueba persistencia, reconexión, seguridad, TV, trivia, desempate y
+votación. Un segundo flujo independiente valida línea, cuatro esquinas, cruz
+central y cartón completo, incluidos reclamos inválidos; también valida pausa,
+acciones bloqueadas, reanudación, reconexión, reclamos duplicados, estadísticas,
+finalización y reinicio.
 
-El job E2E está versionado en `.github/workflows/ci.yml`. Su ejecución remota
-requiere un push posterior y por eso no se afirma aquí un resultado de GitHub
+El job E2E está versionado en `.github/workflows/ci.yml`, instala Chromium con
+dependencias en Ubuntu y falla por propagación normal si cualquiera de los
+escenarios falla. La ejecución remota requiere un push posterior; la validación
+local confirma el contrato del job, pero no sustituye el resultado de GitHub
 Actions. La privacidad de cartones públicos, revocación avanzada de tokens,
 persistencia distribuida de timers y las reglas comerciales de retos/premios
 son pendientes fuera de esta Fase 1.
