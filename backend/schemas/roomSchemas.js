@@ -26,6 +26,8 @@ const createRoomSchema = z.object({
         .optional()
         .default(3),
 
+      gameMode: z.enum(['line', 'fourCorners', 'centralCross', 'full']).optional(),
+
       tieBreakEnabled: z.boolean().optional().default(false)
     }).optional()
   })
@@ -108,6 +110,8 @@ const updateConfigSchema = z.object({
         .min(1, 'La frecuencia mínima de challenges es 1')
         .max(10, 'La frecuencia máxima de challenges es 10')
         .optional(),
+
+      gameMode: z.enum(['line', 'fourCorners', 'centralCross', 'full']).optional(),
 
       tieBreakEnabled: z.boolean().optional()
     })

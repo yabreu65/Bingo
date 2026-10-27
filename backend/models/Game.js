@@ -6,6 +6,11 @@ const gameSchema = new mongoose.Schema({
     ref: 'Room',
     required: true
   },
+  gameMode: {
+    type: String,
+    enum: ['line', 'fourCorners', 'centralCross', 'full'],
+    default: 'full'
+  },
   availableNumbers: [Number],
   calledNumbers: [Number],
   currentNumber: Number,

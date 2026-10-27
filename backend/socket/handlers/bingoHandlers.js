@@ -2,7 +2,9 @@ const Room = require('../../models/Room');
 const Player = require('../../models/Player');
 const Game = require('../../models/Game');
 const logger = require('../../config/logger');
-const { isFullCard } = require('../utils/bingoValidator');
+const { getCard } = require('../../utils/bingoCards');
+const { getCalledMarkedCells, validateBingoClaim } = require('../utils/bingoValidator');
+const { GAME_CONSTANTS } = require('../../constants');
 const { clearAllRoomTimers } = require('../utils/roomTimer');
 const { isRoomHost, emitPermissionError } = require('../../middleware/socketAuthMiddleware');
 
@@ -34,12 +36,61 @@ function waitForPerformanceStart(roomCode, performerId) {
 }
 
 async function finishGameWithWinner(io, room, game, player, bingoType) {
-  game.status = 'finished';
-  game.endTime = new Date();
-  game.duration = game.startTime ? (game.endTime - game.startTime) : undefined;
-  game.winners = Array.isArray(game.winners) ? game.winners : [];
-  game.winners.push({ player: player._id, achievement: bingoType, timestamp: new Date() });
-  await game.save();
+  const endTime = new Date();
+  const winner = {
+    player: player._id,
+    playerName: player.name,
+    cardNumber: player.cardNumber,
+    achievement: bingoType,
+    timestamp: endTime
+  };
+  const pointsByType = {
+    line: GAME_CONSTANTS.POINTS.LINE_COMPLETED,
+    fourCorners: GAME_CONSTANTS.POINTS.FOUR_CORNERS,
+    centralCross: GAME_CONSTANTS.POINTS.CENTRAL_CROSS,
+    full: GAME_CONSTANTS.POINTS.FULL_CARD
+  };
+  const statsUpdate = {
+    $inc: {
+      'stats.points': pointsByType[bingoType] || 0,
+      'stats.bingosAchieved': 1,
+      'stats.gamesWon': 1,
+      ...(bingoType === 'line' ? { 'stats.linesCompleted': 1 } : {})
+    }
+  };
+  if (bingoType !== 'line') {
+    statsUpdate.$set = {
+      [`stats.has${bingoType === 'fourCorners' ? 'FourCorners' : bingoType === 'centralCross' ? 'CentralCross' : 'FullCard'}`]: true
+    };
+  }
+
+  let finalizedGame = game;
+  if (typeof Game.findOneAndUpdate === 'function' && game._id) {
+    finalizedGame = await Game.findOneAndUpdate(
+      { _id: game._id, status: { $ne: 'finished' } },
+      {
+        $set: {
+          status: 'finished',
+          endTime,
+          duration: game.startTime ? (endTime - game.startTime) : undefined
+        },
+        $push: { winners: winner }
+      },
+      { new: true }
+    );
+    if (!finalizedGame) return false;
+  } else {
+    game.status = 'finished';
+    game.endTime = endTime;
+    game.duration = game.startTime ? (game.endTime - game.startTime) : undefined;
+    game.winners = Array.isArray(game.winners) ? game.winners : [];
+    game.winners.push(winner);
+    await game.save();
+  }
+
+  if (typeof Player.findOneAndUpdate === 'function') {
+    await Player.findOneAndUpdate({ _id: player._id }, statsUpdate, { new: true });
+  }
 
   room.gameState = 'finished';
   await room.save();
@@ -49,6 +100,7 @@ async function finishGameWithWinner(io, room, game, player, bingoType) {
   io.to(room.code).emit('bingo-verified', { playerId: player._id, bingoType });
   io.to(room.code).emit('game-state-changed', { state: 'finished' });
   io.to(room.code).emit('game-finished', { winnerId: player._id, winnerName: player.name, achievement: bingoType });
+  return true;
 }
 
 async function runTieBreak(io, socket, room) {
@@ -203,35 +255,38 @@ function handleClaimBingo(io, socket) {
         return socket.emit('error', { message: 'Juego no encontrado' });
       }
 
-      if (game.status === 'finished' || room.gameState === 'finished') {
+      if (!['active', 'playing'].includes(game.status) || room.gameState !== 'playing') {
         io.to(roomCode).emit('bingo-rejected', { playerId, bingoType });
         return;
       }
 
       io.to(roomCode).emit('bingo-claimed', { playerId, bingoType });
 
-      room.gameState = 'paused';
-      await room.save();
-      io.to(roomCode).emit('game-state-changed', { state: 'paused' });
-
-      const marked = Array.isArray(player.bingoCard?.markedCells) ? player.bingoCard.markedCells : [];
-      const isValid = bingoType === 'full' ? isFullCard(marked) : false;
-
-      logger.info(`[${roomCode}] 🎯 BINGO VALIDATION - Player: ${player.name}, Marked cells: ${marked.length}, Is valid: ${isValid}`);
-
-      if (!isValid) {
-        logger.warn(`[${roomCode}] ❌ BINGO REJECTED - Player: ${player.name}, Marked: ${marked.length}/25`);
+      const configuredType = room.config?.gameMode || game.gameMode || 'full';
+      if (bingoType !== configuredType) {
         io.to(roomCode).emit('bingo-rejected', { playerId, bingoType });
-        room.gameState = 'playing';
-        await room.save();
-        io.to(roomCode).emit('game-state-changed', { state: 'playing' });
+        return;
+      }
+
+      const validation = validateBingoClaim({
+        matrix: player.bingoCard?.matrix,
+        markedCells: player.bingoCard?.markedCells,
+        calledNumbers: game.calledNumbers,
+        bingoType
+      });
+      if (!validation.isValid) {
+        io.to(roomCode).emit('bingo-rejected', { playerId, bingoType });
         logger.logGameEvent(roomCode, 'Bingo rejected', { playerId, bingoType });
         return;
       }
 
-      logger.info(`[${roomCode}] ✅ BINGO VALID - Tie-break enabled: ${room.config?.tieBreakEnabled}`);
+      room.gameState = 'paused';
+      await room.save();
+      io.to(roomCode).emit('game-state-changed', { state: 'paused' });
 
-      if (!room.config?.tieBreakEnabled) {
+      logger.info(`[${roomCode}] ✅ BINGO VALID - Type: ${bingoType}; tie-break enabled: ${room.config?.tieBreakEnabled}`);
+
+      if (!room.config?.tieBreakEnabled || bingoType !== 'full') {
         await finishGameWithWinner(io, room, game, player, bingoType);
         logger.logGameEvent(roomCode, 'Bingo verified', { playerId, bingoType });
         return;
@@ -353,6 +408,9 @@ function handleCallNumber(io, socket) {
       const game = await Game.findById(room.currentGame);
       if (!game) {
         return socket.emit('error', { message: 'Juego no encontrado' });
+      }
+      if (room.gameState !== 'playing' || !['active', 'playing'].includes(game.status)) {
+        return socket.emit('error', { message: 'La partida no permite llamar números ahora' });
       }
       if (!Array.isArray(game.availableNumbers) || !game.availableNumbers.includes(number)) {
         return socket.emit('error', { message: 'El número ya fue cantado o no es válido' });
@@ -717,6 +775,23 @@ function handleVerifyBingoManual(io, socket) {
         const error = { message: 'Juego no encontrado' };
         ack?.({ success: false, error: error.message });
         return socket.emit('error', error);
+      }
+
+      if (Array.isArray(game.calledNumbers)) {
+        const bingoType = room.config?.gameMode || game.gameMode || 'full';
+        const manualCard = getCard(cardNumber);
+        const markedCells = getCalledMarkedCells(manualCard, game.calledNumbers);
+        const validation = validateBingoClaim({
+          matrix: manualCard,
+          markedCells,
+          calledNumbers: game.calledNumbers,
+          bingoType
+        });
+        if (!validation.isValid) {
+          const error = 'El cartón manual no cumple la modalidad activa';
+          ack?.({ success: false, error });
+          return socket.emit('error', { message: error });
+        }
       }
 
       // Finalizar juego con jugador manual como ganador

@@ -27,7 +27,8 @@ const {
   getIntervalMs,
   ensureWatchdog,
   createRoomInterval,
-  clearRoomInterval
+  clearRoomInterval,
+  clearAllRoomTimers
 } = require('../utils/roomTimer');
 const { updateRoomActivity } = require('../../utils/roomActivity');
 
@@ -43,6 +44,10 @@ async function immediateNextNumber(io, roomCode) {
   const game = await Game.findById(room.currentGame);
   if (!game) {
     logger.warn(`[${roomCode}] Cannot call an immediate number because the game is missing`);
+    return;
+  }
+  if (room.gameState !== 'playing' || !['active', 'playing'].includes(game.status)) {
+    logger.info(`[${roomCode}] Skipping immediate number because the game is not active`);
     return;
   }
 
@@ -371,6 +376,12 @@ async function scheduleRoomInterval(io, roomCode) {
         logger.warn(`[${rc}] Game not found`);
         return;
       }
+      if (currentRoom.gameState !== 'playing' || !['active', 'playing'].includes(currentGame.status)) {
+        if (currentGame.status === 'finished' || currentRoom.gameState === 'finished') {
+          clearRoomInterval(rc);
+        }
+        return;
+      }
 
       // PRIMERO: Verificar si debe disparar challenge ANTES de cantar el número
       const freq = currentRoom.config?.challengeFrequency || GAME_CONSTANTS.CHALLENGE_FREQUENCY;
@@ -449,7 +460,14 @@ function handleStartGame(io, socket) {
 
       logger.info(`[${roomCode}] Game start requested`);
 
-      const room = await Room.findOne({ code: roomCode });
+      const roomQuery = Room.findOne({ code: roomCode });
+      const room = typeof roomQuery?.populate === 'function'
+        ? await roomQuery.populate('players')
+        : await roomQuery;
+
+      if (!room) {
+        return socket.emit('error', { message: 'Sala no encontrada' });
+      }
 
       // Verificar permisos de host
       if (!(await isRoomHost(socket, room, data?.hostCapability))) {
@@ -457,13 +475,42 @@ function handleStartGame(io, socket) {
         return emitPermissionError(socket);
       }
 
+      if (room.gameState && room.gameState !== 'waiting') {
+        return socket.emit('error', { message: 'La sala ya tiene una partida iniciada' });
+      }
+
+      // Cuando los jugadores están poblados, exigir al menos dos participantes
+      // con cartón. Los mocks y consumidores antiguos sin lista poblada siguen
+      // delegando esta validación al flujo de compatibilidad existente.
+      if (Array.isArray(room.players) && room.players.length > 0 &&
+          room.players.every((player) => player && typeof player === 'object' && player.cardNumber !== undefined)) {
+        const digitalPlayers = room.players.filter((player) => player.cardNumber != null);
+        const manualPlayers = (room.manualPlayers || []).filter((player) => player.cardNumber != null);
+        if (digitalPlayers.length + manualPlayers.length < 2) {
+          return socket.emit('error', { message: 'Se necesitan al menos dos jugadores con cartón' });
+        }
+      }
+
       const game = new Game({
         room: room._id,
+        gameMode: room.config?.gameMode || 'full',
         startTime: new Date(),
         availablePools: initializeChallengePools(),
         lastChallengeType: null
       });
       await game.save();
+
+      const participatingPlayerIds = Array.isArray(room.players)
+        ? room.players
+          .filter((player) => player && typeof player === 'object' && player.cardNumber != null)
+          .map((player) => player._id)
+        : [];
+      if (participatingPlayerIds.length > 0 && typeof Player.updateMany === 'function') {
+        await Player.updateMany(
+          { _id: { $in: participatingPlayerIds } },
+          { $inc: { 'stats.gamesPlayed': 1 } }
+        );
+      }
 
       logger.info(`[${roomCode}] Game created with ID: ${game._id}`);
 
@@ -527,7 +574,18 @@ function handleGameStateChange(io, socket) {
         }
 
         room.gameState = state;
+        if (room.currentGame) {
+          const game = await Game.findById(room.currentGame);
+          if (game) {
+            game.status = state === 'paused' ? 'paused' : state === 'finished' ? 'finished' : 'active';
+            await game.save();
+          }
+        }
         await room.save();
+
+        if (state === 'paused' || state === 'finished') {
+          clearAllRoomTimers(roomCode);
+        }
 
         io.to(roomCode).emit('game-state-changed', { state });
 
@@ -568,11 +626,21 @@ function handleResetGame(io, socket) {
           game.calledNumbers = [];
           game.currentNumber = null;
           game.availableNumbers = Array.from({ length: GAME_CONSTANTS.MAX_NUMBER }, (_, i) => i + 1);
+          game.status = 'active';
+          game.winners = [];
+          game.tieBreakActive = false;
+          game.tieCandidates = [];
+          game.tieWindowEnds = null;
           await game.save();
         }
       }
 
+      room.gameState = 'waiting';
+      await room.save();
+      clearAllRoomTimers(roomCode);
+
       io.to(roomCode).emit('game-reset');
+      io.to(roomCode).emit('game-state-changed', { state: 'waiting' });
 
       logger.logGameEvent(roomCode, 'Game reset');
     } catch (error) {
@@ -624,7 +692,15 @@ function handlePauseGame(io, socket) {
       }
 
       room.gameState = 'paused';
+      if (room.currentGame) {
+        const game = await Game.findById(room.currentGame);
+        if (game && game.status !== 'finished') {
+          game.status = 'paused';
+          await game.save();
+        }
+      }
       await room.save();
+      clearRoomInterval(roomCode);
 
       io.to(roomCode).emit('game-state-changed', { state: 'paused' });
       io.to(roomCode).emit('music-sync', { isPlaying: false });
@@ -657,6 +733,13 @@ function handleResumeGame(io, socket) {
       }
 
       room.gameState = 'playing';
+      if (room.currentGame) {
+        const game = await Game.findById(room.currentGame);
+        if (game && game.status !== 'finished') {
+          game.status = 'active';
+          await game.save();
+        }
+      }
       await room.save();
 
       io.to(roomCode).emit('game-state-changed', { state: 'playing' });

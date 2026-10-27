@@ -2,6 +2,8 @@ const Room = require('../../models/Room');
 const Player = require('../../models/Player');
 const Game = require('../../models/Game');
 const logger = require('../../config/logger');
+const { getCardCell, FREE_CELL } = require('../../utils/bingoCards');
+const { GAME_CONSTANTS } = require('../../constants');
 
 /**
  * Handler para marcar una celda del cartón
@@ -33,13 +35,24 @@ function handleMarkCell(io, socket) {
       const player = await Player.findOne(ownerFilter);
       if (!player) return socket.emit('error', { message: 'No tienes permisos para marcar esta celda' });
 
-      const cellValue = player.bingoCard?.matrix?.[row]?.[col];
-      if (!cellValue || cellValue === 'BINGO') {
+      const matrix = player.bingoCard?.matrix;
+      if (!Array.isArray(matrix) || matrix.length !== 5 || matrix.some((column) => !Array.isArray(column) || column.length !== 5)) {
+        return socket.emit('error', { message: 'No tienes un cartón válido asignado' });
+      }
+
+      const cellValue = getCardCell(matrix, row, col);
+      if (cellValue === undefined || cellValue === FREE_CELL) {
         return socket.emit('error', { message: 'Celda inválida' });
       }
 
       const game = room.currentGame ? await Game.findById(room.currentGame) : null;
-      if (game && Array.isArray(game.calledNumbers) && !game.calledNumbers.includes(cellValue)) {
+      if (!game) {
+        return socket.emit('error', { message: 'No hay una partida activa' });
+      }
+      if ((game.status && game.status !== 'active') || (room.gameState && room.gameState !== 'playing')) {
+        return socket.emit('error', { message: 'La partida no permite marcar ahora' });
+      }
+      if (Array.isArray(game.calledNumbers) && !game.calledNumbers.includes(cellValue)) {
         return socket.emit('error', { message: 'Número no ha sido cantado' });
       }
 
@@ -60,7 +73,10 @@ function handleMarkCell(io, socket) {
           },
           {
             $addToSet: { 'bingoCard.markedCells': { row, col } },
-            $inc: { 'stats.numbersMarked': 1 }
+            $inc: {
+              'stats.numbersMarked': 1,
+              'stats.points': GAME_CONSTANTS.POINTS.NUMBER_MARKED
+            }
           },
           { new: true }
         );
