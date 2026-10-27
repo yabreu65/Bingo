@@ -12,7 +12,8 @@
 - Trivia y adivinanzas no exponen sus respuestas en los eventos públicos ni en
   la sincronización de jugadores. La corrección se entrega al participante y
   se publica cuando el reto termina.
-- Se registran puntos y estadísticas de trivia, adivinanzas y retos completados.
+- Se registran puntos y estadísticas de trivia, adivinanzas, karaoke y retos
+  completados.
   Las actualizaciones de jugadores usan incrementos atómicos.
 - Los retos grupales esperan una respuesta válida de cada participante antes de
   finalizar; si el tiempo vence, el temporizador del servidor reanuda la sala.
@@ -38,7 +39,7 @@
 
 ## Pruebas ejecutadas
 
-- Backend Jest completo: 16 suites, 181 tests aprobados.
+- Backend Jest completo: 16 suites, 182 tests aprobados.
 - Frontend Vitest completo: 9 archivos, 20 tests aprobados.
 - ESLint y build Vite aprobados.
 - Playwright E2E existente: paridad de 200 cartones, flujo organizador/

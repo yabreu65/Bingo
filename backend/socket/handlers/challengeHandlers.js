@@ -252,6 +252,15 @@ function handleKaraokeVideoEnd(io, socket) {
         return socket.emit('error', { message: 'No hay un karaoke activo' });
       }
 
+      const karaokePlayerId = game.activeChallenge.player?._id || game.activeChallenge.player;
+      const karaokePoints = getChallengePoints('karaoke', { success: true });
+      if (karaokePlayerId && typeof Player.findOneAndUpdate === 'function') {
+        await Player.findOneAndUpdate(
+          { _id: karaokePlayerId, room: room._id },
+          { $inc: { 'stats.points': karaokePoints, 'stats.challengesCompleted': 1 } }
+        );
+      }
+
       // Limpiar el challenge activo
       game.activeChallenge = null;
       await game.save();
@@ -264,8 +273,11 @@ function handleKaraokeVideoEnd(io, socket) {
 
       // IMPORTANTE: Emitir challenge-complete PRIMERO para que el frontend
       // actualice el flag antes de recibir game-state-changed
-      io.to(roomCode).emit('challenge-complete', { success: true });
-      io.to(roomCode).emit('challenge-completed', { success: true });
+      io.to(roomCode).emit('challenge-complete', { success: true, result: { points: karaokePoints } });
+      io.to(roomCode).emit('challenge-completed', {
+        success: true,
+        result: { points: karaokePoints }
+      });
       io.to(roomCode).emit('game-state-changed', { state: 'playing' });
 
       // Llamar el siguiente número inmediatamente

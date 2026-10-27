@@ -439,8 +439,15 @@ describe('challenge and voting socket identity', () => {
 
     game.activeChallenge.type = 'karaoke';
     await handleKaraokeVideoEnd(io, tvSocket)({ roomCode: 'ROOMA1' });
-    expect(emit).toHaveBeenCalledWith('challenge-completed', { success: true });
+    expect(emit).toHaveBeenCalledWith('challenge-completed', {
+      success: true,
+      result: { points: 75 }
+    });
     expect(game.save).toHaveBeenCalledTimes(2);
+    expect(Player.findOneAndUpdate).toHaveBeenCalledWith(
+      { _id: 'manual-1', room: room._id },
+      { $inc: { 'stats.points': 75, 'stats.challengesCompleted': 1 } }
+    );
     expect(room.save).toHaveBeenCalledTimes(1);
     expect(gameHandlers.immediateNextNumber).toHaveBeenCalledWith(io, 'ROOMA1');
   });
