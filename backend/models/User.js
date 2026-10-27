@@ -119,8 +119,8 @@ const userSchema = new mongoose.Schema({
   }
 });
 
-// Índices para optimizar queries
-userSchema.index({ email: 1 });
+// Índices para optimizar queries. El campo email único ya crea su propio
+// índice; declararlo nuevamente produce advertencias de índice duplicado.
 userSchema.index({ role: 1 });
 userSchema.index({ createdAt: -1 });
 
