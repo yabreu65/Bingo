@@ -3,7 +3,7 @@ const crypto = require('crypto');
 const router = express.Router();
 const Room = require('../models/Room');
 const Player = require('../models/Player');
-const { getCard } = require('../utils/bingoCards');
+const { CARD_MATRIX_VERSION, getCard } = require('../utils/bingoCards');
 const { validateRequest } = require('../middleware/validateRequest');
 const { updateRoomActivity } = require('../utils/roomActivity');
 const logger = require('../config/logger');
@@ -93,7 +93,8 @@ router.post('/join', joinRoomLimiter, speedLimiter, validateRequest(joinRoomSche
       return res.status(404).json({ error: 'Sala no encontrada' });
     }
 
-    if (room.players.length >= room.config.maxPlayers) {
+    const totalPlayers = room.players.length + (room.manualPlayers?.length || 0);
+    if (totalPlayers >= room.config.maxPlayers) {
       return res.status(400).json({ error: 'Sala llena' });
     }
 
@@ -139,7 +140,6 @@ router.get('/:code', generalApiLimiter, validateRequest(getRoomSchema), async (r
     if (!room) {
       return res.status(404).json({ error: 'Sala no encontrada' });
     }
-
     res.json({ room: stripTriviaAnswers(stripGuestCapabilityHashes(room)) });
   } catch (error) {
     logger.error('Error getting room:', error);
@@ -168,7 +168,6 @@ router.post('/:code/select-card', selectCardLimiter, validateRequest(selectCardS
     if (!room) {
       return res.status(404).json({ error: 'Sala no encontrada' });
     }
-
     const playerIdString = playerId.toString();
     const isRoomMember = room.players.some((player) => player._id.toString() === playerIdString);
     if (!isRoomMember) {
@@ -212,12 +211,17 @@ router.post('/:code/select-card', selectCardLimiter, validateRequest(selectCardS
       };
     }
 
+    if (room.gameState && room.gameState !== 'waiting') {
+      return res.status(403).json({ error: 'No se pueden cambiar cartones después de iniciar la partida' });
+    }
+
     const player = await Player.findOneAndUpdate(
       playerFilter,
       {
         $set: {
           cardNumber,
           'bingoCard.matrix': bingoCard,
+          'bingoCard.matrixVersion': CARD_MATRIX_VERSION,
           'bingoCard.markedCells': [[2, 2]]
         }
       },
@@ -237,6 +241,9 @@ router.post('/:code/select-card', selectCardLimiter, validateRequest(selectCardS
     }));
   } catch (error) {
     logger.error('Error selecting card:', error);
+    if (error?.code === 11000) {
+      return res.status(409).json({ error: 'El cartón ya está en uso. Elige otro número.' });
+    }
     res.status(500).json({ error: 'No se pudo seleccionar el cartón' });
   }
 });

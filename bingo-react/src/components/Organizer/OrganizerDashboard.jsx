@@ -11,7 +11,12 @@ import { Play, Pause, RefreshCw, Users, Link as LinkIcon, Tv, X, Search, Crown, 
 import RecordingChallenge from '../Recording/RecordingChallenge';
 import { getShareableUrl } from '../../utils/networkUtils';
 import { createTVDisplayURL, openTVDisplay } from '../../utils/tvAuthorization';
-import { generateBingoCard, checkBingoWithCalledNumbers } from '../../utils/bingoCardGenerator';
+import {
+  CARD_MATRIX_VERSION,
+  checkBingoWithCalledNumbers,
+  generateBingoCard,
+  getCardCell
+} from '../../utils/bingoCardGenerator';
 
 // --- Subcomponentes de UI ---
 
@@ -308,8 +313,9 @@ const ManualBingoValidator = ({ isOpen, onClose, player, calledNumbers, gameMode
 
         {/* Cartón 5x5 */}
         <div className="grid grid-cols-5 gap-2 mb-6">
-          {matrix.map((row, rowIdx) =>
-            row.map((cell, colIdx) => {
+          {Array.from({ length: 5 }, (_, rowIdx) =>
+            Array.from({ length: 5 }, (_, colIdx) => {
+              const cell = getCardCell(matrix, rowIdx, colIdx, CARD_MATRIX_VERSION);
               const isMarked = markedSet.has(`${rowIdx},${colIdx}`);
               const isFree = cell === 'BINGO';
 

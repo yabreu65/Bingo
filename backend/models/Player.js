@@ -39,6 +39,10 @@ const playerSchema = new mongoose.Schema({
       type: Array,
       default: []
     },
+    matrixVersion: {
+      type: String,
+      default: null
+    },
     markedCells: {
       type: Array,
       default: []
@@ -46,6 +50,9 @@ const playerSchema = new mongoose.Schema({
   },
   stats: {
     points: { type: Number, default: 0 },
+      gamesPlayed: { type: Number, default: 0 },
+      gamesWon: { type: Number, default: 0 },
+      bingosAchieved: { type: Number, default: 0 },
     level: {
       name: { type: String, default: '⭐ Novato' },
       stars: { type: Number, default: 1 }
@@ -106,6 +113,13 @@ playerSchema.set('toJSON', {
 playerSchema.set('toObject', {
   transform: stripPrivatePlayerFields
 });
+
+// Impide que dos jugadores digitales reciban el mismo cartón dentro de una sala.
+// Los jugadores sin cartón no participan en el índice parcial.
+playerSchema.index(
+  { room: 1, cardNumber: 1 },
+  { unique: true, partialFilterExpression: { cardNumber: { $type: 'number' } } }
+);
 
 /**
  * Pre-save hook para sincronizar el nombre del usuario

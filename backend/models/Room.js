@@ -102,6 +102,10 @@ const roomSchema = new mongoose.Schema({
       min: 186,
       max: 200
     },
+    matrixVersion: {
+      type: String,
+      default: 'v1-column-major'
+    },
     assignedAt: {
       type: Date,
       default: Date.now

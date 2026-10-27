@@ -1,6 +1,8 @@
 /**
  * Generador de Cartones de Bingo
- * Crea cartones únicos formato 5x5 con distribución B-I-N-G-O
+ * Crea cartones determinísticos con distribución B-I-N-G-O.
+ * El contrato online histórico serializa matrix[columna][fila]; las vistas
+ * utilizan getCardCell para leer siempre con coordenadas visuales row/col.
  * Los cartones son DETERMINÍSTICOS - el mismo número siempre genera el mismo cartón
  */
 
@@ -27,64 +29,48 @@ function seededRandom(seed) {
  * @param {Function} rng - Función generadora de números aleatorios
  * @returns {number[]} Array de números únicos
  */
-function getRandomNumbers(min, max, count, rng) {
-  const numbers = [];
-  const available = [];
+export const CARD_MATRIX_VERSION = 'v1-column-major';
+export const ROW_MAJOR_MATRIX_VERSION = 'v2-row-major';
+export const FREE_CELL = 'BINGO';
 
-  // Crear array con todos los números posibles
-  for (let i = min; i <= max; i++) {
-    available.push(i);
+function generateColumn(min, max, rng) {
+  const column = [];
+  while (column.length < 5) {
+    const number = Math.floor(rng() * (max - min + 1)) + min;
+    if (!column.includes(number)) column.push(number);
   }
+  return column.sort((a, b) => a - b);
+}
 
-  // Seleccionar números usando el generador con semilla
-  for (let i = 0; i < count; i++) {
-    const randomIndex = Math.floor(rng() * available.length);
-    numbers.push(available[randomIndex]);
-    available.splice(randomIndex, 1);
+export function getCardCell(matrix, row, col, matrixVersion = ROW_MAJOR_MATRIX_VERSION) {
+  if (!Array.isArray(matrix) || !Number.isInteger(row) || !Number.isInteger(col)) {
+    return undefined;
   }
-
-  return numbers.sort((a, b) => a - b);
+  return matrixVersion === CARD_MATRIX_VERSION ? matrix[col]?.[row] : matrix[row]?.[col];
 }
 
 /**
  * Genera un cartón de bingo determinístico basado en el número de cartón
  * @param {number} cardNumber - Número del cartón (1-200). El mismo número siempre genera el mismo cartón
- * @returns {Object} Cartón de bingo con estructura 5x5
+ * @returns {Object} Cartón de bingo con matriz column-major compatible con backend
  */
 export function generateBingoCard(cardNumber = 1) {
   // Crear generador pseudo-aleatorio con semilla basada en el número de cartón
   const rng = seededRandom(cardNumber);
 
-  const card = {
-    B: getRandomNumbers(1, 15, 5, rng),
-    I: getRandomNumbers(16, 30, 5, rng),
-    N: getRandomNumbers(31, 45, 5, rng),
-    G: getRandomNumbers(46, 60, 5, rng),
-    O: getRandomNumbers(61, 75, 5, rng)
-  };
+  const matrix = [
+    generateColumn(1, 15, rng),
+    generateColumn(16, 30, rng),
+    generateColumn(31, 45, rng),
+    generateColumn(46, 60, rng),
+    generateColumn(61, 75, rng)
+  ];
 
-  // Convertir a formato de matriz 5x5
-  const matrix = [];
-  for (let row = 0; row < 5; row++) {
-    const currentRow = [];
-    currentRow.push(card.B[row]);
-    currentRow.push(card.I[row]);
-
-    // Centro es BINGO space
-    if (row === 2) {
-      currentRow.push('BINGO');
-    } else {
-      currentRow.push(card.N[row]);
-    }
-
-    currentRow.push(card.G[row]);
-    currentRow.push(card.O[row]);
-
-    matrix.push(currentRow);
-  }
+  matrix[2][2] = FREE_CELL;
 
   return {
     matrix,
+    matrixVersion: CARD_MATRIX_VERSION,
     markedCells: [[2, 2]] // Centro ya está marcado (BINGO)
   };
 }
@@ -101,7 +87,7 @@ export function markNumber(matrix, markedCells, number) {
 
   for (let row = 0; row < 5; row++) {
     for (let col = 0; col < 5; col++) {
-      if (matrix[row][col] === number) {
+      if (getCardCell(matrix, row, col, CARD_MATRIX_VERSION) === number) {
         // Verificar si no está ya marcada
         const alreadyMarked = newMarked.some(
           ([r, c]) => r === row && c === col
@@ -190,7 +176,8 @@ export function checkFourCorners(markedCells) {
  * @returns {boolean} True si todas las 25 celdas están marcadas
  */
 export function checkFullCard(markedCells) {
-  return markedCells.length === 25;
+  const marked = new Set(markedCells.map(([row, col]) => `${row},${col}`));
+  return marked.size === 25;
 }
 
 /**
@@ -277,7 +264,12 @@ export function countCompletedLines(markedCells) {
  * @param {string} gameMode - Modo: 'line', 'fourCorners', 'centralCross', 'full'
  * @returns {Object} {hasBingo: boolean, pattern: string, markedCells: Array}
  */
-export function checkBingoWithCalledNumbers(matrix, calledNumbers, gameMode = 'full') {
+export function checkBingoWithCalledNumbers(
+  matrix,
+  calledNumbers,
+  gameMode = 'full',
+  matrixVersion = CARD_MATRIX_VERSION
+) {
   // Crear set de números cantados para búsqueda rápida
   const calledSet = new Set(calledNumbers);
 
@@ -286,8 +278,8 @@ export function checkBingoWithCalledNumbers(matrix, calledNumbers, gameMode = 'f
 
   for (let row = 0; row < 5; row++) {
     for (let col = 0; col < 5; col++) {
-      const value = matrix[row][col];
-      if (value !== 'BINGO' && calledSet.has(value)) {
+      const value = getCardCell(matrix, row, col, matrixVersion);
+      if (value !== FREE_CELL && calledSet.has(value)) {
         markedCells.push([row, col]);
       }
     }

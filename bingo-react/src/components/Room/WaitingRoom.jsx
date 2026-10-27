@@ -3,6 +3,7 @@ import toast from 'react-hot-toast';
 import { useSocket } from '../../context/useSocket';
 import SyncedMusicPlayer from '../Music/SyncedMusicPlayer';
 import BingoCard from '../BingoCard/BingoCard';
+import { CARD_MATRIX_VERSION } from '../../utils/bingoCardGenerator';
 import './WaitingRoom.css';
 
 const WaitingRoom = ({ roomData, onGameStart }) => {
@@ -15,6 +16,7 @@ const WaitingRoom = ({ roomData, onGameStart }) => {
   const [countdown, setCountdown] = useState(null);
   const [timeLeft, setTimeLeft] = useState(null);
   const intervalSec = roomData.room?.config?.timeBetweenNumbers || 30;
+  const eligiblePlayerCount = players.filter((player) => player.cardNumber != null).length;
 
   useEffect(() => {
     // Join the Socket.io room with the current principal's capability.
@@ -103,8 +105,8 @@ const WaitingRoom = ({ roomData, onGameStart }) => {
   };
 
   const handleStartGame = () => {
-    if (players.length < 2) {
-      toast.error('Se necesitan al menos 2 jugadores para comenzar');
+    if (eligiblePlayerCount < 2) {
+      toast.error('Se necesitan al menos 2 jugadores con cartón para comenzar');
       return;
     }
     startGame(roomData.roomCode, roomData.isHost ? roomData.hostCapability : undefined);
@@ -135,6 +137,7 @@ const WaitingRoom = ({ roomData, onGameStart }) => {
             <h3>🎴 Mi Cartón</h3>
             <BingoCard
               card={myCard}
+              matrixVersion={myCard.matrixVersion || CARD_MATRIX_VERSION}
               compact={false}
               interactive={true}
               onCellClick={(row, col, cell) => {
@@ -232,13 +235,13 @@ const WaitingRoom = ({ roomData, onGameStart }) => {
               <button
                 className="start-game-btn"
                 onClick={handleStartGame}
-                disabled={players.length < 2}
+                disabled={eligiblePlayerCount < 2}
               >
                 🎮 Iniciar Partida
               </button>
-              {players.length < 2 && (
+              {eligiblePlayerCount < 2 && (
                 <p className="min-players-hint">
-                  Se necesitan al menos 2 jugadores para comenzar
+                  Se necesitan al menos 2 jugadores con cartón para comenzar
                 </p>
               )}
             </>
@@ -279,6 +282,7 @@ const WaitingRoom = ({ roomData, onGameStart }) => {
             <h3>🎴 Mi Cartón</h3>
             <BingoCard
               card={myCard}
+              matrixVersion={myCard.matrixVersion || CARD_MATRIX_VERSION}
               compact={true}
               interactive={true}
               onCellClick={(row, col, cell) => {

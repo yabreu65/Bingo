@@ -3,6 +3,7 @@ import toast from 'react-hot-toast';
 import { useSocket } from '../../context/useSocket';
 import ChallengeModal from '../Challenges/ChallengeModal';
 import TiebreakVotingModal from '../Voting/TiebreakVotingModal';
+import { CARD_MATRIX_VERSION, getCardCell } from '../../utils/bingoCardGenerator';
 import './PlayerCardView.css';
 
 const STORAGE_KEY = 'bingo_session';
@@ -294,7 +295,7 @@ const PlayerCardView = ({ roomData }) => {
       socket?.emit('claim-bingo', {
         roomCode: roomData.roomCode,
         playerId: roomData.playerId,
-        bingoType: 'full'
+        bingoType: roomData.room?.config?.gameMode || 'full'
       });
     }
   };
@@ -311,6 +312,14 @@ const PlayerCardView = ({ roomData }) => {
   }
 
   const card = roomData.bingoCard.matrix;
+  const matrixVersion = roomData.bingoCard.matrixVersion || CARD_MATRIX_VERSION;
+  const gameMode = roomData.room?.config?.gameMode || 'full';
+  const gameModeLabels = {
+    line: 'LÍNEA',
+    fourCorners: '4 ESQUINAS',
+    centralCross: 'CRUZ CENTRAL',
+    full: 'BINGO'
+  };
 
   return (
     <div className="player-card-view">
@@ -363,13 +372,17 @@ const PlayerCardView = ({ roomData }) => {
           {[0, 1, 2, 3, 4].map((row) => (
             <div key={row} className="bingo-card-row">
               {[0, 1, 2, 3, 4].map((col) => {
-                const value = card[col]?.[row];
+                const value = getCardCell(card, row, col, matrixVersion);
                 const marked = value === 'BINGO' || isCellMarked(row, col);
                 const wasCalled = calledNumbers.includes(value);
 
                 return (
                   <div
                     key={`${row}-${col}`}
+                    data-testid="bingo-card-cell"
+                    data-row={row}
+                    data-col={col}
+                    data-value={value}
                     className={`bingo-card-cell ${marked ? 'marked' : ''} ${
                       wasCalled && !marked ? 'available' : ''
                     }`}
@@ -400,7 +413,7 @@ const PlayerCardView = ({ roomData }) => {
       {/* Bingo Button */}
       {gameState === 'playing' && (
         <button className="bingo-claim-btn" onClick={handleClaimBingo}>
-          🎉 ¡CANTAR BINGO!
+          🎉 ¡CANTAR {gameModeLabels[gameMode] || gameModeLabels.full}!
         </button>
       )}
 

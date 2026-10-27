@@ -1,5 +1,12 @@
-// Generador de 200 cartones de bingo únicos y predefinidos
-// Los cartones son DETERMINÍSTICOS - el mismo número siempre genera el mismo cartón
+// Generador de 200 cartones de bingo únicos y predefinidos.
+// Los cartones son DETERMINÍSTICOS: el mismo número siempre genera el mismo cartón.
+
+// La matriz histórica se serializa como matrix[columna][fila]. Las coordenadas
+// públicas del juego siguen siendo { row, col}; getCardCell centraliza la única
+// transformación necesaria para conservar cartones ya asignados.
+const CARD_MATRIX_VERSION = 'v1-column-major';
+const CARD_SIZE = 5;
+const FREE_CELL = 'BINGO';
 
 /**
  * Generador de números pseudo-aleatorios con semilla (Mulberry32)
@@ -25,10 +32,10 @@ function generateBingoCard(cardNumber) {
   // Crear generador pseudo-aleatorio con semilla basada en el número de cartón
   const rng = seededRandom(cardNumber);
 
-  const card = [];
+  const cardColumns = [];
 
   // B (1-15), I (16-30), N (31-45), G (46-60), O (61-75)
-  const columns = [
+  const ranges = [
     { min: 1, max: 15 },
     { min: 16, max: 30 },
     { min: 31, max: 45 },
@@ -38,7 +45,7 @@ function generateBingoCard(cardNumber) {
 
   for (let col = 0; col < 5; col++) {
     const columnNumbers = [];
-    const { min, max } = columns[col];
+    const { min, max } = ranges[col];
 
     while (columnNumbers.length < 5) {
       const num = Math.floor(rng() * (max - min + 1)) + min;
@@ -49,13 +56,13 @@ function generateBingoCard(cardNumber) {
 
     // Ordenar los números de cada columna de menor a mayor
     columnNumbers.sort((a, b) => a - b);
-    card.push(columnNumbers);
+    cardColumns.push(columnNumbers);
   }
 
   // Center space is BINGO
-  card[2][2] = 'BINGO';
+  cardColumns[2][2] = FREE_CELL;
 
-  return card;
+  return cardColumns;
 }
 
 // Generate 200 unique cards
@@ -81,6 +88,24 @@ function getCard(cardNumber) {
 }
 
 module.exports = {
+  CARD_MATRIX_VERSION,
+  CARD_SIZE,
+  FREE_CELL,
+  getCardCell,
   getCard,
   BINGO_CARDS
 };
+
+/**
+ * Reads a persisted card using public row/column coordinates.
+ * @param {Array} matrix - Persisted column-major matrix
+ * @param {number} row - Visual row, zero-based
+ * @param {number} col - Visual column, zero-based
+ * @returns {number|string|undefined}
+ */
+function getCardCell(matrix, row, col) {
+  if (!Array.isArray(matrix) || !Number.isInteger(row) || !Number.isInteger(col)) {
+    return undefined;
+  }
+  return matrix[col]?.[row];
+}
