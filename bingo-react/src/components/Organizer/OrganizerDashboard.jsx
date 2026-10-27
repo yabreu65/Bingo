@@ -10,6 +10,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Play, Pause, RefreshCw, Users, Link as LinkIcon, Tv, X, Search, Crown, Mic, Music, Gift, Target, Clock, Video, Eye, CheckCircle, XCircle } from 'lucide-react';
 import RecordingChallenge from '../Recording/RecordingChallenge';
 import { getShareableUrl } from '../../utils/networkUtils';
+import { createTVDisplayURL, openTVDisplay } from '../../utils/tvAuthorization';
 import { generateBingoCard, checkBingoWithCalledNumbers } from '../../utils/bingoCardGenerator';
 
 // --- Subcomponentes de UI ---
@@ -174,7 +175,7 @@ const ManualPlayerModal = ({ isOpen, onClose, onAssign, formData, setFormData, a
             </label>
             <select
               value={formData.cardNumber || ''}
-              onChange={(e) => setFormData({ ...formData, cardNumber: parseInt(e.target.value) })}
+              onChange={(e) => setFormData({ ...formData, cardNumber: Number(e.target.value) })}
               className="w-full bg-slate-700/50 border border-slate-600 rounded-lg px-4 py-3 text-white focus:ring-2 focus:ring-amber-500 focus:outline-none transition-all"
             >
               <option value="">Selecciona un cartón...</option>
@@ -429,7 +430,10 @@ export default function OrganizerDashboard({ roomData }) {
 
         // Sincronizar estado del dashboard después de conectar
         console.log('🔄 Requesting dashboard state sync...');
-        socket.emit('sync-dashboard', { roomCode: roomState.code }, (syncResponse) => {
+        socket.emit('sync-dashboard', {
+          roomCode: roomState.code,
+          hostCapability: roomData.hostCapability
+        }, (syncResponse) => {
           if (syncResponse?.success) {
             console.log('✅ Dashboard state synced:', syncResponse.data);
 
@@ -742,11 +746,16 @@ export default function OrganizerDashboard({ roomData }) {
       cardNumber: player.cardNumber,
       playerId: player.playerId,
       hostCapability: roomData.hostCapability
-    });
+    }, (response) => {
+      if (!response?.success) {
+        showError(response?.error || 'No se pudo verificar el bingo manual', 'Error al verificar BINGO');
+        return;
+      }
 
-    showSuccess(`¡BINGO confirmado para ${player.playerName}!`);
-    setShowBingoValidator(false);
-    setValidatingPlayer(null);
+      showSuccess(`¡BINGO confirmado para ${response.playerName}!`);
+      setShowBingoValidator(false);
+      setValidatingPlayer(null);
+    });
   };
 
   // --- Lógica de Renderizado ---
@@ -756,11 +765,25 @@ export default function OrganizerDashboard({ roomData }) {
 
   const shareableBaseUrl = getShareableUrl();
   const joinUrl = `${shareableBaseUrl}/?room=${roomState.code}`;
-  const tvUrl = `${shareableBaseUrl}/?tv=${roomState.code}`;
+  const tvUrl = createTVDisplayURL(shareableBaseUrl, roomState.code);
 
   const copyToClipboard = (text, message) => {
     navigator.clipboard.writeText(text);
     toast.success(message, { icon: '📋' });
+  };
+
+  const handleOpenTV = () => {
+    if (!roomData.tvCapability) {
+      showError('La sesión del anfitrión no tiene credencial para abrir la TV.');
+      return;
+    }
+    openTVDisplay(
+      window,
+      tvUrl,
+      roomState.code,
+      roomData.tvCapability,
+      () => showError('El navegador bloqueó la ventana de TV. Permití las ventanas emergentes y probá de nuevo.')
+    );
   };
 
   const gameStatusMap = {
@@ -931,6 +954,7 @@ export default function OrganizerDashboard({ roomData }) {
                       roomCode={roomState.code}
                       playerId={activeChallenge.player?._id || roomData.playerId}
                       playerName={activeChallenge.player?.name || 'Jugador'}
+                      hostCapability={roomData.hostCapability}
                       challengeType={activeChallenge.type}
                       challengeText={activeChallenge.data?.text || activeChallenge.data || 'Challenge'}
                       onRecordingComplete={handleRecordingComplete}
@@ -1061,7 +1085,7 @@ export default function OrganizerDashboard({ roomData }) {
                 <ActionButton
                   icon={<Tv size={16} />}
                   label="Abrir TV"
-                  onClick={() => window.open(tvUrl, '_blank', 'noopener,noreferrer')}
+                  onClick={handleOpenTV}
                   variant="success"
                   className="!py-2.5 !text-sm"
                 />

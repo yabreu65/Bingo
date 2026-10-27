@@ -32,14 +32,16 @@ describe('QuickJoin', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it('joins the room and selects the requested card', async () => {
+  it('joins the room and selects the requested card with its player capability', async () => {
     const onJoinComplete = vi.fn();
+    const playerCapability = 'j'.repeat(43);
     const fetchMock = vi.fn()
       .mockResolvedValueOnce({
         ok: true,
         json: async () => ({
           player: { _id: 'player-1' },
           room: { code: 'ABC123' },
+          playerCapability
         }),
       })
       .mockResolvedValueOnce({
@@ -61,10 +63,16 @@ describe('QuickJoin', () => {
       roomCode: 'ABC123',
       playerName: 'Ana',
     });
-    expect(fetchMock.mock.calls[1][0]).toContain('/api/rooms/abc123/select-card');
+    expect(fetchMock.mock.calls[1][0]).toContain('/api/rooms/ABC123/select-card');
     expect(JSON.parse(fetchMock.mock.calls[1][1].body)).toEqual({
       playerId: 'player-1',
       cardNumber: 42,
     });
+    expect(fetchMock.mock.calls[1][1].headers).toEqual(expect.objectContaining({
+      'x-player-capability': playerCapability
+    }));
+    await waitFor(() => expect(onJoinComplete).toHaveBeenCalledWith(expect.objectContaining({
+      playerCapability
+    })));
   });
 });

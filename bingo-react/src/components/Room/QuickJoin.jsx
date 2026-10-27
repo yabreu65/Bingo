@@ -14,6 +14,14 @@ const QuickJoin = ({ roomCode, onJoinComplete }) => {
     e.preventDefault();
     setError('');
 
+    const normalizedRoomCode = typeof roomCode === 'string' ? roomCode.trim().toUpperCase() : '';
+    if (!/^[A-Z0-9]{6}$/.test(normalizedRoomCode)) {
+      const errorMsg = 'El código de sala no es válido';
+      setError(errorMsg);
+      toast.error(errorMsg);
+      return;
+    }
+
     // Validaciones mejoradas
     if (!playerName.trim()) {
       const errorMsg = 'Por favor ingresa tu nombre';
@@ -29,13 +37,20 @@ const QuickJoin = ({ roomCode, onJoinComplete }) => {
       return;
     }
 
-    const cardNum = parseInt(cardNumber);
     if (!cardNumber || cardNumber.trim() === '') {
       const errorMsg = 'Por favor ingresa un número de cartón';
       setError(errorMsg);
       toast.error(errorMsg);
       return;
     }
+
+    if (!/^\d+$/.test(cardNumber.trim())) {
+      const errorMsg = 'El número de cartón debe estar entre 1 y 200';
+      setError(errorMsg);
+      toast.error(errorMsg);
+      return;
+    }
+    const cardNum = Number(cardNumber);
 
     if (isNaN(cardNum) || cardNum < 1 || cardNum > 200) {
       const errorMsg = 'El número de cartón debe estar entre 1 y 200';
@@ -55,7 +70,7 @@ const QuickJoin = ({ roomCode, onJoinComplete }) => {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          roomCode: roomCode.toUpperCase(),
+          roomCode: normalizedRoomCode,
           playerName: playerName.trim(),
         }),
       });
@@ -73,13 +88,20 @@ const QuickJoin = ({ roomCode, onJoinComplete }) => {
         setLoadingStep('');
         return;
       }
+      if (typeof joinData.playerCapability !== 'string' || joinData.playerCapability.length !== 43) {
+        setError('No se pudo establecer una sesión segura. Intenta unirte de nuevo.');
+        setLoading(false);
+        setLoadingStep('');
+        return;
+      }
 
       // Paso 2: Seleccionar cartón
       setLoadingStep('Seleccionando cartón...');
-      const cardResponse = await fetch(`${API_URL}/api/rooms/${roomCode}/select-card`, {
+      const cardResponse = await fetch(`${API_URL}/api/rooms/${normalizedRoomCode}/select-card`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          'x-player-capability': joinData.playerCapability
         },
         body: JSON.stringify({
           playerId: joinData.player._id,
@@ -113,6 +135,7 @@ const QuickJoin = ({ roomCode, onJoinComplete }) => {
             playerId: joinData.player._id,
             playerName: playerName.trim(),
             isHost: false,
+            playerCapability: joinData.playerCapability,
             room: joinData.room,
             cardNumber: cardNum,
             bingoCard: cardData.bingoCard

@@ -12,8 +12,6 @@ const CardSelection = ({ roomData, onCardSelected }) => {
     e.preventDefault();
     setError('');
 
-    const cardNumber = parseInt(selectedCard);
-
     // Validaciones mejoradas
     if (!selectedCard || selectedCard.trim() === '') {
       const errorMsg = 'Por favor ingresa un número de cartón';
@@ -22,12 +20,14 @@ const CardSelection = ({ roomData, onCardSelected }) => {
       return;
     }
 
-    if (isNaN(cardNumber)) {
+    if (!/^\d+$/.test(selectedCard.trim())) {
       const errorMsg = 'Debes ingresar un número válido';
       setError(errorMsg);
       toast.error(errorMsg);
       return;
     }
+
+    const cardNumber = Number(selectedCard);
 
     if (cardNumber < 1 || cardNumber > 200) {
       const errorMsg = 'El número de cartón debe estar entre 1 y 200';
@@ -43,6 +43,7 @@ const CardSelection = ({ roomData, onCardSelected }) => {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          'x-player-capability': roomData.playerCapability
         },
         body: JSON.stringify({
           playerId: roomData.playerId,

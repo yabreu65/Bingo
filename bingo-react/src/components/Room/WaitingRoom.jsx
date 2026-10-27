@@ -17,8 +17,11 @@ const WaitingRoom = ({ roomData, onGameStart }) => {
   const intervalSec = roomData.room?.config?.timeBetweenNumbers || 30;
 
   useEffect(() => {
-    // Join the Socket.io room
-    joinRoom(roomData.roomCode, roomData.playerId);
+    // Join the Socket.io room with the current principal's capability.
+    const credentials = roomData.isHost
+      ? { hostCapability: roomData.hostCapability }
+      : { playerCapability: roomData.playerCapability };
+    joinRoom(roomData.roomCode, roomData.playerId, credentials);
 
     // Listen for new players joining
     const unsubscribePlayerJoined = onPlayerJoined((data) => {
@@ -37,7 +40,17 @@ const WaitingRoom = ({ roomData, onGameStart }) => {
       if (unsubscribePlayerJoined) unsubscribePlayerJoined();
       if (unsubscribeGameStarted) unsubscribeGameStarted();
     };
-  }, [joinRoom, onPlayerJoined, onGameStarted, onGameStart, roomData.roomCode, roomData.playerId]);
+  }, [
+    joinRoom,
+    onPlayerJoined,
+    onGameStarted,
+    onGameStart,
+    roomData.roomCode,
+    roomData.playerId,
+    roomData.isHost,
+    roomData.hostCapability,
+    roomData.playerCapability
+  ]);
 
   useEffect(() => {
     const unsubCell = onCellMarked((data) => {
@@ -94,7 +107,7 @@ const WaitingRoom = ({ roomData, onGameStart }) => {
       toast.error('Se necesitan al menos 2 jugadores para comenzar');
       return;
     }
-    startGame(roomData.roomCode);
+    startGame(roomData.roomCode, roomData.isHost ? roomData.hostCapability : undefined);
   };
 
   if (gameStarted && !roomData.isHost) {

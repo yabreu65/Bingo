@@ -13,7 +13,9 @@ const ChallengeModal = ({
   externalGameId = null,
   externalRoomCode = null,
   externalPlayerId = null,
-  externalPlayerName = null
+  externalPlayerName = null,
+  externalPlayerCapability = null,
+  externalTriviaResult = null
 }) => {
   const contextData = useGame();
 
@@ -23,6 +25,7 @@ const ChallengeModal = ({
   const roomCode = externalRoomCode || contextData.roomCode;
   const playerId = externalPlayerId || contextData.playerId;
   const playerName = externalPlayerName || contextData.playerName;
+  const playerCapability = externalPlayerCapability || contextData.playerCapability;
   const [selectedAnswer, setSelectedAnswer] = useState(null);
   const [showResult, setShowResult] = useState(false);
   const [timer, setTimer] = useState(0);
@@ -36,6 +39,15 @@ const ChallengeModal = ({
   // Refs para los sonidos
   const applauseAudioRef = useRef(null);
   const donkeyAudioRef = useRef(null);
+
+  /* eslint-disable react-hooks/set-state-in-effect */
+  useEffect(() => {
+    if (activeChallenge?.type === 'trivia' && externalTriviaResult?.answer !== undefined) {
+      setSelectedAnswer(externalTriviaResult.answer);
+      setShowResult(true);
+    }
+  }, [activeChallenge, externalTriviaResult]);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   const startTimer = useCallback((initialTime) => {
     if (timerIntervalRef.current) {
@@ -152,17 +164,19 @@ const ChallengeModal = ({
     if (showResult) return;
 
     setSelectedAnswer(answerIndex);
-    setShowResult(true);
-
     // Determinar si la respuesta es correcta
-    const isCorrect = answerIndex === activeChallenge.data.correct;
+    const hasLocalAnswer = Number.isInteger(activeChallenge?.data?.correct);
+    const isCorrect = hasLocalAnswer ? answerIndex === activeChallenge.data.correct : null;
+    setShowResult(hasLocalAnswer);
 
     // IMPORTANTE: Emitir INMEDIATAMENTE la respuesta para sincronizar con TV
     console.log('📤 Emitting answer immediately for TV sync');
     completeChallenge(true, answerIndex);
 
     // Reproducir el sonido correspondiente
-    const audioToPlay = isCorrect ? applauseAudioRef.current : donkeyAudioRef.current;
+    const audioToPlay = hasLocalAnswer
+      ? (isCorrect ? applauseAudioRef.current : donkeyAudioRef.current)
+      : null;
 
     if (audioToPlay) {
       audioToPlay.currentTime = 0; // Reiniciar el audio
@@ -243,9 +257,13 @@ const ChallengeModal = ({
                     <button
                       key={index}
                       className={`trivia-option ${
-                        showResult && index === data.correct
+                        showResult && externalTriviaResult?.isCorrect && index === selectedAnswer
                           ? 'correct'
-                          : showResult && index === selectedAnswer
+                          : showResult && externalTriviaResult && !externalTriviaResult.isCorrect && index === selectedAnswer
+                          ? 'incorrect'
+                          : showResult && !externalTriviaResult && index === data.correct
+                          ? 'correct'
+                          : showResult && !externalTriviaResult && index === selectedAnswer
                           ? 'incorrect'
                           : ''
                       } ${selectedAnswer === index ? 'selected' : ''}`}
@@ -258,10 +276,10 @@ const ChallengeModal = ({
                 </div>
 
                 {showResult && (
-                  <div className={`trivia-result ${selectedAnswer === data.correct ? 'correct' : 'incorrect'}`}>
-                    {selectedAnswer === data.correct
+                  <div className={`trivia-result ${(externalTriviaResult?.isCorrect ?? selectedAnswer === data.correct) ? 'correct' : 'incorrect'}`}>
+                    {(externalTriviaResult?.isCorrect ?? selectedAnswer === data.correct)
                       ? '✅ ¡CORRECTO! ¡Muy bien!'
-                      : `❌ ¡INCORRECTO! La respuesta era: ${data.options[data.correct]}`}
+                      : '❌ ¡INCORRECTO!'}
                   </div>
                 )}
               </>
@@ -306,6 +324,7 @@ const ChallengeModal = ({
                 roomCode={roomCode}
                 playerId={playerId}
                 playerName={playerName}
+                playerCapability={playerCapability}
                 challengeType={type}
                 challengeText={data}
                 onRecordingComplete={handleRecordingComplete}
@@ -486,6 +505,7 @@ const ChallengeModal = ({
                 roomCode={roomCode}
                 playerId={playerId}
                 playerName={playerName}
+                playerCapability={playerCapability}
                 challengeType={type}
                 challengeText={karaokeSong?.title || data}
                 onRecordingComplete={handleRecordingComplete}

@@ -24,7 +24,7 @@ const MotionBox = ({ children, ...props }) => (
   </motion.div>
 );
 
-const TVDisplay = ({ roomCode }) => {
+const TVDisplay = ({ roomCode, tvCapability }) => {
   const { socket } = useSocket();
   const [currentNumber, setCurrentNumber] = useState(null);
   const [calledNumbers, setCalledNumbers] = useState([]);
@@ -37,6 +37,7 @@ const TVDisplay = ({ roomCode }) => {
   const [bingoWinner, setBingoWinner] = useState(null);
   const [triviaAnswer, setTriviaAnswer] = useState(null); // Para almacenar la respuesta del jugador
   const [manualPlayerAnswers, setManualPlayerAnswers] = useState({}); // Respuestas de jugadores manuales {playerId: answerIndex}
+  const [manualPlayerResults, setManualPlayerResults] = useState({});
 
   // Estados para tie-break
   const [tieBreakActive, setTieBreakActive] = useState(false);
@@ -128,6 +129,7 @@ const TVDisplay = ({ roomCode }) => {
         setChallengeTimeLeft(null);
         setTriviaAnswer(null); // Limpiar respuesta de trivia
         setManualPlayerAnswers({}); // Limpiar respuestas de jugadores manuales
+        setManualPlayerResults({});
 
         // El backend enviará game-state-changed y music-sync
         // El useEffect de gameState se encargará de reproducir
@@ -139,19 +141,17 @@ const TVDisplay = ({ roomCode }) => {
         console.log('📺 TVDisplay: Full data received:', JSON.stringify(data, null, 2));
         console.log('📺 TVDisplay: Active challenge:', activeChallenge);
 
-        const { answer, correct, isCorrect } = data;
+        const { answer, isCorrect } = data;
 
         console.log('📺 TVDisplay: Extracted values:', {
             answer,
-            correct,
             isCorrect,
             answerType: typeof answer,
-            correctType: typeof correct,
             isCorrectType: typeof isCorrect
         });
 
         // Guardar la respuesta para resaltarla en el UI
-        setTriviaAnswer({ answer, correct, isCorrect });
+        setTriviaAnswer({ answer, isCorrect });
         console.log('📺 TVDisplay: ✅ triviaAnswer state updated');
 
         // Reproducir sonido correspondiente
@@ -174,6 +174,12 @@ const TVDisplay = ({ roomCode }) => {
         }
 
         console.log('📺 TVDisplay: ========== END TRIVIA ANSWERED EVENT ==========');
+    };
+    const handleTriviaResult = (data) => {
+      const challengePlayerId = activeChallenge?.player?.id || activeChallenge?.player?._id || activeChallenge?.player?.playerId;
+      if (!challengePlayerId || data?.playerId?.toString() !== challengePlayerId.toString()) return;
+      setTriviaAnswer(data);
+      setManualPlayerResults(prev => ({ ...prev, [data.playerId]: data }));
     };
     const handleCountdownTick = (data) => {
         if (typeof data?.value === 'number') {
@@ -284,14 +290,19 @@ const TVDisplay = ({ roomCode }) => {
     };
 
 
-    // Join room con callback para verificar éxito
-    socket.emit('join-room', { roomCode, playerId: 'tv-display' }, (response) => {
-      if (response?.success) {
-        console.log('📺 TV Display joined room successfully:', response);
-      } else {
-        console.error('📺 TV Display failed to join room:', response?.error);
-      }
-    });
+    // Join only after receiving the scoped capability through the opener handshake.
+    const joinTVRoom = () => {
+      if (!tvCapability) return;
+      socket.emit('join-room', { roomCode, playerId: 'tv-display', tvCapability }, (response) => {
+        if (response?.success) {
+          console.log('📺 TV Display joined room successfully:', response);
+        } else {
+          console.error('📺 TV Display failed to join room:', response?.error);
+        }
+      });
+    };
+    joinTVRoom();
+    socket.on('connect', joinTVRoom);
 
     socket.on('number-called', handleNumberCalled);
     socket.on('game-started', handleGameStarted);
@@ -301,6 +312,8 @@ const TVDisplay = ({ roomCode }) => {
     socket.on('challenge-countdown', handleChallengeCountdown);
     socket.on('challenge-complete', handleChallengeComplete);
     socket.on('trivia-answered', handleTriviaAnswered);
+    socket.on('trivia-result-public', handleTriviaAnswered);
+    socket.on('trivia-result', handleTriviaResult);
     socket.on('countdown-tick', handleCountdownTick);
     socket.on('music-song-change', handleMusicSongChange);
     socket.on('music-sync', handleMusicSync);
@@ -321,6 +334,7 @@ const TVDisplay = ({ roomCode }) => {
 
 
     return () => {
+      socket.off('connect', joinTVRoom);
       socket.off('number-called', handleNumberCalled);
       socket.off('game-started', handleGameStarted);
       socket.off('game-state-changed', handleGameStateChanged);
@@ -329,6 +343,8 @@ const TVDisplay = ({ roomCode }) => {
       socket.off('challenge-countdown', handleChallengeCountdown);
       socket.off('challenge-complete', handleChallengeComplete);
       socket.off('trivia-answered', handleTriviaAnswered);
+      socket.off('trivia-result-public', handleTriviaAnswered);
+      socket.off('trivia-result', handleTriviaResult);
       socket.off('countdown-tick', handleCountdownTick);
       socket.off('music-song-change', handleMusicSongChange);
       socket.off('music-sync', handleMusicSync);
@@ -342,7 +358,7 @@ const TVDisplay = ({ roomCode }) => {
       socket.off('tiebreak-voting-progress', handleTiebreakVotingProgress);
       socket.off('tiebreak-results', handleTiebreakResults);
     };
-  }, [socket, roomCode, activeChallenge, gameState, playlist.length]); // Solo re-ejecutar si cambia el contexto de la sala o el estado del juego
+  }, [socket, roomCode, tvCapability, activeChallenge, gameState, playlist.length]); // Solo re-ejecutar si cambia el contexto de la sala o el estado del juego
 
   // Manejar cuando termina una canción
   const handleVideoEnded = () => {
@@ -475,22 +491,14 @@ const TVDisplay = ({ roomCode }) => {
       [playerId]: answerIndex
     }));
 
-    // Emitir la respuesta al backend
-    const correct = activeChallenge?.data?.correct;
-    const isCorrect = answerIndex === correct;
-
     socket?.emit('trivia-answered', {
       roomCode,
       playerId,
-      answer: answerIndex,
-      correct,
-      isCorrect
+      answer: answerIndex
     });
 
     console.log(`📺 TV: Emitted trivia-answered for manual player ${playerName}`, {
-      answer: answerIndex,
-      correct,
-      isCorrect
+      answer: answerIndex
     });
   };
 
@@ -520,7 +528,7 @@ const TVDisplay = ({ roomCode }) => {
                         let borderColor = 'rgba(255, 255, 255, 0.3)';
 
                         if (triviaAnswer) {
-                          if (index === triviaAnswer.correct) {
+                          if (index === triviaAnswer.answer && triviaAnswer.isCorrect) {
                             bgColor = 'rgba(34, 197, 94, 0.3)';
                             borderColor = 'rgb(34, 197, 94)';
                           } else if (index === triviaAnswer.answer && !triviaAnswer.isCorrect) {
@@ -586,15 +594,15 @@ const TVDisplay = ({ roomCode }) => {
                         }}>
                           {activeChallenge.player.name} (Cartón #{activeChallenge.player.cardNumber})
                         </p>
-                        {manualPlayerAnswers[activeChallenge.player.id] !== undefined && (
+                        {manualPlayerAnswers[activeChallenge.player.id] !== undefined && manualPlayerResults[activeChallenge.player.id] && (
                           <div style={{
                             fontSize: '1.5rem',
                             fontWeight: 'bold',
                             marginBottom: '15px',
                             textAlign: 'center',
-                            color: manualPlayerAnswers[activeChallenge.player.id] === activeChallenge.data.correct ? '#22c55e' : '#ef4444'
+                            color: manualPlayerResults[activeChallenge.player.id].isCorrect ? '#22c55e' : '#ef4444'
                           }}>
-                            {manualPlayerAnswers[activeChallenge.player.id] === activeChallenge.data.correct ? '✅ Respuesta Correcta' : '❌ Respuesta Incorrecta'}
+                            {manualPlayerResults[activeChallenge.player.id].isCorrect ? '✅ Respuesta Correcta' : '❌ Respuesta Incorrecta'}
                           </div>
                         )}
                         <div style={{
@@ -607,7 +615,7 @@ const TVDisplay = ({ roomCode }) => {
                           {activeChallenge.data.options?.map((option, index) => {
                             const hasAnswered = manualPlayerAnswers[activeChallenge.player.id] !== undefined;
                             const playerAnswer = manualPlayerAnswers[activeChallenge.player.id];
-                            const isCorrectAnswer = playerAnswer === activeChallenge.data.correct;
+                            const isCorrectAnswer = manualPlayerResults[activeChallenge.player.id]?.isCorrect === true;
 
                             return (
                               <button

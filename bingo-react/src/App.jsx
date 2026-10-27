@@ -5,6 +5,7 @@ import { useGame } from './context/useGame';
 import { useSocket } from './context/useSocket';
 import Snowflakes from './components/UI/Snowflakes';
 import { API_URL } from './config/api';
+import { listenForTVAuthorization } from './utils/tvAuthorization';
 import './App.css';
 
 const STORAGE_KEY = 'bingo_session';
@@ -36,6 +37,7 @@ function App() {
   const [showLanding, setShowLanding] = useState(true);
   const [mode, setMode] = useState(null); // 'single' or 'multi'
   const [roomData, setRoomData] = useState(null);
+  const [tvCapability, setTvCapability] = useState(null);
   const [cardSelected, setCardSelected] = useState(false);
   const [inWaitingRoom, setInWaitingRoom] = useState(false);
   const [isReconnecting, setIsReconnecting] = useState(true);
@@ -46,6 +48,12 @@ function App() {
   const urlParams = new URLSearchParams(window.location.search);
   const tvRoomCode = urlParams.get('tv');
   const quickJoinRoomCode = urlParams.get('room');
+
+  // Receive the scoped TV credential without putting it in the URL.
+  useEffect(() => {
+    if (!tvRoomCode) return undefined;
+    return listenForTVAuthorization(window, tvRoomCode, setTvCapability);
+  }, [tvRoomCode]);
 
   // Listener global para cierre de sala
   useEffect(() => {
@@ -99,24 +107,33 @@ function App() {
           setIsReconnecting(false);
           return;
         }
+        if (!session.isHost && typeof session.playerCapability !== 'string') {
+          localStorage.removeItem(STORAGE_KEY);
+          setIsReconnecting(false);
+          toast.error('Esta sesión es anterior y ya no es válida. Volvé a unirte a la sala.');
+          return;
+        }
 
         console.log('📱 Loading saved session - socket will handle reconnection');
 
         // Verificar si tenemos un cartón guardado COMPLETO (con matrix)
-        const hasCard = session.bingoCard?.matrix && session.cardNumber;
+        let hasCard = Boolean(session.bingoCard?.matrix && session.cardNumber);
 
         // Si tiene cardNumber pero NO tiene bingoCard.matrix, intentar recuperar del backend
         if (session.cardNumber && !session.bingoCard?.matrix && !session.isHost) {
           console.warn('⚠️ Incomplete session: has cardNumber but no bingoCard.matrix, recovering from backend...');
           try {
             // Intentar obtener el jugador del backend para recuperar el cartón
-            const playerResponse = await fetch(`${API_URL}/api/players/${session.playerId}`);
+            const playerResponse = await fetch(`${API_URL}/api/players/${session.playerId}`, {
+              headers: { 'x-player-capability': session.playerCapability }
+            });
             if (playerResponse.ok) {
               const playerData = await playerResponse.json();
               if (playerData.player?.bingoCard?.matrix) {
                 console.log('✅ Card recovered from backend');
                 session.bingoCard = playerData.player.bingoCard;
                 session.cardNumber = playerData.player.cardNumber;
+                hasCard = Boolean(session.bingoCard?.matrix && session.cardNumber);
                 // Actualizar localStorage con los datos recuperados
                 localStorage.setItem(STORAGE_KEY, JSON.stringify(session));
               } else {
@@ -165,6 +182,8 @@ function App() {
           playerName: session.playerName || 'Jugador',
           isHost: session.isHost || false,
           hostCapability: session.isHost ? session.hostCapability : undefined,
+          tvCapability: session.isHost ? session.tvCapability : undefined,
+          playerCapability: session.isHost ? undefined : session.playerCapability,
           cardNumber: session.cardNumber || null,
           bingoCard: session.bingoCard || null,
           // Restaurar también el estado del juego
@@ -206,6 +225,8 @@ function App() {
         playerName: roomData.playerName,
         isHost: roomData.isHost,
         hostCapability: roomData.isHost ? roomData.hostCapability : undefined,
+        tvCapability: roomData.isHost ? roomData.tvCapability : undefined,
+        playerCapability: roomData.isHost ? undefined : roomData.playerCapability,
         cardNumber: roomData.cardNumber,
         bingoCard: roomData.bingoCard,
         // Guardar también el estado del juego para reconexión
@@ -286,7 +307,7 @@ function App() {
       <div className="app">
         <Toaster position="top-right" toastOptions={{ duration: 3000 }} />
         <Suspense fallback={<LoadingScreen />}>
-          <TVDisplay roomCode={tvRoomCode.toUpperCase()} />
+          <TVDisplay roomCode={tvRoomCode.toUpperCase()} tvCapability={tvCapability} />
         </Suspense>
       </div>
     );

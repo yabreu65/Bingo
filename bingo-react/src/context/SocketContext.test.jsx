@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { fireEvent, render, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { SocketProvider } from './SocketContext';
 import { useSocket } from './useSocket';
@@ -68,5 +68,38 @@ describe('SocketContext host reconnection', () => {
       hostCapability: 'server-secret'
     });
     expect(JSON.stringify(consoleLog.mock.calls)).not.toContain('server-secret');
+  });
+
+  it('retains and resends a guest capability on reconnect without logging it', async () => {
+    const socket = makeSocket();
+    const consoleLog = vi.spyOn(console, 'log');
+    io.mockReturnValue(socket);
+    const playerCapability = 'g'.repeat(43);
+
+    function GuestClient() {
+      const { socket: connectedSocket, joinRoom } = useSocket();
+      useEffect(() => {
+        if (connectedSocket) joinRoom('ABC123', 'guest-player', { playerCapability });
+      }, [connectedSocket, joinRoom]);
+      return <button onClick={() => socket.listeners.connect()}>Reconnect</button>;
+    }
+
+    render(<SocketProvider><GuestClient /></SocketProvider>);
+    await waitFor(() => expect(socket.emit).toHaveBeenCalledWith('join-room', {
+      roomCode: 'ABC123',
+      playerId: 'guest-player',
+      playerCapability
+    }));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Reconnect' }));
+
+    const joins = socket.emit.mock.calls.filter(([event]) => event === 'join-room');
+    expect(joins).toHaveLength(2);
+    expect(joins[1][1]).toEqual({
+      roomCode: 'ABC123',
+      playerId: 'guest-player',
+      playerCapability
+    });
+    expect(JSON.stringify(consoleLog.mock.calls)).not.toContain(playerCapability);
   });
 });

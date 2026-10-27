@@ -44,10 +44,11 @@ export const SocketProvider = ({ children }) => {
 
       // Auto-rejoin room after reconnection
       if (roomDataRef.current) {
-        const { roomCode, playerId, hostCapability } = roomDataRef.current;
+        const { roomCode, playerId, hostCapability, playerCapability } = roomDataRef.current;
         console.log('🔄 Auto-rejoining room after reconnection:', roomCode);
         const joinPayload = { roomCode, playerId };
         if (hostCapability) joinPayload.hostCapability = hostCapability;
+        if (playerCapability) joinPayload.playerCapability = playerCapability;
         newSocket.emit('join-room', joinPayload, (response) => {
           if (response?.success) {
             console.log('✅ Successfully rejoined room');
@@ -212,22 +213,34 @@ export const SocketProvider = ({ children }) => {
   }, []);
 
   // Room Management
-  const joinRoom = useCallback((roomCode, playerId, hostCapability, callback) => {
+  const joinRoom = useCallback((roomCode, playerId, credentialsOrHostCapability, callback) => {
     if (!socket) {
       console.error('Socket not initialized');
       return;
     }
+    const credentials = typeof credentialsOrHostCapability === 'string'
+      ? { hostCapability: credentialsOrHostCapability }
+      : credentialsOrHostCapability && typeof credentialsOrHostCapability === 'object'
+        ? {
+          hostCapability: credentialsOrHostCapability.hostCapability,
+          playerCapability: credentialsOrHostCapability.playerCapability
+        }
+        : {};
+    const completion = typeof credentialsOrHostCapability === 'function'
+      ? credentialsOrHostCapability
+      : callback;
     console.log('📥 Joining room:', roomCode);
     const joinPayload = { roomCode, playerId };
-    if (hostCapability) joinPayload.hostCapability = hostCapability;
-    if (callback) {
-      socket.emit('join-room', joinPayload, callback);
+    if (credentials.hostCapability) joinPayload.hostCapability = credentials.hostCapability;
+    if (credentials.playerCapability) joinPayload.playerCapability = credentials.playerCapability;
+    if (completion) {
+      socket.emit('join-room', joinPayload, completion);
     } else {
       socket.emit('join-room', joinPayload);
     }
     setCurrentRoom(roomCode);
-    // Store the host-only capability for authenticated room-control reconnects.
-    roomDataRef.current = { roomCode, playerId, hostCapability };
+    // Keep only the current principal's capability for reconnecting this socket.
+    roomDataRef.current = { roomCode, playerId, ...credentials };
   }, [socket]);
 
   const leaveRoom = useCallback(() => {

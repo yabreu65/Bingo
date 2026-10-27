@@ -8,7 +8,7 @@ import './PlayerCardView.css';
 const STORAGE_KEY = 'bingo_session';
 
 const PlayerCardView = ({ roomData }) => {
-  const { socket } = useSocket();
+  const { socket, joinRoom } = useSocket();
   const [currentNumber, setCurrentNumber] = useState(roomData.currentNumber || null);
   const [calledNumbers, setCalledNumbers] = useState(roomData.calledNumbers || []);
   const [markedCells, setMarkedCells] = useState(
@@ -19,6 +19,7 @@ const PlayerCardView = ({ roomData }) => {
   const [gameState, setGameState] = useState(roomData.gameState || 'waiting');
   const [activeEvent, setActiveEvent] = useState(null);
   const [activeChallenge, setActiveChallenge] = useState(null);
+  const [triviaResult, setTriviaResult] = useState(null);
 
   // Estados para votación de tie-break
   const [tiebreakVoting, setTiebreakVoting] = useState(null); // { candidates, votingDuration, message }
@@ -117,13 +118,20 @@ const PlayerCardView = ({ roomData }) => {
 
   function handleChallengeTriggered(data) {
     console.log('🎯 PlayerCardView: Challenge triggered:', data);
+    setTriviaResult(null);
     setActiveChallenge(data);
   }
 
   function handleChallengeComplete() {
     console.log('🎯 PlayerCardView: Challenge complete');
+    setTriviaResult(null);
     setActiveChallenge(null);
   }
+
+  const handleTriviaResult = useCallback((data) => {
+    if (data?.playerId?.toString() !== roomData.playerId?.toString()) return;
+    setTriviaResult(data);
+  }, [roomData.playerId]);
 
   // Handlers para tie-break voting
   function handleTiebreakVotingStarted(data) {
@@ -181,26 +189,15 @@ const PlayerCardView = ({ roomData }) => {
       });
     };
 
-    // Join the Socket.io room and request sync
-    socket.emit('join-room', {
-      roomCode: roomData.roomCode,
-      playerId: roomData.playerId
+    // Join through the provider so the capability is retained for socket reconnects.
+    joinRoom(roomData.roomCode, roomData.playerId, {
+      playerCapability: roomData.playerCapability
     }, (response) => {
       if (response?.success) {
         console.log('✅ Joined room successfully');
         syncGameState();
       }
     });
-
-    // Re-sincronizar cuando el socket se reconecta (importante para iPhone)
-    const handleReconnect = () => {
-      console.log('📱 Socket reconnected, re-syncing game state...');
-      setTimeout(() => {
-        syncGameState();
-      }, 500); // Pequeño delay para asegurar que join-room se completó
-    };
-
-    socket.on('connect', handleReconnect);
 
     // Listen for game events
     socket?.on('number-called', handleNumberCalled);
@@ -210,6 +207,7 @@ const PlayerCardView = ({ roomData }) => {
     socket?.on('cell-marked', handleCellMarked);
     socket?.on('challenge-triggered', handleChallengeTriggered);
     socket?.on('challenge-complete', handleChallengeComplete);
+    socket?.on('trivia-result', handleTriviaResult);
     socket?.on('bingo-claimed', (data) => {
       if (data.playerId === roomData.playerId) {
         toast.success('BINGO reclamado, validando...');
@@ -242,6 +240,7 @@ const PlayerCardView = ({ roomData }) => {
       socket?.off('cell-marked', handleCellMarked);
       socket?.off('challenge-triggered', handleChallengeTriggered);
       socket?.off('challenge-complete', handleChallengeComplete);
+      socket?.off('trivia-result', handleTriviaResult);
       socket?.off('bingo-claimed');
       socket?.off('bingo-verified');
       socket?.off('bingo-rejected');
@@ -249,7 +248,7 @@ const PlayerCardView = ({ roomData }) => {
       socket?.off('tiebreak-vote-confirmed', handleTiebreakVoteConfirmed);
       socket?.off('tiebreak-results', handleTiebreakResults);
     };
-  }, [socket, roomData.roomCode, roomData.playerId, handleCellMarked, handleGameStateUpdate]);
+  }, [socket, joinRoom, roomData.roomCode, roomData.playerId, roomData.playerCapability, handleCellMarked, handleGameStateUpdate, handleTriviaResult]);
 
   const handleTiebreakVote = (performerId, stars) => {
     console.log(`⭐ Voting for ${performerId}: ${stars} stars`);
@@ -432,8 +431,6 @@ const PlayerCardView = ({ roomData }) => {
             const answerData = {
               success,
               answer,
-              correct: activeChallenge?.data?.correct,
-              isCorrect: answer === activeChallenge?.data?.correct,
               type: activeChallenge?.type
             };
             console.log('🎯 Completing challenge:', answerData);
@@ -443,8 +440,7 @@ const PlayerCardView = ({ roomData }) => {
               const triviaData = {
                 roomCode: roomData.roomCode,
                 playerId: roomData.playerId,
-                answer: answer,
-                correct: activeChallenge?.data?.correct
+                answer
               };
               console.log('📤 Emitting trivia-answered:', triviaData);
               socket?.emit('trivia-answered', triviaData);
@@ -466,6 +462,8 @@ const PlayerCardView = ({ roomData }) => {
           externalRoomCode={roomData.roomCode}
           externalPlayerId={roomData.playerId}
           externalPlayerName={roomData.playerName}
+          externalPlayerCapability={roomData.playerCapability}
+          externalTriviaResult={triviaResult}
         />
       )}
     </div>

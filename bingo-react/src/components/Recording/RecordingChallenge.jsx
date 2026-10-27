@@ -1,5 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import './RecordingChallenge.css';
+import { createRecordingAuthorizationHeaders } from '../../utils/recordingAuthorization';
+import { API_URL } from '../../config/api';
 
 const RECORDING_DURATION = 30 * 1000; // 30 segundos
 const COUNTDOWN_DURATION = 3; // 3 segundos de cuenta regresiva
@@ -9,6 +11,8 @@ const RecordingChallenge = ({
   roomCode,
   playerId,
   playerName,
+  playerCapability,
+  hostCapability,
   challengeType,
   challengeText,
   onRecordingComplete,
@@ -35,6 +39,14 @@ const RecordingChallenge = ({
   useEffect(() => {
     loadCameras();
     return () => {
+      if (countdownTimerRef.current) clearInterval(countdownTimerRef.current);
+      if (recordingTimerRef.current) clearInterval(recordingTimerRef.current);
+      countdownTimerRef.current = null;
+      recordingTimerRef.current = null;
+      if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+        mediaRecorderRef.current.onstop = null;
+        mediaRecorderRef.current.stop();
+      }
       stopStream();
     };
   }, []);
@@ -119,6 +131,7 @@ const RecordingChallenge = ({
 
         if (count === 0) {
           clearInterval(countdownTimerRef.current);
+          countdownTimerRef.current = null;
           beginRecording();
         }
       }, 1000);
@@ -182,6 +195,7 @@ const RecordingChallenge = ({
   const stopRecording = () => {
     if (recordingTimerRef.current) {
       clearInterval(recordingTimerRef.current);
+      recordingTimerRef.current = null;
     }
 
     if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
@@ -204,8 +218,14 @@ const RecordingChallenge = ({
       formData.append('challengeText', challengeText);
       formData.append('duration', Math.floor(recordingTime));
 
-      const response = await fetch('/api/recordings/upload', {
+      const response = await fetch(`${API_URL}/api/recordings/upload`, {
         method: 'POST',
+        headers: createRecordingAuthorizationHeaders({
+          roomCode,
+          playerId,
+          playerCapability,
+          hostCapability
+        }),
         body: formData
       });
 
