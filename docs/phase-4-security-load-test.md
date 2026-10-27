@@ -35,6 +35,8 @@ The first-join maximum includes MongoDB/backend warm-up and is intentionally rep
 
 A separate restart smoke run with five players completed all six protocol minigames (`trivia`, `riddle`, `dance`, `sing`, `group`, `karaoke`), restarted the backend against the same temporary MongoDB while a group challenge was paused, recovered six persisted players and the paused state, then completed the game and reconnections successfully. This run had zero recorded errors.
 
+A 50-player minigame run also completed all six modalities with zero errors: 52 Socket.IO joins including organizer and TV, 3,750 number events, 1,200 marks, zero duplicates, ten reconnections, number propagation p50/p95/max of 6.00/27.37/132.08 ms, backend peak RSS 214.19 MB, simulator RSS 124.41 MB, and peak sampled backend CPU 135.6%.
+
 ## Security boundary
 
 Unauthenticated requests to recording listing, detail, streaming, likes and statistics endpoints are rejected before storage access. Player capabilities are bound to the room and player identifiers; TV capabilities are bound to the room. The regression suite covers the public-stream boundary and keeps malformed range handling intact.
