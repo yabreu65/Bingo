@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { existsSync } from 'node:fs';
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -125,6 +125,11 @@ function findChromiumExecutable() {
     return process.env.PLAYWRIGHT_CHROMIUM_PATH;
   }
 
+  const bundledChromium = chromium.executablePath();
+  if (bundledChromium && existsSync(bundledChromium)) {
+    return bundledChromium;
+  }
+
   const candidates = [
     join(process.env.HOME || '', 'Library/Caches/ms-playwright/chromium-1223/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing'),
     join(process.env.HOME || '', 'Library/Caches/ms-playwright/chromium-1208/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing'),
@@ -201,10 +206,18 @@ async function assertForbiddenFromPlayer(page, roomCode, playerCapability) {
 async function openAuthorizedSocket(payload) {
   const socket = socketIO(backendURL, { transports: ['websocket'], forceNew: true });
   await new Promise((resolvePromise, reject) => {
-    const onError = (error) => reject(error);
+    const timeout = setTimeout(() => {
+      socket.disconnect();
+      reject(new Error('Timed out opening authorized socket for ' + payload.playerId));
+    }, 10000);
+    const onError = (error) => {
+      clearTimeout(timeout);
+      reject(error);
+    };
     socket.once('connect_error', onError);
     socket.once('connect', () => {
       socket.emit('join-room', payload, (response) => {
+        clearTimeout(timeout);
         socket.off('connect_error', onError);
         if (!response?.success) {
           reject(new Error('Socket join failed: ' + JSON.stringify(response)));
@@ -253,7 +266,7 @@ async function main() {
     browser = await chromium.launch({ headless: true, executablePath: chromiumPath });
 
     const hostContext = await browser.newContext();
-    const playerAContext = await browser.newContext();
+    let playerAContext = await browser.newContext();
     let playerBContext = await browser.newContext();
     contexts.push(hostContext, playerAContext, playerBContext);
 
@@ -274,7 +287,7 @@ async function main() {
       typeof value.hostCapability === 'string' && value.hostCapability.length === 43
     );
     const roomCode = hostSession.roomCode;
-    await configureRoom(hostPage, roomCode, hostSession.hostCapability);
+    await configureRoom(hostPage, roomCode, hostSession.hostCapability, { challengeFrequency: 10 });
     console.log('  room ' + roomCode + ' created with isolated config');
 
     console.log('E2E 2/10: independent players join and select cards');
@@ -297,6 +310,37 @@ async function main() {
     assert.match(await hostPage.locator('body').innerText(), /3/);
     console.log('  players joined with cards 1 and 2');
 
+    const readRenderedCard = async (page) => page.locator('[data-testid="bingo-card-cell"]').evaluateAll((cells) => {
+      const ordered = [...cells].sort((left, right) => {
+        const rowDelta = Number(left.dataset.row) - Number(right.dataset.row);
+        return rowDelta || Number(left.dataset.col) - Number(right.dataset.col);
+      });
+      return ordered.map((cell) => ({
+        row: Number(cell.dataset.row),
+        col: Number(cell.dataset.col),
+        value: cell.dataset.value
+      }));
+    });
+
+    const persistedPlayerA = await Player.findById(playerASession.playerId);
+    const expectedVisualCard = Array.from({ length: 5 }, (_, row) =>
+      Array.from({ length: 5 }, (_, col) => String(persistedPlayerA.bingoCard.matrix[col][row]))
+    ).flat();
+    const renderedPlayerA = await readRenderedCard(playerAPage);
+    for (const cell of renderedPlayerA) {
+      assert.equal(
+        cell.value,
+        String(persistedPlayerA.bingoCard.matrix[cell.col][cell.row]),
+        `Visual cell ${cell.row},${cell.col} does not match persisted coordinates`
+      );
+    }
+    assert.deepEqual(
+      renderedPlayerA.map((cell) => cell.value),
+      expectedVisualCard,
+      'Rendered player card differs from the persisted backend card'
+    );
+    console.log('  visual card values match the persisted backend matrix');
+
     console.log('E2E 3/10: TV popup authorization, game start, Socket.IO and music resource');
     const popupPromise = hostPage.waitForEvent('popup', { timeout: 10000 });
     await hostPage.getByRole('button', { name: /Abrir TV/ }).click();
@@ -314,12 +358,61 @@ async function main() {
     await waitForBody(hostPage, /En Juego|Número Cantado/);
     await waitForBody(playerAPage, /En Juego|Números cantados/);
     await waitForBody(playerBPage, /En Juego|Números cantados/);
-    await waitForBody(tvPage, /En Juego|PAUSADO/);
+    await waitForBody(tvPage, /En Juego|PAUSADO|CANTADOS|Números Cantados|Número/, 20000);
     await waitForBody(playerAPage, /Números cantados \([1-9]/, 12000);
     const playerNumber = await playerAPage.locator('.called-number').first().innerText();
     await waitForBody(tvPage, new RegExp('\\b' + playerNumber + '\\b'), 5000);
     assert.ok(playerNumber, 'Player did not receive a called number');
     console.log('  Socket.IO synchronized number ' + playerNumber + '; TV music source ' + musicSource);
+
+    hostControlSocket = await openAuthorizedSocket({
+      roomCode,
+      playerId: hostSession.playerId,
+      hostCapability: hostSession.hostCapability
+    });
+    const visualCardCells = await readRenderedCard(playerAPage);
+    const targetCells = [];
+    for (const cell of visualCardCells) {
+      if (cell.value === 'BINGO' || targetCells.some((target) => target.row === cell.row || target.col === cell.col)) continue;
+      targetCells.push(cell);
+      if (targetCells.length === 3) break;
+    }
+    assert.equal(targetCells.length, 3, 'Expected three numeric cells in distinct rows for visual validation');
+    for (const targetCell of targetCells) {
+      const targetNumber = Number(targetCell.value);
+      const currentVisualGame = await Game.findById((await Room.findOne({ code: roomCode })).currentGame);
+      if (!currentVisualGame.calledNumbers.includes(targetNumber)) {
+        const numberCalled = new Promise((resolvePromise) => {
+          hostControlSocket.once('number-called', resolvePromise);
+        });
+        hostControlSocket.emit('call-number', {
+          roomCode,
+          number: targetNumber,
+          hostCapability: hostSession.hostCapability
+        });
+        await Promise.race([
+          numberCalled,
+          new Promise((_, reject) => setTimeout(() => reject(new Error('Timed out calling visual target number')), 5000))
+        ]);
+      }
+      const visualCell = playerAPage.locator(
+        `[data-testid="bingo-card-cell"][data-row="${targetCell.row}"][data-col="${targetCell.col}"]`
+      );
+      await visualCell.click({ force: true });
+      await waitForMongoDocument(
+        () => Player.findById(playerASession.playerId),
+        (player) => player.bingoCard?.markedCells?.some((cell) =>
+          Array.isArray(cell)
+            ? cell[0] === targetCell.row && cell[1] === targetCell.col
+            : cell.row === targetCell.row && cell.col === targetCell.col
+        ),
+        `visual card mark persisted at ${targetCell.row},${targetCell.col}`
+      );
+    }
+    const visualMarkedPlayer = await Player.findById(playerASession.playerId);
+    assert.equal(visualMarkedPlayer.bingoCard.markedCells.length, 4, 'Only the free cell and three visual marks should be persisted');
+    console.log('  three visual numbers from distinct rows were marked and persisted with real coordinates');
+    await configureRoom(hostPage, roomCode, hostSession.hostCapability, { challengeFrequency: 1 });
 
     console.log('E2E 4/10: automatic trivia challenge, answer flow and public synchronization');
     const scenarioPages = [['player-a', playerAPage], ['player-b', playerBPage], ['tv', tvPage], ['host', hostPage]];
@@ -336,6 +429,33 @@ async function main() {
       await waitForBody(tvPage, /TRIVIA|Respuesta|RETO|Challenge/, 5000);
     }
     console.log('  challenge observed on ' + challengeTarget.name);
+
+    console.log('  disconnecting and reconnecting player A after visual marks');
+    const savedPlayerASession = await playerAPage.evaluate((key) => JSON.parse(localStorage.getItem(key)), storageKey);
+    await playerAContext.close();
+    playerAContext = await browser.newContext();
+    contexts.push(playerAContext);
+    playerAPage = await playerAContext.newPage();
+    await playerAPage.goto(baseURL);
+    await playerAPage.evaluate(({ key, value }) => localStorage.setItem(key, JSON.stringify(value)), {
+      key: storageKey,
+      value: savedPlayerASession
+    });
+    await playerAPage.reload();
+    await waitForBody(playerAPage, /Números cantados|Mi Cartón|Reconectando/, 10000);
+    await waitForSession(playerAPage, (value) =>
+      value.roomCode === roomCode && value.playerId === savedPlayerASession.playerId &&
+      value.playerCapability === savedPlayerASession.playerCapability
+    );
+    const recoveredPlayerA = await Player.findById(playerASession.playerId);
+    for (const targetCell of targetCells) {
+      assert.ok(recoveredPlayerA.bingoCard.markedCells.some((cell) =>
+        Array.isArray(cell)
+          ? cell[0] === targetCell.row && cell[1] === targetCell.col
+          : cell.row === targetCell.row && cell.col === targetCell.col
+      ), `Visual mark ${targetCell.row},${targetCell.col} was lost after reconnection`);
+    }
+    console.log('  player A retained its assigned card and all visual marks after reconnection');
 
     console.log('E2E 5/10: invalid bingo declaration is rejected');
     await waitForBody(playerAPage, /En Juego/, 8000);
@@ -354,6 +474,12 @@ async function main() {
       challengeFrequency: 10,
       tieBreakEnabled: true
     });
+    await waitForMongoDocument(
+      () => Room.findOne({ code: roomCode }),
+      (room) => room.gameState === 'playing',
+      'game resumed before tie-break draw',
+      15000
+    );
 
     console.log('  disconnecting and reconnecting player B before the tie');
     const savedPlayerBSession = await playerBPage.evaluate((key) => JSON.parse(localStorage.getItem(key)), storageKey);
@@ -381,11 +507,6 @@ async function main() {
     assert.ok(roomForDraw?.currentGame, 'Room has no current game for bingo draw');
     const currentGameId = roomForDraw.currentGame;
 
-    hostControlSocket = await openAuthorizedSocket({
-      roomCode,
-      playerId: hostSession.playerId,
-      hostCapability: hostSession.hostCapability
-    });
     const cardValuesByPlayer = [playerASession, playerBSession].map((session) =>
       session.bingoCard.matrix.flat().filter((value) => value !== 'BINGO')
     );
@@ -405,11 +526,13 @@ async function main() {
     }
     const markFullCard = async (page, session) => {
       await page.waitForFunction(
-        () => document.querySelectorAll('.bingo-card-cell.available').length >= 24,
+        () => document.querySelectorAll('[data-testid="bingo-card-cell"]').length === 25 &&
+          document.querySelectorAll('[data-testid="bingo-card-cell"].available').length > 0,
         { timeout: 10000 }
       );
-      for (let index = 0; index < 24; index += 1) {
-        await page.locator('.bingo-card-cell.available').first().click({ force: true });
+      const availableCells = page.locator('[data-testid="bingo-card-cell"].available');
+      while (await availableCells.count() > 0) {
+        await availableCells.first().click({ force: true });
       }
       await waitForMongoDocument(
         () => Player.findById(session.playerId),
@@ -581,10 +704,14 @@ async function main() {
 
 main().catch((error) => {
   console.error('E2E FAIL: ' + (error.stack || error.message));
+  const artifactDir = join(root, 'artifacts');
+  mkdirSync(artifactDir, { recursive: true });
   for (const [name, output] of logs) {
     if (output.length > 0) {
       console.error('--- ' + name + ' logs ---');
-      console.error(output.join('').slice(-12000));
+      const log = output.join('');
+      console.error(log.slice(-12000));
+      writeFileSync(join(artifactDir, `${name}.log`), log);
     }
   }
   process.exitCode = 1;
