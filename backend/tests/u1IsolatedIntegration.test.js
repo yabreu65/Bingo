@@ -82,10 +82,25 @@ const joinRoom = async (roomCode, playerName) => {
   return response.body;
 };
 
+const getMongoBinaryOptions = () => {
+  const configuredPath = process.env.MONGOMS_SYSTEM_BINARY?.trim();
+  if (!configuredPath) return undefined;
+
+  const resolvedPath = path.resolve(configuredPath);
+  try {
+    if (!fs.statSync(resolvedPath).isFile()) throw new Error('not a file');
+    fs.accessSync(resolvedPath, fs.constants.X_OK);
+  } catch {
+    throw new Error('MONGOMS_SYSTEM_BINARY must point to an executable file');
+  }
+
+  return { systemBinary: resolvedPath };
+};
+
 beforeAll(async () => {
   mongoPath = fs.mkdtempSync(path.join(__dirname, '../.tmp-u1-integration-'));
   mongoServer = await MongoMemoryServer.create({
-    binary: { systemBinary: '/opt/homebrew/bin/mongod', version: '8.2.1' },
+    binary: getMongoBinaryOptions(),
     instance: {
       dbPath: mongoPath,
       dbName: `bingo_u1_${crypto.randomBytes(6).toString('hex')}`,
