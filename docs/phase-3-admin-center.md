@@ -12,6 +12,7 @@ El organizador de una sala puede administrar contenidos y configuración sin edi
 - `backend/routes/adminRoutes.js`: CRUD, importación/exportación y autorización.
 - `backend/utils/adminCatalog.js`: validación, límites y adaptación al contrato legacy de challenges.
 - `bingo-react/src/components/Organizer/AdminCenter.jsx`: interfaz real integrada al dashboard del organizador.
+- `bingo-react/src/components/Player/PlayerCardView.jsx`: reproduce en modo sincronizado la playlist local activa de la sala.
 
 Cuando una sala activa contenido administrado, el motor crea un snapshot de los pools en `Game.availablePools` y la selección prioriza ese snapshot sobre los catálogos legacy. La edición posterior no cambia una ronda ya iniciada ni expone respuestas correctas en eventos públicos. El E2E visual verifica que la primera trivia usa la pregunta administrada.
 
@@ -38,7 +39,7 @@ Las eliminaciones son archivado lógico. Las entregas usan una actualización at
 
 ## Sala y reglas
 
-La configuración existente continúa en `PATCH /api/rooms/:code/config`. Fase 3 agrega nombre del evento, visibilidad de resultados, playlist activa y marca de contenido administrado. Cambiar `gameMode` o reglas durante una ronda debe ser restringido por el contrato de la sala; una ronda ya creada conserva sus snapshots.
+La configuración existente continúa en `PATCH /api/rooms/:code/config`. Fase 3 agrega nombre del evento, visibilidad de resultados, máximo de jugadores, desempate, playlist activa y marca de contenido administrado. El centro permite editar modalidad, intervalos, frecuencia, tipos de reto y playlist; cambiar `gameMode` o `maxPlayers` durante una ronda es rechazado por el contrato de la sala, y una ronda ya creada conserva sus snapshots.
 
 ## Importación/exportación
 
@@ -54,6 +55,7 @@ Las pistas se registran por identificador seguro y metadatos. No se aceptan ruta
 
 - Backend: validación de catálogo, límites, importación sin estados parciales y autorización room-scoped.
 - Frontend: suite existente, lint y build.
+- E2E visual: el organizador crea dos pistas locales sintéticas, selecciona y ordena una playlist, la activa, cambia la configuración, crea/edita/entrega un premio y verifica persistencia en MongoDB; un jugador consume la playlist activa desde el reproductor sincronizado.
 - Fases 1 y 2: se conservan sus suites y contratos.
 
 ## Limitaciones reales

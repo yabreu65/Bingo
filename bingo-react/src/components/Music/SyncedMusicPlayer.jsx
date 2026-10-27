@@ -1,10 +1,11 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import toast from 'react-hot-toast';
 import ReactPlayer from 'react-player';
 import { useSocket } from '../../context/useSocket';
+import { MUSIC_PLAYLISTS } from '../../config/musicPlaylists';
 import './MusicPlayer.css';
 
-const SyncedMusicPlayer = ({ roomCode, isHost, hostCapability, playlist = [], currentIndex: externalIndex = 0, onSongChange }) => {
+const SyncedMusicPlayer = ({ roomCode, isHost, hostCapability, playlist: suppliedPlaylist = [], currentIndex: externalIndex = 0, onSongChange }) => {
   const { socket } = useSocket();
   const [currentIndex, setCurrentIndex] = useState(externalIndex);
   const [playing, setPlaying] = useState(false);
@@ -15,6 +16,10 @@ const SyncedMusicPlayer = ({ roomCode, isHost, hostCapability, playlist = [], cu
   const playerRef = useRef(null);
   const syncTimeoutRef = useRef(null);
   const [allowPlay, setAllowPlay] = useState(false);
+  const playlist = useMemo(() => {
+    const source = suppliedPlaylist.length ? suppliedPlaylist : MUSIC_PLAYLISTS;
+    return source.map((song, index) => ({ ...song, id: song.id ?? index + 1 }));
+  }, [suppliedPlaylist]);
 
   // Sincronizar índice externo con estado local
   useEffect(() => {
@@ -279,7 +284,7 @@ const SyncedMusicPlayer = ({ roomCode, isHost, hostCapability, playlist = [], cu
           <div style={{ display: 'none' }}>
           <ReactPlayer
             ref={playerRef}
-            url={`https://www.youtube.com/watch?v=${currentSong.videoId}`}
+            url={currentSong.localFile ? `/music/${encodeURI(currentSong.localFile.replace(/^\/+/, ''))}` : (currentSong.videoId ? `https://www.youtube.com/watch?v=${currentSong.videoId}` : undefined)}
             playing={playing}
             volume={volume}
             muted={muted}

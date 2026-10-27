@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import toast from 'react-hot-toast';
 import { useSocket } from '../../context/useSocket';
 import SyncedMusicPlayer from '../Music/SyncedMusicPlayer';
@@ -17,6 +17,15 @@ const WaitingRoom = ({ roomData, onGameStart }) => {
   const [timeLeft, setTimeLeft] = useState(null);
   const intervalSec = roomData.room?.config?.timeBetweenNumbers || 30;
   const eligiblePlayerCount = players.filter((player) => player.cardNumber != null).length;
+  const managedPlaylist = useMemo(() => {
+    const tracks = roomData.room?.config?.activePlaylist?.tracks || [];
+    return tracks.filter(track => track.sourceType === 'local' && track.resourceId).map(track => ({
+      id: track._id,
+      title: track.title || track.statement,
+      artist: track.artist || 'Artista desconocido',
+      localFile: track.resourceId
+    }));
+  }, [roomData.room?.config?.activePlaylist]);
 
   useEffect(() => {
     // Join the Socket.io room with the current principal's capability.
@@ -159,6 +168,7 @@ const WaitingRoom = ({ roomData, onGameStart }) => {
           roomCode={roomData.roomCode}
           isHost={roomData.isHost}
           hostCapability={roomData.isHost ? roomData.hostCapability : undefined}
+          playlist={managedPlaylist}
         />
       </div>
     );
@@ -307,6 +317,7 @@ const WaitingRoom = ({ roomData, onGameStart }) => {
         roomCode={roomData.roomCode}
         isHost={roomData.isHost}
         hostCapability={roomData.isHost ? roomData.hostCapability : undefined}
+        playlist={managedPlaylist}
       />
       {countdown != null && (
         <div className="countdown-overlay" style={{ position: 'fixed', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.35)', color: '#fff', fontSize: '6rem', fontWeight: 800 }}>

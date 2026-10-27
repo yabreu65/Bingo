@@ -93,6 +93,10 @@ router.post('/join', joinRoomLimiter, speedLimiter, validateRequest(joinRoomSche
       return res.status(404).json({ error: 'Sala no encontrada' });
     }
 
+    if (room.config?.activePlaylist && typeof room.populate === 'function') {
+      await room.populate({ path: 'config.activePlaylist', populate: { path: 'tracks' } });
+    }
+
     const totalPlayers = room.players.length + (room.manualPlayers?.length || 0);
     if (totalPlayers >= room.config.maxPlayers) {
       return res.status(400).json({ error: 'Sala llena' });
@@ -139,6 +143,9 @@ router.get('/:code', generalApiLimiter, validateRequest(getRoomSchema), async (r
     
     if (!room) {
       return res.status(404).json({ error: 'Sala no encontrada' });
+    }
+    if (room.config?.activePlaylist && typeof room.populate === 'function') {
+      await room.populate({ path: 'config.activePlaylist', populate: { path: 'tracks' } });
     }
     res.json({ room: stripTriviaAnswers(stripGuestCapabilityHashes(room)) });
   } catch (error) {

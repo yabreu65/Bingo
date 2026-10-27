@@ -26,6 +26,12 @@ const createRoomSchema = z.object({
         .optional()
         .default(3),
 
+      maxPlayers: z.number()
+        .int('El máximo de jugadores debe ser un número entero')
+        .min(2, 'El mínimo de jugadores es 2')
+        .max(500, 'El máximo de jugadores es 500')
+        .optional(),
+
       gameMode: z.enum(['line', 'fourCorners', 'centralCross', 'full']).optional(),
 
       tieBreakEnabled: z.boolean().optional().default(false),
@@ -121,6 +127,12 @@ const updateConfigSchema = z.object({
         .int('La frecuencia debe ser un número entero')
         .min(1, 'La frecuencia mínima de challenges es 1')
         .max(10, 'La frecuencia máxima de challenges es 10')
+        .optional(),
+
+      maxPlayers: z.number()
+        .int('El máximo de jugadores debe ser un número entero')
+        .min(2, 'El mínimo de jugadores es 2')
+        .max(500, 'El máximo de jugadores es 500')
         .optional(),
 
       gameMode: z.enum(['line', 'fourCorners', 'centralCross', 'full']).optional(),

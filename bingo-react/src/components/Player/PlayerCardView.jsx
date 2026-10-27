@@ -1,9 +1,10 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import toast from 'react-hot-toast';
 import { useSocket } from '../../context/useSocket';
 import ChallengeModal from '../Challenges/ChallengeModal';
 import TiebreakVotingModal from '../Voting/TiebreakVotingModal';
 import VotingModal from '../Voting/VotingModal';
+import SyncedMusicPlayer from '../Music/SyncedMusicPlayer';
 import { CARD_MATRIX_VERSION, getCardCell } from '../../utils/bingoCardGenerator';
 import './PlayerCardView.css';
 
@@ -26,6 +27,15 @@ const PlayerCardView = ({ roomData }) => {
   const [activeChallenge, setActiveChallenge] = useState(null);
   const [triviaResult, setTriviaResult] = useState(null);
   const [activeVoting, setActiveVoting] = useState(null);
+  const managedPlaylist = useMemo(() => {
+    const tracks = roomData.room?.config?.activePlaylist?.tracks || [];
+    return tracks.filter(track => track.sourceType === 'local' && track.resourceId).map(track => ({
+      id: track._id,
+      title: track.title || track.statement,
+      artist: track.artist || 'Artista desconocido',
+      localFile: track.resourceId
+    }));
+  }, [roomData.room?.config?.activePlaylist]);
 
   // Estados para votación de tie-break
   const [tiebreakVoting, setTiebreakVoting] = useState(null); // { candidates, votingDuration, message }
@@ -460,6 +470,12 @@ const PlayerCardView = ({ roomData }) => {
           <p>Esperando que el organizador inicie el juego...</p>
         </div>
       )}
+
+      <SyncedMusicPlayer
+        roomCode={roomData.roomCode}
+        isHost={false}
+        playlist={managedPlaylist}
+      />
 
       {/* Tie-break Voting Modal */}
       {tiebreakVoting && (
