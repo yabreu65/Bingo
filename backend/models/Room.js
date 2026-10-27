@@ -22,6 +22,10 @@ const roomSchema = new mongoose.Schema({
     type: String,
     select: false
   },
+  tvCapabilityHash: {
+    type: String,
+    select: false
+  },
   players: [{
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Player'
@@ -75,6 +79,7 @@ const roomSchema = new mongoose.Schema({
   },
   musicState: {
     currentSongId: { type: Number, default: null },
+    currentSongIndex: { type: Number, default: 0 },
     isPlaying: { type: Boolean, default: false },
     volume: { type: Number, default: 0.5 },
     currentTime: { type: Number, default: 0 },

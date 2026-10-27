@@ -201,7 +201,7 @@ describe('challengeSelector utils', () => {
       });
     });
 
-    it('should handle trivia challenges with null deezerId', () => {
+    it('should omit the trivia answer from the public challenge payload', () => {
       const challengeType = 'trivia';
       const selectedPlayer = {
         _id: 'player-456',
@@ -225,8 +225,7 @@ describe('challengeSelector utils', () => {
         duration: GAME_CONSTANTS.CHALLENGE_DURATION,
         data: {
           question: '¿Cuántas letras tiene BINGO?',
-          options: ['4 letras', '5 letras', '6 letras', '7 letras'],
-          correct: 1
+          options: ['4 letras', '5 letras', '6 letras', '7 letras']
         }
       });
     });

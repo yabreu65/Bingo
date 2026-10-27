@@ -206,12 +206,11 @@ function createChallengeData(challengeType, selectedPlayer, challenge) {
     duration: GAME_CONSTANTS.CHALLENGE_DURATION
   };
 
-  // Para trivia, incluir pregunta, opciones y respuesta correcta
+  // Para trivia, nunca enviar la respuesta correcta en el reto inicial.
   if (challengeType === GAME_CONSTANTS.CHALLENGE_TYPES.TRIVIA) {
     baseData.data = {
       question: challenge.question,
-      options: challenge.options,
-      correct: challenge.correct
+      options: challenge.options
     };
   }
   // Para karaoke, incluir datos adicionales y duración más larga

@@ -27,6 +27,13 @@ const gameSchema = new mongoose.Schema({
     player: mongoose.Schema.Types.Mixed,
     data: mongoose.Schema.Types.Mixed,
     startTime: Date,
+    duration: Number,
+    text: String,
+    deezerId: String,
+    karaokeId: String,
+    title: String,
+    artist: String,
+    localFile: String,
     voteId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'Vote'
@@ -73,6 +80,9 @@ const gameSchema = new mongoose.Schema({
   winners: [{
     // Acepta tanto ObjectId (jugadores digitales) como String (jugadores manuales)
     player: mongoose.Schema.Types.Mixed,
+    playerName: String,
+    cardNumber: Number,
+    isManualPlayer: Boolean,
     achievement: String,
     timestamp: Date
   }],
@@ -83,6 +93,21 @@ const gameSchema = new mongoose.Schema({
   // Acepta tanto ObjectIds (jugadores digitales) como Strings (jugadores manuales)
   tieCandidates: [mongoose.Schema.Types.Mixed],
   tieWindowEnds: Date,
+  tieBreakStatus: {
+    type: String,
+    enum: ['waiting-for-voting', 'voting', null],
+    default: null
+  },
+  tieBreakCurrentPerformer: {
+    type: mongoose.Schema.Types.Mixed,
+    default: null
+  },
+  tieBreakVotes: [{
+    voterId: mongoose.Schema.Types.Mixed,
+    performerId: mongoose.Schema.Types.Mixed,
+    stars: { type: Number, min: 1, max: 5 },
+    timestamp: { type: Date, default: Date.now }
+  }],
   status: {
     type: String,
     enum: ['active', 'paused', 'finished'],

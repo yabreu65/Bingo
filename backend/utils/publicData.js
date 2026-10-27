@@ -1,0 +1,39 @@
+const stripTriviaAnswers = (value) => {
+  if (Array.isArray(value)) return value.map(stripTriviaAnswers);
+  if (!value || typeof value !== 'object') return value;
+
+  const plainValue = typeof value.toJSON === 'function' ? value.toJSON() : value;
+  if (plainValue !== value) return stripTriviaAnswers(plainValue);
+
+  const safeValue = {};
+  for (const [key, nestedValue] of Object.entries(value)) {
+    safeValue[key] = stripTriviaAnswers(nestedValue);
+  }
+
+  const redactChallengeAnswer = (challenge) => {
+    if (challenge?.type === 'trivia' && challenge.data && typeof challenge.data === 'object') {
+      delete challenge.data.correct;
+    }
+  };
+  redactChallengeAnswer(safeValue);
+  redactChallengeAnswer(safeValue.activeChallenge);
+  return safeValue;
+};
+
+const stripGuestCapabilityHashes = (value) => {
+  if (Array.isArray(value)) return value.map(stripGuestCapabilityHashes);
+  if (!value || typeof value !== 'object') return value;
+
+  if (typeof value.toJSON === 'function') {
+    return stripGuestCapabilityHashes(value.toJSON());
+  }
+
+  const safeValue = {};
+  for (const [key, nestedValue] of Object.entries(value)) {
+    if (key === 'guestCapabilityHash' || key === 'hostCapabilityHash' || key === 'tvCapabilityHash') continue;
+    safeValue[key] = stripGuestCapabilityHashes(nestedValue);
+  }
+  return safeValue;
+};
+
+module.exports = { stripGuestCapabilityHashes, stripTriviaAnswers };
