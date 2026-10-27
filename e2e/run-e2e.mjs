@@ -21,6 +21,7 @@ const { io: socketIO } = requireFromFrontend('socket.io-client');
 const mongoose = requireFromBackend('mongoose');
 const Room = requireFromBackend(join(backendDir, 'models/Room.js'));
 const Game = requireFromBackend(join(backendDir, 'models/Game.js'));
+const Player = requireFromBackend(join(backendDir, 'models/Player.js'));
 
 const processes = [];
 const logs = new Map();
@@ -106,6 +107,17 @@ async function waitForTextOrPages(pages, pattern, timeout = 15000) {
     await new Promise((resolvePromise) => setTimeout(resolvePromise, 200));
   }
   throw new Error('Timed out waiting for ' + pattern + ' in pages ' + pages.map(([name]) => name).join(', '));
+}
+
+async function waitForMongoDocument(load, predicate, label, timeout = 15000) {
+  const deadline = Date.now() + timeout;
+  let lastDocument;
+  while (Date.now() < deadline) {
+    lastDocument = await load();
+    if (lastDocument && predicate(lastDocument)) return lastDocument;
+    await new Promise((resolvePromise) => setTimeout(resolvePromise, 200));
+  }
+  throw new Error('Timed out waiting for ' + label + ': ' + JSON.stringify(lastDocument));
 }
 
 function findChromiumExecutable() {
@@ -232,6 +244,7 @@ async function main() {
   let browser;
   let hostControlSocket;
   let votingSocket;
+  let spoofSocket;
   const contexts = [];
   try {
     await waitForHttp(backendURL + '/api/health');
@@ -241,12 +254,12 @@ async function main() {
 
     const hostContext = await browser.newContext();
     const playerAContext = await browser.newContext();
-    const playerBContext = await browser.newContext();
+    let playerBContext = await browser.newContext();
     contexts.push(hostContext, playerAContext, playerBContext);
 
     const hostPage = await hostContext.newPage();
-    const playerAPage = await playerAContext.newPage();
-    const playerBPage = await playerBContext.newPage();
+    let playerAPage = await playerAContext.newPage();
+    let playerBPage = await playerBContext.newPage();
 
     console.log('E2E 1/10: organizer creates and configures a room');
     await hostPage.goto(baseURL);
@@ -336,12 +349,33 @@ async function main() {
     await assertForbiddenFromPlayer(playerBPage, roomCode, playerBSession.playerCapability);
     console.log('  config and manual-card escalation rejected with HTTP 403');
 
-    console.log('E2E 7/10: valid bingo claim finishes the game');
+    console.log('E2E 7/10: legitimate tie-break with two full bingo claims');
     await configureRoom(hostPage, roomCode, hostSession.hostCapability, {
       challengeFrequency: 10,
-      tieBreakEnabled: false
+      tieBreakEnabled: true
     });
+
+    console.log('  disconnecting and reconnecting player B before the tie');
+    const savedPlayerBSession = await playerBPage.evaluate((key) => JSON.parse(localStorage.getItem(key)), storageKey);
+    await playerBContext.close();
+    playerBContext = await browser.newContext();
+    contexts.push(playerBContext);
+    playerBPage = await playerBContext.newPage();
+    await playerBPage.goto(baseURL);
+    await playerBPage.evaluate(({ key, value }) => localStorage.setItem(key, JSON.stringify(value)), {
+      key: storageKey,
+      value: savedPlayerBSession
+    });
+    await playerBPage.reload();
+    await waitForBody(playerBPage, /Números cantados|Mi Cartón|Reconectando/, 10000);
+    await waitForSession(playerBPage, (value) =>
+      value.roomCode === roomCode && value.playerId === savedPlayerBSession.playerId &&
+      value.playerCapability === savedPlayerBSession.playerCapability
+    );
+    console.log('  player B session reconnected with the same capability and card');
+
     await waitForBody(playerAPage, /En Juego/, 10000);
+    await waitForBody(playerBPage, /En Juego/, 10000);
 
     const roomForDraw = await Room.findOne({ code: roomCode });
     assert.ok(roomForDraw?.currentGame, 'Room has no current game for bingo draw');
@@ -352,10 +386,11 @@ async function main() {
       playerId: hostSession.playerId,
       hostCapability: hostSession.hostCapability
     });
-    const playerCardValues = playerASession.bingoCard.matrix
-      .flat()
-      .filter((value) => value !== 'BINGO');
-    for (const number of playerCardValues) {
+    const cardValuesByPlayer = [playerASession, playerBSession].map((session) =>
+      session.bingoCard.matrix.flat().filter((value) => value !== 'BINGO')
+    );
+    const cardValues = [...new Set(cardValuesByPlayer.flat())];
+    for (const number of cardValues) {
       const currentGame = await Game.findById(currentGameId);
       if (currentGame && !currentGame.availableNumbers.includes(number)) continue;
       const numberCalled = new Promise((resolvePromise) => {
@@ -368,84 +403,172 @@ async function main() {
       });
       await numberCalled;
     }
-    await playerAPage.waitForFunction(
-      () => document.querySelectorAll('.bingo-card-cell.available').length >= 24,
-      { timeout: 10000 }
-    );
-    for (let index = 0; index < 24; index += 1) {
-      await playerAPage.locator('.bingo-card-cell.available').first().click({ force: true });
-    }
-    await playerAPage.waitForFunction(async ({ url, id, capability }) => {
-      const response = await fetch(url + '/api/players/' + id, {
-        headers: { 'x-player-capability': capability }
-      });
-      const data = await response.json();
-      return data.player?.bingoCard?.markedCells?.length === 25;
-    }, {
-      url: backendURL,
-      id: playerASession.playerId,
-      capability: playerASession.playerCapability
-    }, { timeout: 10000 });
-    await playerAPage.evaluate(() => { window.confirm = () => true; });
-    await playerAPage.getByRole('button', { name: /CANTAR BINGO/ }).click({ force: true });
-    await waitForBody(playerAPage, /Finalizado|BINGO verificado/, 10000);
-    console.log('  24 called card values were marked and the valid bingo was verified');
-    hostControlSocket.disconnect();
-    hostControlSocket = null;
+    const markFullCard = async (page, session) => {
+      await page.waitForFunction(
+        () => document.querySelectorAll('.bingo-card-cell.available').length >= 24,
+        { timeout: 10000 }
+      );
+      for (let index = 0; index < 24; index += 1) {
+        await page.locator('.bingo-card-cell.available').first().click({ force: true });
+      }
+      await waitForMongoDocument(
+        () => Player.findById(session.playerId),
+        (player) => player.bingoCard?.markedCells?.length === 25,
+        'full marked card for ' + session.playerId
+      );
+    };
 
-    console.log('E2E 8/10: player disconnects and reconnects with scoped session');
-    const savedPlayerBSession = await playerBPage.evaluate((key) => JSON.parse(localStorage.getItem(key)), storageKey);
+    await markFullCard(playerAPage, playerASession);
+    await markFullCard(playerBPage, playerBSession);
+    await playerAPage.evaluate(() => { window.confirm = () => true; });
+    await playerBPage.evaluate(() => { window.confirm = () => true; });
+    await Promise.all([
+      playerAPage.evaluate(() => document.querySelector('.bingo-claim-btn')?.click()),
+      playerBPage.evaluate(() => document.querySelector('.bingo-claim-btn')?.click())
+    ]);
+
+    const tieGame = await waitForMongoDocument(
+      () => Game.findById(currentGameId),
+      (game) => game.tieBreakActive === true && game.tieCandidates?.length === 2,
+      'two legitimate tie-break candidates',
+      10000
+    );
+    const tieCandidateIds = tieGame.tieCandidates.map((candidateId) => candidateId.toString());
+    assert.deepEqual(
+      new Set(tieCandidateIds),
+      new Set([playerASession.playerId.toString(), playerBSession.playerId.toString()])
+    );
+    console.log('  both independent players claimed valid bingo inside the tie window');
+
+    await waitForBody(tvPage, /DESEMPATE|Baile de Thriller/, 10000);
+    await waitForBody(tvPage, /Candidato 1 de 2/, 10000);
+    await tvPage.getByRole('button', { name: /INICIAR BAILE/ }).click({ force: true });
+    await waitForMongoDocument(
+      () => Game.findById(currentGameId),
+      (game) => game.tieBreakCurrentPerformer?.status === 'performing',
+      'first tie-break performance to start'
+    );
+    await waitForBody(tvPage, /Candidato 2 de 2/, 22000);
+    await tvPage.getByRole('button', { name: /INICIAR BAILE/ }).click({ force: true });
+    await waitForMongoDocument(
+      () => Game.findById(currentGameId),
+      (game) => game.tieBreakStatus === 'waiting-for-voting' && !game.tieBreakCurrentPerformer,
+      'all tie-break performances to finish',
+      22000
+    );
+    await waitForBody(tvPage, /ABRIR VOTACIONES/, 5000);
+    console.log('  TV completed both public performances and exposed the voting action');
+
+    console.log('E2E 8/10: voting UI, valid votes and voter identity protection');
+    await tvPage.getByRole('button', { name: /ABRIR VOTACIONES/ }).click({ force: true });
+    await waitForBody(playerAPage, /Vota por cada candidato/);
+    await waitForBody(playerBPage, /Vota por cada candidato/);
+    assert.equal(await playerAPage.locator('.voting-modal-content button').count(), 10);
+    assert.equal(await playerBPage.locator('.voting-modal-content button').count(), 10);
+
+    const castBrowserVotes = async (page) => {
+      const buttons = page.locator('.voting-modal-content button');
+      await buttons.nth(4).click({ force: true });
+      await buttons.nth(9).click({ force: true });
+      await waitForBody(page, /Has votado por todos/, 5000);
+    };
+    // Keep the browser actions sequential here. The backend accepts concurrent
+    // voters, but sequential UI actions make the persisted identity/count
+    // assertions deterministic and leave the concurrency coverage to the
+    // atomic backend handlers.
+    await castBrowserVotes(playerAPage);
+    await castBrowserVotes(playerBPage);
+    const votedGame = await waitForMongoDocument(
+      () => Game.findById(currentGameId),
+      (game) => game.tieBreakVotes?.length === 4 &&
+        new Set(game.tieBreakVotes.map((vote) => vote.voterId.toString())).size === 2,
+      'votes from both browser sessions',
+      10000
+    );
+    assert.equal(votedGame.tieBreakVotes.filter((vote) => vote.voterId.toString() === playerASession.playerId.toString()).length, 2);
+    assert.equal(votedGame.tieBreakVotes.filter((vote) => vote.voterId.toString() === playerBSession.playerId.toString()).length, 2);
+
     await playerBContext.close();
-    const reconnectContext = await browser.newContext();
-    contexts.push(reconnectContext);
-    const reconnectPage = await reconnectContext.newPage();
-    await reconnectPage.goto(baseURL);
-    await reconnectPage.evaluate(({ key, value }) => localStorage.setItem(key, JSON.stringify(value)), {
+    await waitForMongoDocument(
+      () => Player.findById(playerBSession.playerId),
+      (player) => player.isConnected === false,
+      'player B disconnect before identity probe'
+    );
+    spoofSocket = await openAuthorizedSocket({
+      roomCode,
+      playerId: playerBSession.playerId,
+      playerCapability: playerBSession.playerCapability
+    });
+    const spoofError = new Promise((resolvePromise) => spoofSocket.once('error', resolvePromise));
+    spoofSocket.emit('cast-tiebreak-vote', {
+      roomCode,
+      voterId: playerASession.playerId,
+      performerId: tieCandidateIds[0],
+      stars: 5
+    });
+    const spoofResponse = await spoofError;
+    assert.match(String(spoofResponse?.message), /permisos/i);
+    const unmodifiedGame = await Game.findById(currentGameId);
+    assert.equal(unmodifiedGame.tieBreakVotes?.length || 0, 4);
+    spoofSocket.disconnect();
+    spoofSocket = null;
+
+    playerBContext = await browser.newContext();
+    contexts.push(playerBContext);
+    playerBPage = await playerBContext.newPage();
+    await playerBPage.goto(baseURL);
+    await playerBPage.evaluate(({ key, value }) => localStorage.setItem(key, JSON.stringify(value)), {
       key: storageKey,
       value: savedPlayerBSession
     });
-    await reconnectPage.reload();
-    await waitForBody(reconnectPage, /Números cantados|Mi Cartón|Reconectando/, 10000);
-    await waitForSession(reconnectPage, (value) =>
+    await playerBPage.reload();
+    await waitForBody(playerBPage, /Vota por cada candidato/, 10000);
+    await waitForSession(playerBPage, (value) =>
       value.roomCode === roomCode && value.playerId === savedPlayerBSession.playerId &&
       value.playerCapability === savedPlayerBSession.playerCapability
     );
-    console.log('  player session reconnected with the same capability and card');
+    console.log('  both browser sessions voted and a spoofed voter identity was rejected');
 
-    console.log('E2E 9/10: tie-break voting modal and vote ownership');
-    const roomDocument = await Room.findOne({ code: roomCode });
-    assert.ok(roomDocument?.currentGame, 'Room has no current game for voting fixture');
-    const gameDocument = await Game.findById(roomDocument.currentGame);
-    gameDocument.tieBreakActive = true;
-    gameDocument.tieBreakStatus = 'waiting-for-voting';
-    gameDocument.tieCandidates = [playerASession.playerId];
-    gameDocument.tieBreakVotes = [];
-    await gameDocument.save();
+    console.log('E2E 9/10: tie-break results and persisted winner transition');
+    const finalGame = await waitForMongoDocument(
+      () => Game.findById(currentGameId),
+      (game) => game.status === 'finished' && game.tieBreakActive === false &&
+        game.tieBreakStatus === null && game.winners?.length === 1,
+      'tie-break final result',
+      40000
+    );
+    const finalRoom = await waitForMongoDocument(
+      () => Room.findOne({ code: roomCode }),
+      (room) => room.gameState === 'finished',
+      'finished room state',
+      5000
+    );
+    assert.equal(finalRoom.gameState, 'finished');
+    assert.equal(finalGame.winners[0].player.toString(), tieCandidateIds[0]);
+    await waitForBody(hostPage, /Finalizado/, 5000);
+    await waitForBody(playerAPage, /Finalizado/, 5000);
+    await waitForBody(playerBPage, /Finalizado/, 5000);
+    await waitForBody(tvPage, /¡BINGO!/, 5000);
+    const winnerName = tieCandidateIds[0] === playerASession.playerId.toString() ? 'Jugador A' : 'Jugador B';
+    await waitForBody(tvPage, new RegExp(winnerName), 5000);
+    console.log('  voting results selected ' + winnerName + ' and finished the game for all clients');
 
-    votingSocket = await openAuthorizedSocket({
-      roomCode,
-      playerId: 'tv-display',
-      tvCapability: hostSession.tvCapability
-    });
-    votingSocket.emit('start-tiebreak-voting', { roomCode });
-    await waitForBody(playerAPage, /Vota por cada candidato/);
-    await waitForBody(reconnectPage, /Vota por cada candidato/);
-    const voteStar = playerAPage.locator('.voting-modal-content button').first();
-    await voteStar.click({ force: true });
-    await waitForBody(playerAPage, /Votado|Voto registrado/);
-    console.log('  players received the voting modal and a scoped vote was accepted');
-
-    console.log('E2E 10/10: TV, players and organizer remain active after recovery');
+    console.log('E2E 10/10: organizer, TV and recovered players remain coherent');
     await waitForBody(hostPage, /Jugadores Activos/);
-    await waitForBody(tvPage, /Bingo Bailable/);
-    await waitForBody(reconnectPage, /Números cantados|En Juego/);
-    console.log('  organizer, TV and recovered player remained synchronized');
+    // The TV keeps the winner overlay visible while the room status banner
+    // can still be transitioning; the winner assertion above is the public
+    // completion signal for this display.
+    await waitForBody(tvPage, /¡BINGO!|Finalizado/);
+    await waitForBody(playerAPage, /Finalizado/);
+    await waitForBody(playerBPage, /Finalizado/);
+    console.log('  organizer, TV and both recovered player sessions remained synchronized');
 
     await tvPage.close();
     console.log('E2E PASS: complete organizer/player/TV flow and critical security/recovery scenarios');
   } finally {
     if (hostControlSocket) hostControlSocket.disconnect();
     if (votingSocket) votingSocket.disconnect();
+    if (spoofSocket) spoofSocket.disconnect();
     if (mongoose.connection.readyState !== 0) await mongoose.disconnect().catch(() => {});
     for (const context of contexts) {
       await context.close().catch(() => {});

@@ -52,12 +52,15 @@ function handleMarkCell(io, socket) {
 
       if (!alreadyMarked) {
         const updatedPlayer = await Player.findOneAndUpdate(
-          ownerFilter,
           {
-            $set: {
-              'bingoCard.markedCells': [...marked, { row, col }],
-              'stats.numbersMarked': (player.stats?.numbersMarked || 0) + 1
+            ...ownerFilter,
+            'bingoCard.markedCells': {
+              $not: { $elemMatch: { row, col } }
             }
+          },
+          {
+            $addToSet: { 'bingoCard.markedCells': { row, col } },
+            $inc: { 'stats.numbersMarked': 1 }
           },
           { new: true }
         );

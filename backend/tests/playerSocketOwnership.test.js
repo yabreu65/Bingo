@@ -88,11 +88,14 @@ describe('player socket mutation ownership', () => {
     await handleMarkCell(io, socket)({ roomCode: 'ROOMA1', playerId: 'player-a', row: 0, col: 0 });
 
     expect(Player.findOneAndUpdate).toHaveBeenLastCalledWith(
-      { _id: 'player-a', room: 'room-a', socketId: 'socket-current', isConnected: true },
-      { $set: {
-        'bingoCard.markedCells': [{ row: 0, col: 0 }],
-        'stats.numbersMarked': 1
-      } },
+      {
+        _id: 'player-a', room: 'room-a', socketId: 'socket-current', isConnected: true,
+        'bingoCard.markedCells': { $not: { $elemMatch: { row: 0, col: 0 } } }
+      },
+      {
+        $addToSet: { 'bingoCard.markedCells': { row: 0, col: 0 } },
+        $inc: { 'stats.numbersMarked': 1 }
+      },
       { new: true }
     );
     expect(player.save).not.toHaveBeenCalled();

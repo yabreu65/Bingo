@@ -127,6 +127,7 @@ async function runTieBreak(io, socket, room) {
 
     // Marcar como performing
     game.tieBreakCurrentPerformer.status = 'performing';
+    game.markModified('tieBreakCurrentPerformer');
     await game.save();
 
     // Notificar que el video está reproduciéndose
@@ -140,6 +141,7 @@ async function runTieBreak(io, socket, room) {
 
     // Después del video, marcar como completado (NO iniciar votación automática)
     game.tieBreakCurrentPerformer.status = 'completed';
+    game.markModified('tieBreakCurrentPerformer');
     await game.save();
 
     logger.info(`[${room.code}] Performance ${i + 1}/${candidates.length} completado`);
@@ -235,36 +237,90 @@ function handleClaimBingo(io, socket) {
         return;
       }
 
-      const now = Date.now();
-      const windowEnds = game.tieWindowEnds ? new Date(game.tieWindowEnds).getTime() : 0;
+      const now = new Date();
+      const playerAlreadyCandidate = Array.isArray(game.tieCandidates) &&
+        game.tieCandidates.some((candidateId) => candidateId.toString() === player._id.toString());
 
-      if (game.tieBreakActive && now <= windowEnds) {
-        game.tieCandidates = Array.isArray(game.tieCandidates) ? game.tieCandidates : [];
-        if (!game.tieCandidates.find(id => id.toString() === player._id.toString())) {
-          game.tieCandidates.push(player._id);
-        }
-        await game.save();
+      if (game.tieBreakActive && playerAlreadyCandidate) return;
+
+      // Claims can arrive concurrently. Use an atomic update so the second
+      // valid claim joins the active five-second window instead of losing to a
+      // Mongoose document-version race.
+      const candidateAddedGame = await Game.findOneAndUpdate(
+        {
+          _id: game._id,
+          tieBreakActive: true,
+          tieWindowEnds: { $gte: now },
+          tieCandidates: { $ne: player._id }
+        },
+        { $addToSet: { tieCandidates: player._id } },
+        { new: true }
+      );
+      if (candidateAddedGame) {
         io.to(roomCode).emit('tiebreak-candidate-added', { playerId });
         logger.logGameEvent(roomCode, 'Tie-break candidate added', { playerId });
         return;
       }
 
-      game.tieBreakActive = true;
-      game.tieCandidates = [player._id];
-      game.tieWindowEnds = new Date(Date.now() + 5000);
-      await game.save();
-      io.to(roomCode).emit('tiebreak-window-started', { endsAt: game.tieWindowEnds, firstCandidate: player._id });
-      logger.logGameEvent(roomCode, 'Tie-break window started');
+      const tieWindowEnds = new Date(Date.now() + 5000);
+      const windowStartedGame = await Game.findOneAndUpdate(
+        {
+          _id: game._id,
+          $or: [
+            { tieBreakActive: { $ne: true } },
+            { tieBreakActive: true, tieWindowEnds: { $lt: now } }
+          ]
+        },
+        {
+          $set: {
+            tieBreakActive: true,
+            tieCandidates: [player._id],
+            tieWindowEnds,
+            tieBreakStatus: null,
+            tieBreakCurrentPerformer: null
+          }
+        },
+        { new: true }
+      );
 
-      setTimeout(async () => {
-        try {
-          const freshRoom = await Room.findOne({ code: roomCode });
-          if (!freshRoom) return;
-          await runTieBreak(io, socket, freshRoom);
-        } catch (error) {
-          logger.error('Error starting tie-break asynchronously:', error);
-        }
-      }, 5000);
+      if (windowStartedGame) {
+        io.to(roomCode).emit('tiebreak-window-started', {
+          endsAt: windowStartedGame.tieWindowEnds,
+          firstCandidate: player._id
+        });
+        logger.logGameEvent(roomCode, 'Tie-break window started');
+
+        setTimeout(async () => {
+          try {
+            const freshRoom = await Room.findOne({ code: roomCode });
+            if (!freshRoom) return;
+            await runTieBreak(io, socket, freshRoom);
+          } catch (error) {
+            logger.error('Error starting tie-break asynchronously:', error);
+          }
+        }, 5000);
+        return;
+      }
+
+      // If another request opened the window between the two atomic updates,
+      // retry the join against the now-current window.
+      const racedCandidateGame = await Game.findOneAndUpdate(
+        {
+          _id: game._id,
+          tieBreakActive: true,
+          tieWindowEnds: { $gte: new Date() },
+          tieCandidates: { $ne: player._id }
+        },
+        { $addToSet: { tieCandidates: player._id } },
+        { new: true }
+      );
+      if (racedCandidateGame) {
+        io.to(roomCode).emit('tiebreak-candidate-added', { playerId });
+        logger.logGameEvent(roomCode, 'Tie-break candidate added', { playerId });
+        return;
+      }
+
+      logger.warn(`[${roomCode}] Valid bingo could not join or open the tie-break window`);
     } catch (error) {
       logger.error('Error in claim-bingo:', error);
       socket.emit('error', { message: 'No se pudo reclamar el bingo' });
@@ -427,7 +483,7 @@ function handleStartTiebreakVoting(io, socket) {
 
       // Después de 30 segundos, procesar resultados
       setTimeout(async () => {
-        await finalizeTiebreakVoting(io, room, game, candidatesInfo);
+        await finalizeTiebreakVoting(io, room, game._id, candidatesInfo);
       }, 30000);
 
     } catch (error) {
@@ -440,8 +496,17 @@ function handleStartTiebreakVoting(io, socket) {
 /**
  * Finalizar votación de tie-break y determinar ganador
  */
-async function finalizeTiebreakVoting(io, room, game, candidatesInfo) {
+async function finalizeTiebreakVoting(io, room, gameId, candidatesInfo) {
   try {
+    // Votes are written by independent player sockets while the timer is
+    // running. Reload the game so finalization never uses the stale document
+    // captured when voting started.
+    const game = await Game.findById(gameId);
+    if (!game) {
+      logger.warn(`[${room?.code || 'unknown'}] Tie-break finalization skipped: game not found`);
+      return;
+    }
+
     // Obtener votos de cada candidato desde game.tieBreakVotes
     const results = [];
 
@@ -541,16 +606,6 @@ function handleCastTiebreakVote(io, socket) {
         return socket.emit('error', { message: 'Candidato de desempate inválido' });
       }
 
-      // Guardar voto en el juego
-      if (!game.tieBreakVotes) {
-        game.tieBreakVotes = [];
-      }
-
-      // Verificar si ya votó por este candidato
-      const existingVoteIndex = game.tieBreakVotes.findIndex(
-        v => v.voterId.toString() === voter._id.toString() && v.performerId.toString() === performerId.toString()
-      );
-
       const vote = {
         voterId: voter._id,
         performerId,
@@ -558,15 +613,40 @@ function handleCastTiebreakVote(io, socket) {
         timestamp: new Date()
       };
 
-      if (existingVoteIndex >= 0) {
-        // Actualizar voto existente
-        game.tieBreakVotes[existingVoteIndex] = vote;
-      } else {
-        // Agregar nuevo voto
-        game.tieBreakVotes.push(vote);
+      // Votes from different browser sessions can arrive in the same event
+      // loop turn. Use an atomic append, then an atomic replacement for the
+      // retry/update case, instead of saving a stale document per vote.
+      const voteMatch = {
+        voterId: voter._id,
+        performerId
+      };
+      let updatedGame = await Game.findOneAndUpdate(
+        {
+          _id: game._id,
+          tieBreakActive: true,
+          tieBreakStatus: 'voting',
+          tieBreakVotes: { $not: { $elemMatch: voteMatch } }
+        },
+        { $push: { tieBreakVotes: vote } },
+        { new: true }
+      );
+
+      if (!updatedGame) {
+        updatedGame = await Game.findOneAndUpdate(
+          { _id: game._id, tieBreakVotes: { $elemMatch: voteMatch } },
+          {
+            $set: {
+              'tieBreakVotes.$.stars': stars,
+              'tieBreakVotes.$.timestamp': vote.timestamp
+            }
+          },
+          { new: true }
+        );
       }
 
-      await game.save();
+      if (!updatedGame) {
+        return socket.emit('error', { message: 'No se pudo registrar el voto de desempate' });
+      }
 
       // Confirmar voto
       socket.emit('tiebreak-vote-confirmed', { performerId, stars });
@@ -575,7 +655,7 @@ function handleCastTiebreakVote(io, socket) {
       const connectedDigitalPlayers = room.players.filter(p => p.isConnected);
       const manualPlayersCount = (room.manualPlayers || []).length;
       const totalVoters = connectedDigitalPlayers.length + manualPlayersCount;
-      const votersWhoVoted = new Set(game.tieBreakVotes.map(v => v.voterId.toString())).size;
+      const votersWhoVoted = new Set(updatedGame.tieBreakVotes.map(v => v.voterId.toString())).size;
 
       io.to(roomCode).emit('tiebreak-voting-progress', {
         voted: votersWhoVoted,
