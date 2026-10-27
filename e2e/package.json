@@ -1,0 +1,11 @@
+{
+  "name": "bingo-bailable-e2e",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node run-e2e.mjs"
+  },
+  "dependencies": {
+    "playwright": "1.64.1"
+  }
+}
