@@ -415,6 +415,7 @@ export default function OrganizerDashboard({ roomData }) {
   const [searchPlayer, setSearchPlayer] = useState('');
   const [showRecording, setShowRecording] = useState(false);
   const [activeChallenge, setActiveChallenge] = useState(null);
+  const [activeVoting, setActiveVoting] = useState(null);
   const [recordingCompleted, setRecordingCompleted] = useState(false);
   const tieBreakOn = !!roomState?.config?.tieBreakEnabled;
 
@@ -516,6 +517,8 @@ export default function OrganizerDashboard({ roomData }) {
         setActiveChallenge(null);
         setShowRecording(false);
     };
+    const handleVotingStarted = (data) => setActiveVoting(data);
+    const handleVotingResults = () => setActiveVoting(null);
     const handleBingoVerified = (data) => {
         setGameState('finished');
         const p = roomState.players.find(p => p._id === data.playerId);
@@ -531,6 +534,8 @@ export default function OrganizerDashboard({ roomData }) {
     socket.on('player-left', handlePlayerLeft);
     socket.on('challenge-triggered', handleChallengeTriggered);
     socket.on('challenge-completed', handleChallengeCompleted);
+    socket.on('votingStarted', handleVotingStarted);
+    socket.on('votingResults', handleVotingResults);
     socket.on('bingo-verified', handleBingoVerified);
 
     return () => {
@@ -543,6 +548,8 @@ export default function OrganizerDashboard({ roomData }) {
       socket.off('player-left', handlePlayerLeft);
       socket.off('challenge-triggered', handleChallengeTriggered);
       socket.off('challenge-completed', handleChallengeCompleted);
+      socket.off('votingStarted', handleVotingStarted);
+      socket.off('votingResults', handleVotingResults);
       socket.off('bingo-verified', handleBingoVerified);
     };
   }, [socket, roomState.config?.timeBetweenNumbers, roomState.players]);
@@ -635,6 +642,26 @@ export default function OrganizerDashboard({ roomData }) {
         hostCapability: roomData.hostCapability
       });
       toast.success(`Lanzando ${eventType}...`);
+  };
+
+  const handleStartVoting = () => {
+    if (!activeChallenge) return;
+    const performerId = activeChallenge.player?.id || activeChallenge.player?._id || activeChallenge.player;
+    socket?.emit('startVoting', {
+      roomCode: roomState.code,
+      challengeType: activeChallenge.type,
+      performerId: performerId?.toString(),
+      hostCapability: roomData.hostCapability
+    });
+  };
+
+  const handleEndVoting = () => {
+    if (!activeVoting) return;
+    socket?.emit('endVoting', {
+      roomCode: roomState.code,
+      voteId: activeVoting.voteId,
+      hostCapability: roomData.hostCapability
+    });
   };
 
   const handleToggleRecording = () => {
@@ -920,6 +947,41 @@ export default function OrganizerDashboard({ roomData }) {
                   className="!py-4"
                 />
                 <ActionButton
+                  icon={<Target size={22} />}
+                  label="Lanzar Adivinanza"
+                  onClick={() => handleLaunchEvent('riddle')}
+                  variant="secondary"
+                  className="!py-4"
+                />
+                <ActionButton
+                  icon={<Music size={22} />}
+                  label="Lanzar Baile"
+                  onClick={() => handleLaunchEvent('dance')}
+                  variant="secondary"
+                  className="!py-4"
+                />
+                <ActionButton
+                  icon={<Mic size={22} />}
+                  label="Lanzar Canto"
+                  onClick={() => handleLaunchEvent('sing')}
+                  variant="secondary"
+                  className="!py-4"
+                />
+                <ActionButton
+                  icon={<Users size={22} />}
+                  label="Lanzar Grupal"
+                  onClick={() => handleLaunchEvent('group')}
+                  variant="secondary"
+                  className="!py-4"
+                />
+                <ActionButton
+                  icon={<Music size={22} />}
+                  label="Lanzar Karaoke"
+                  onClick={() => handleLaunchEvent('karaoke')}
+                  variant="secondary"
+                  className="!py-4"
+                />
+                <ActionButton
                   icon={<Gift size={22} />}
                   label="Dar Premio"
                   onClick={() => handleLaunchEvent('prize')}
@@ -948,6 +1010,28 @@ export default function OrganizerDashboard({ roomData }) {
                   <p className="text-slate-300 text-sm mt-1">
                     Jugador: {activeChallenge.player?.name || 'Desconocido'}
                   </p>
+                  {!activeVoting && (
+                    <ActionButton
+                      icon={<Gift size={18} />}
+                      label="Abrir votación"
+                      onClick={handleStartVoting}
+                      variant="success"
+                      className="mt-3"
+                    />
+                  )}
+                  {activeVoting && (
+                    <div className="mt-3 flex items-center gap-3">
+                      <span className="text-slate-300 text-sm">
+                        Votación: {activeVoting.votesReceived || 0}/{activeVoting.totalVoters || 0}
+                      </span>
+                      <ActionButton
+                        label="Cerrar votación"
+                        onClick={handleEndVoting}
+                        variant="warning"
+                        className="!w-auto"
+                      />
+                    </div>
+                  )}
                 </motion.div>
               )}
 

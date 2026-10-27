@@ -27,6 +27,7 @@ const ChallengeModal = ({
   const playerName = externalPlayerName || contextData.playerName;
   const playerCapability = externalPlayerCapability || contextData.playerCapability;
   const [selectedAnswer, setSelectedAnswer] = useState(null);
+  const [textAnswer, setTextAnswer] = useState('');
   const [showResult, setShowResult] = useState(false);
   const [timer, setTimer] = useState(0);
   const timerIntervalRef = useRef(null);
@@ -77,6 +78,7 @@ const ChallengeModal = ({
       console.log('🎯 Challenge data:', activeChallenge.data);
 
       setSelectedAnswer(null);
+      setTextAnswer('');
       setShowResult(false);
       setCurrentLyricIndex(0);
 
@@ -197,6 +199,12 @@ const ChallengeModal = ({
     }
   };
 
+  const handleRiddleAnswer = () => {
+    const answer = textAnswer.trim();
+    if (!answer) return;
+    completeChallenge(true, answer);
+  };
+
   const handleRecordingComplete = (recording) => {
     console.log('Grabación completada:', recording);
     setRecordingCompleted(true);
@@ -234,6 +242,7 @@ const ChallengeModal = ({
           {type === 'sing' && '🎤 RETO DE CANTO'}
           {type === 'group' && '👥 RETO GRUPAL'}
           {type === 'karaoke' && '🎤 MODO KARAOKE'}
+          {type === 'riddle' && '🧩 ADIVINANZA'}
         </div>
 
         {/* TRIVIA */}
@@ -284,6 +293,28 @@ const ChallengeModal = ({
                 )}
               </>
             )}
+          </>
+        )}
+
+        {/* ADIVINANZA */}
+        {type === 'riddle' && (
+          <>
+            <div className="challenge-description">{data?.prompt || activeChallenge.text}</div>
+            <input
+              type="text"
+              value={textAnswer}
+              onChange={(event) => setTextAnswer(event.target.value)}
+              maxLength={200}
+              placeholder="Escribí tu respuesta"
+              aria-label="Respuesta de la adivinanza"
+            />
+            <button
+              className="btn-close-challenge"
+              onClick={handleRiddleAnswer}
+              disabled={!textAnswer.trim()}
+            >
+              Enviar respuesta
+            </button>
           </>
         )}
 

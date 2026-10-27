@@ -38,6 +38,7 @@ const TVDisplay = ({ roomCode, tvCapability }) => {
   const [triviaAnswer, setTriviaAnswer] = useState(null); // Para almacenar la respuesta del jugador
   const [manualPlayerAnswers, setManualPlayerAnswers] = useState({}); // Respuestas de jugadores manuales {playerId: answerIndex}
   const [manualPlayerResults, setManualPlayerResults] = useState({});
+  const [activeVoting, setActiveVoting] = useState(null);
 
   // Estados para tie-break
   const [tieBreakActive, setTieBreakActive] = useState(false);
@@ -117,6 +118,14 @@ const TVDisplay = ({ roomCode, tvCapability }) => {
     };
     const handleChallengeCountdown = (data) => {
         setChallengeTimeLeft(data.timeLeft);
+    };
+    const handleVotingStarted = (data) => setActiveVoting(data);
+    const handleVotingResults = (data) => {
+      setActiveVoting(null);
+      setTimeout(() => setCartonazoWinner({
+        name: data.performerName,
+        message: `Promedio ${Number(data.averageStars || 0).toFixed(1)} ⭐ · +${data.bonusPoints || 0} puntos`
+      }), 0);
     };
     const handleChallengeComplete = () => {
         console.log('🎮 Challenge complete, resuming game');
@@ -314,6 +323,8 @@ const TVDisplay = ({ roomCode, tvCapability }) => {
     socket.on('trivia-answered', handleTriviaAnswered);
     socket.on('trivia-result-public', handleTriviaAnswered);
     socket.on('trivia-result', handleTriviaResult);
+    socket.on('votingStarted', handleVotingStarted);
+    socket.on('votingResults', handleVotingResults);
     socket.on('countdown-tick', handleCountdownTick);
     socket.on('music-song-change', handleMusicSongChange);
     socket.on('music-sync', handleMusicSync);
@@ -345,6 +356,8 @@ const TVDisplay = ({ roomCode, tvCapability }) => {
       socket.off('trivia-answered', handleTriviaAnswered);
       socket.off('trivia-result-public', handleTriviaAnswered);
       socket.off('trivia-result', handleTriviaResult);
+      socket.off('votingStarted', handleVotingStarted);
+      socket.off('votingResults', handleVotingResults);
       socket.off('countdown-tick', handleCountdownTick);
       socket.off('music-song-change', handleMusicSongChange);
       socket.off('music-sync', handleMusicSync);
@@ -674,6 +687,18 @@ const TVDisplay = ({ roomCode, tvCapability }) => {
                 )}
 
                 <div className="challenge-timer">{challengeTimeLeft}s</div>
+            </div>
+          </MotionBox>
+        )}
+        {activeVoting && (
+          <MotionBox className="overlay challenge-overlay">
+            <div className="challenge-content">
+              <h2 className="challenge-title">⭐ VOTACIÓN ABIERTA</h2>
+              <p className="challenge-player">Actuación de {activeVoting.performerName}</p>
+              <p className="challenge-text">Los jugadores pueden calificar de 1 a 5 estrellas.</p>
+              <div className="challenge-timer">
+                {activeVoting.votesReceived || 0} / {activeVoting.totalVoters || 0} votos
+              </div>
             </div>
           </MotionBox>
         )}

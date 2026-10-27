@@ -3,6 +3,7 @@ import toast from 'react-hot-toast';
 import { useSocket } from '../../context/useSocket';
 import ChallengeModal from '../Challenges/ChallengeModal';
 import TiebreakVotingModal from '../Voting/TiebreakVotingModal';
+import VotingModal from '../Voting/VotingModal';
 import { CARD_MATRIX_VERSION, getCardCell } from '../../utils/bingoCardGenerator';
 import './PlayerCardView.css';
 
@@ -24,6 +25,7 @@ const PlayerCardView = ({ roomData }) => {
   const [activeEvent, setActiveEvent] = useState(null);
   const [activeChallenge, setActiveChallenge] = useState(null);
   const [triviaResult, setTriviaResult] = useState(null);
+  const [activeVoting, setActiveVoting] = useState(null);
 
   // Estados para votación de tie-break
   const [tiebreakVoting, setTiebreakVoting] = useState(null); // { candidates, votingDuration, message }
@@ -144,6 +146,14 @@ const PlayerCardView = ({ roomData }) => {
     setTriviaResult(data);
   }, [roomData.playerId]);
 
+  const handleVotingStarted = useCallback((data) => {
+    setActiveVoting(data);
+  }, []);
+
+  const handleVotingResults = useCallback(() => {
+    setActiveVoting(null);
+  }, []);
+
   // Handlers para tie-break voting
   function handleTiebreakVotingStarted(data) {
     console.log('🗳️ Tie-break voting started:', data);
@@ -219,6 +229,8 @@ const PlayerCardView = ({ roomData }) => {
     socket?.on('challenge-triggered', handleChallengeTriggered);
     socket?.on('challenge-complete', handleChallengeComplete);
     socket?.on('trivia-result', handleTriviaResult);
+    socket?.on('votingStarted', handleVotingStarted);
+    socket?.on('votingResults', handleVotingResults);
     socket?.on('bingo-claimed', (data) => {
       if (data.playerId === roomData.playerId) {
         toast.success('BINGO reclamado, validando...');
@@ -252,6 +264,8 @@ const PlayerCardView = ({ roomData }) => {
       socket?.off('challenge-triggered', handleChallengeTriggered);
       socket?.off('challenge-complete', handleChallengeComplete);
       socket?.off('trivia-result', handleTriviaResult);
+      socket?.off('votingStarted', handleVotingStarted);
+      socket?.off('votingResults', handleVotingResults);
       socket?.off('bingo-claimed');
       socket?.off('bingo-verified');
       socket?.off('bingo-rejected');
@@ -259,7 +273,7 @@ const PlayerCardView = ({ roomData }) => {
       socket?.off('tiebreak-vote-confirmed', handleTiebreakVoteConfirmed);
       socket?.off('tiebreak-results', handleTiebreakResults);
     };
-  }, [socket, joinRoom, roomData.roomCode, roomData.playerId, roomData.playerCapability, handleCellMarked, handleGameStateUpdate, handleTriviaResult]);
+  }, [socket, joinRoom, roomData.roomCode, roomData.playerId, roomData.playerCapability, handleCellMarked, handleGameStateUpdate, handleTriviaResult, handleVotingStarted, handleVotingResults]);
 
   const handleTiebreakVote = (performerId, stars) => {
     console.log(`⭐ Voting for ${performerId}: ${stars} stars`);
@@ -267,6 +281,15 @@ const PlayerCardView = ({ roomData }) => {
       roomCode: roomData.roomCode,
       voterId: roomData.playerId,
       performerId,
+      stars
+    });
+  };
+
+  const handleVote = (stars) => {
+    if (!activeVoting) return;
+    socket?.emit('castVote', {
+      voteId: activeVoting.voteId,
+      voterId: roomData.playerId,
       stars
     });
   };
@@ -449,8 +472,21 @@ const PlayerCardView = ({ roomData }) => {
         />
       )}
 
-      {/* Challenge Modal - Solo para trivias */}
-      {activeChallenge && activeChallenge.type === 'trivia' && (
+      {activeVoting && (
+        <VotingModal
+          isOpen={true}
+          performerName={activeVoting.performerName}
+          challengeType={activeVoting.challengeType}
+          challengeText={activeVoting.challengeText}
+          onVote={handleVote}
+          votingDuration={activeVoting.votingDuration || 15}
+          myPlayerId={roomData.playerId}
+          performerId={activeVoting.performerId}
+        />
+      )}
+
+      {/* Challenge Modal */}
+      {activeChallenge && (
         <ChallengeModal
           externalActiveChallenge={activeChallenge}
           externalCompleteChallenge={(success, answer) => {
@@ -466,21 +502,30 @@ const PlayerCardView = ({ roomData }) => {
               const triviaData = {
                 roomCode: roomData.roomCode,
                 playerId: roomData.playerId,
-                answer
+                answer,
+                challengeId: activeChallenge.challengeId
               };
               console.log('📤 Emitting trivia-answered:', triviaData);
               socket?.emit('trivia-answered', triviaData);
+            } else if (activeChallenge?.type === 'riddle') {
+              socket?.emit('challenge-answer', {
+                roomCode: roomData.roomCode,
+                playerId: roomData.playerId,
+                challengeId: activeChallenge.challengeId,
+                answer
+              });
             } else {
               // Para otros tipos de challenges
               socket?.emit('challenge-complete', {
                 roomCode: roomData.roomCode,
                 playerId: roomData.playerId,
+                challengeId: activeChallenge.challengeId,
                 type: activeChallenge?.type
               });
             }
 
             // No cerrar inmediatamente para trivias, esperar el evento del servidor
-            if (activeChallenge?.type !== 'trivia') {
+            if (activeChallenge?.type !== 'trivia' && activeChallenge?.type !== 'riddle') {
               setActiveChallenge(null);
             }
           }}

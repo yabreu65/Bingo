@@ -135,6 +135,19 @@ async function waitForMongoDocument(load, predicate, label, timeout = 15000) {
   throw new Error('Timed out waiting for ' + label + ': ' + JSON.stringify(lastDocument));
 }
 
+async function waitForChallengePage(pages, type, timeout = 10000) {
+  const deadline = Date.now() + timeout;
+  while (Date.now() < deadline) {
+    for (const [name, page] of pages) {
+      if (page.isClosed()) continue;
+      const challenge = page.locator(`.challenge-type-${type}`);
+      if (await challenge.count().catch(() => 0)) return { name, page };
+    }
+    await new Promise((resolvePromise) => setTimeout(resolvePromise, 200));
+  }
+  throw new Error('Timed out waiting for ' + type + ' challenge in browser pages');
+}
+
 function findChromiumExecutable() {
   if (process.env.PLAYWRIGHT_CHROMIUM_PATH && existsSync(process.env.PLAYWRIGHT_CHROMIUM_PATH)) {
     return process.env.PLAYWRIGHT_CHROMIUM_PATH;
@@ -271,6 +284,7 @@ async function main() {
 
   let browser;
   let hostControlSocket;
+  let tvControlSocket;
   let votingSocket;
   let spoofSocket;
   const contexts = [];
@@ -385,6 +399,21 @@ async function main() {
       playerId: hostSession.playerId,
       hostCapability: hostSession.hostCapability
     });
+    tvControlSocket = await openAuthorizedSocket({
+      roomCode,
+      playerId: 'tv-display',
+      tvCapability: hostSession.tvCapability
+    });
+    const ensureHostControlSocket = async () => {
+      if (!hostControlSocket?.connected) {
+        hostControlSocket = await openAuthorizedSocket({
+          roomCode,
+          playerId: hostSession.playerId,
+          hostCapability: hostSession.hostCapability
+        });
+      }
+      return hostControlSocket;
+    };
     const visualCardCells = await readRenderedCard(playerAPage);
     const targetCells = [];
     for (const cell of visualCardCells) {
@@ -397,6 +426,7 @@ async function main() {
       const targetNumber = Number(targetCell.value);
       const currentVisualGame = await Game.findById((await Room.findOne({ code: roomCode })).currentGame);
       if (!currentVisualGame.calledNumbers.includes(targetNumber)) {
+        await ensureHostControlSocket();
         const numberCalled = new Promise((resolvePromise) => {
           hostControlSocket.once('number-called', resolvePromise);
         });
@@ -436,14 +466,76 @@ async function main() {
       challengeTarget.name === 'player-b' ? playerBPage : challengeTarget.name === 'tv' ? tvPage : hostPage;
     assert.match(challengeTarget.text, /trivia|TRIVIA|Pregunta|Challenge Activo/i);
 
-    if (challengeTarget.name === 'player-a' || challengeTarget.name === 'player-b') {
-      const options = challengePage.locator('.trivia-options button');
-      await options.first().waitFor({ state: 'visible', timeout: 5000 });
-      await options.first().click();
-      await waitForBody(challengePage, /CORRECTO|INCORRECTO/, 5000);
-      await waitForBody(tvPage, /TRIVIA|Respuesta|RETO|Challenge/, 5000);
-    }
+    const gameForRoom = async () => {
+      const currentRoom = await Room.findOne({ code: roomCode });
+      return currentRoom?.currentGame ? Game.findById(currentRoom.currentGame) : null;
+    };
+
+    const triviaChallenge = await waitForChallengePage(
+      [['player-a', playerAPage], ['player-b', playerBPage]],
+      'trivia'
+    );
+    const triviaPage = triviaChallenge.page;
+
+    const options = triviaPage.locator('.trivia-options button');
+    await options.first().waitFor({ state: 'visible', timeout: 5000 });
+    await options.first().click();
+    await waitForBody(triviaPage, /CORRECTO|INCORRECTO/, 5000);
+    await waitForBody(tvPage, /TRIVIA|Respuesta|RETO|Challenge/, 5000);
     console.log('  challenge observed on ' + challengeTarget.name);
+    await waitForMongoDocument(
+      gameForRoom,
+      (game) => !game?.activeChallenge,
+      'automatic trivia completion'
+    );
+    await configureRoom(hostPage, roomCode, hostSession.hostCapability, { challengeFrequency: 10 });
+
+    const challengePages = [['player-a', playerAPage], ['player-b', playerBPage]];
+    const launchChallenge = async (type) => {
+      await ensureHostControlSocket();
+      hostControlSocket.emit('launch-event', {
+        roomCode,
+        type,
+        hostCapability: hostSession.hostCapability
+      });
+    };
+    const launchChallengeAndComplete = async (type, complete) => {
+      await launchChallenge(type);
+      const challenge = await waitForChallengePage(challengePages, type);
+      const activeChallenge = await gameForRoom();
+      const performerId = activeChallenge?.activeChallenge?.player?.toString();
+      const performerPage = performerId === playerASession.playerId.toString()
+        ? playerAPage
+        : performerId === playerBSession.playerId.toString() ? playerBPage : challenge.page;
+      await complete(performerPage, performerId || challenge.name);
+      await waitForMongoDocument(gameForRoom, (game) => !game?.activeChallenge, `${type} completion`);
+    };
+
+    console.log('E2E 4b/10: riddle, dance, sing, group and karaoke challenge contracts');
+    await launchChallengeAndComplete('riddle', async (page) => {
+      const game = await gameForRoom();
+      const answer = game.activeChallenge.data.answers[0];
+      await page.getByLabel('Respuesta de la adivinanza').fill(answer);
+      await page.getByRole('button', { name: /Enviar respuesta/ }).click();
+    });
+    await launchChallengeAndComplete('dance', async (page) => {
+      await page.locator('.challenge-modal .btn-close-challenge').click();
+    });
+    await launchChallengeAndComplete('sing', async (page) => {
+      await page.locator('.challenge-modal .btn-close-challenge').click();
+    });
+    await launchChallenge('group');
+    await waitForChallengePage(challengePages, 'group');
+    for (const [, page] of challengePages) {
+      await page.locator('.challenge-modal .btn-close-challenge').click();
+      await new Promise((resolvePromise) => setTimeout(resolvePromise, 300));
+    }
+    await waitForMongoDocument(gameForRoom, (game) => !game?.activeChallenge, 'group completion or timeout', 40000);
+    await launchChallenge('karaoke');
+    await waitForChallengePage([['player-a', playerAPage], ['player-b', playerBPage], ['tv', tvPage]], 'karaoke');
+    tvControlSocket.emit('karaoke-video-end', { roomCode });
+    await waitForMongoDocument(gameForRoom, (game) => !game?.activeChallenge, 'karaoke completion');
+    console.log('  all Phase 2 challenge types exercised through real browser clients and timeout recovery');
 
     console.log('  disconnecting and reconnecting player A after visual marks');
     const savedPlayerASession = await playerAPage.evaluate((key) => JSON.parse(localStorage.getItem(key)), storageKey);
@@ -529,6 +621,7 @@ async function main() {
     for (const number of cardValues) {
       const currentGame = await Game.findById(currentGameId);
       if (currentGame && !currentGame.availableNumbers.includes(number)) continue;
+      await ensureHostControlSocket();
       const numberCalled = new Promise((resolvePromise) => {
         hostControlSocket.once('number-called', resolvePromise);
       });
@@ -720,6 +813,7 @@ async function main() {
   } finally {
     if (hostControlSocket) hostControlSocket.disconnect();
     if (votingSocket) votingSocket.disconnect();
+    if (tvControlSocket) tvControlSocket.disconnect();
     if (spoofSocket) spoofSocket.disconnect();
     if (mongoose.connection.readyState !== 0) await mongoose.disconnect().catch(() => {});
     for (const context of contexts) {
