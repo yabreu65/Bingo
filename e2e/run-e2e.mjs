@@ -526,13 +526,27 @@ async function main() {
     }
     const markFullCard = async (page, session) => {
       await page.waitForFunction(
-        () => document.querySelectorAll('[data-testid="bingo-card-cell"]').length === 25 &&
-          document.querySelectorAll('[data-testid="bingo-card-cell"].available').length > 0,
+        () => document.querySelectorAll('[data-testid="bingo-card-cell"]').length === 25,
         { timeout: 10000 }
       );
-      const availableCells = page.locator('[data-testid="bingo-card-cell"].available');
-      while (await availableCells.count() > 0) {
-        await availableCells.first().click({ force: true });
+      for (let row = 0; row < 5; row += 1) {
+        for (let col = 0; col < 5; col += 1) {
+          if (row === 2 && col === 2) continue;
+          const cell = page.locator(
+            `[data-testid="bingo-card-cell"][data-row="${row}"][data-col="${col}"]`
+          );
+          await cell.waitFor({ state: 'visible', timeout: 10000 });
+          await cell.click({ force: true });
+          await waitForMongoDocument(
+            () => Player.findById(session.playerId),
+            (player) => player.bingoCard?.markedCells?.some((markedCell) =>
+              Array.isArray(markedCell)
+                ? markedCell[0] === row && markedCell[1] === col
+                : markedCell.row === row && markedCell.col === col
+            ),
+            `mark full-card cell ${row},${col} for ${session.playerId}`
+          );
+        }
       }
       await waitForMongoDocument(
         () => Player.findById(session.playerId),
