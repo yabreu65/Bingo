@@ -40,9 +40,11 @@ const roomSchema = new mongoose.Schema({
     challengeFrequency: { type: Number, default: 3 },
     enabledChallengeTypes: {
       trivia: { type: Boolean, default: true },
+      riddle: { type: Boolean, default: true },
       dance: { type: Boolean, default: true },
       sing: { type: Boolean, default: true },
-      group: { type: Boolean, default: true }
+      group: { type: Boolean, default: true },
+      karaoke: { type: Boolean, default: true }
     },
     gameMode: {
       type: String,

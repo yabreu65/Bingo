@@ -23,26 +23,12 @@ const gameSchema = new mongoose.Schema({
     type: Number,
     default: 0
   },
+  // Mixed is intentional: legacy games store challenge snapshots with different
+  // shapes. Keeping the snapshot unversioned prevents a stale reconnect document
+  // from failing when tie-break fields are updated concurrently.
   activeChallenge: {
-    type: {
-      type: String,
-      enum: ['trivia', 'dance', 'sing', 'group', 'karaoke']
-    },
-    // Acepta tanto ObjectId (jugadores digitales) como String (jugadores manuales)
-    player: mongoose.Schema.Types.Mixed,
-    data: mongoose.Schema.Types.Mixed,
-    startTime: Date,
-    duration: Number,
-    text: String,
-    deezerId: String,
-    karaokeId: String,
-    title: String,
-    artist: String,
-    localFile: String,
-    voteId: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'Vote'
-    }
+    type: mongoose.Schema.Types.Mixed,
+    default: null
   },
   // Votación activa
   activeVoting: {
@@ -55,6 +41,7 @@ const gameSchema = new mongoose.Schema({
     performerId: mongoose.Schema.Types.Mixed,
     performerName: String,
     startTime: Date,
+    endTime: Date,
     votesReceived: Number,
     totalVoters: Number
   },
@@ -121,12 +108,15 @@ const gameSchema = new mongoose.Schema({
   // Pools disponibles para challenges sin repetición
   availablePools: {
     trivia: [mongoose.Schema.Types.Mixed],
+    riddle: [mongoose.Schema.Types.Mixed],
     dance: [mongoose.Schema.Types.Mixed],
+    sing: [mongoose.Schema.Types.Mixed],
+    group: [mongoose.Schema.Types.Mixed],
     karaoke: [mongoose.Schema.Types.Mixed]
   },
   lastChallengeType: {
     type: String,
-    enum: ['trivia', 'dance', 'karaoke'],
+    enum: ['trivia', 'riddle', 'dance', 'sing', 'group', 'karaoke'],
     default: null
   }
 }, {

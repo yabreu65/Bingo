@@ -12,7 +12,7 @@ const { isRoomHost, emitPermissionError } = require('../../middleware/socketAuth
 async function startVoting(io, socket, data = {}) {
   try {
     const { roomCode, challengeType, challengeText, performerId, performerName, songData, hostCapability } = data;
-    const allowedChallengeTypes = new Set(['dance', 'sing', 'karaoke', 'group', 'trivia']);
+    const allowedChallengeTypes = new Set(['dance', 'sing', 'karaoke', 'group', 'trivia', 'riddle']);
     if (typeof roomCode !== 'string' || !/^[A-Z0-9]{6}$/.test(roomCode) ||
         !allowedChallengeTypes.has(challengeType) || typeof performerId !== 'string') {
       return socket.emit('error', { message: 'Datos de votación inválidos' });
@@ -36,9 +36,17 @@ async function startVoting(io, socket, data = {}) {
 
     const activeChallenge = game.activeChallenge;
     const authoritativePerformerId = activeChallenge?.player?._id || activeChallenge?.player;
-    const performer = room.players.find((candidate) =>
+    const manualPerformers = (room.manualPlayers || []).map(player => ({
+      _id: player.playerId,
+      name: player.playerName,
+      isConnected: true
+    }));
+    const performer = [...(room.players || []), ...manualPerformers].find((candidate) =>
       (candidate?._id || candidate)?.toString() === authoritativePerformerId?.toString()
     );
+    if (game.activeVoting?.voteId) {
+      return socket.emit('error', { message: 'Ya hay una votación activa' });
+    }
     if (!activeChallenge || activeChallenge.type !== challengeType ||
         !authoritativePerformerId || authoritativePerformerId.toString() !== performerId || !performer) {
       return socket.emit('error', { message: 'El challenge o el jugador no son válidos' });
@@ -71,6 +79,7 @@ async function startVoting(io, socket, data = {}) {
       performerId,
       performerName,
       startTime: new Date(),
+      endTime: new Date(Date.now() + 15000),
       votesReceived: 0,
       totalVoters
     };
@@ -140,6 +149,12 @@ async function castVote(io, socket, data = {}) {
     const voterName = voter.name;
     logger.info(`[VOTING] ${voterName} vota ${stars} estrellas`);
 
+    const game = await Game.findOne({ 'activeVoting.voteId': voteId });
+    if (!game || !game.activeVoting ||
+        (game.activeVoting.endTime && new Date(game.activeVoting.endTime).getTime() <= Date.now())) {
+      return socket.emit('error', { message: 'La votación ya terminó' });
+    }
+
     // Verificar que no haya votado ya
     const alreadyVoted = await votingService.hasVoted(voteId, voter._id);
     if (alreadyVoted) {
@@ -151,11 +166,8 @@ async function castVote(io, socket, data = {}) {
     const { vote, stats } = await votingService.submitVote(voteId, voter._id, voterName, stars);
 
     // Actualizar el juego
-    const game = await Game.findOne({ 'activeVoting.voteId': voteId });
-    if (game) {
-      game.activeVoting.votesReceived = vote.totalVotes;
-      await game.save();
-    }
+    game.activeVoting.votesReceived = vote.totalVotes;
+    await game.save();
 
     // Emitir confirmación al votante
     socket.emit('voteConfirmed', {
@@ -212,8 +224,12 @@ async function endVoting(io, socket, data = {}) {
     // Actualizar el juego
     const game = await Game.findOne({ 'activeVoting.voteId': voteId });
     if (game) {
+      const completedVoteIds = Array.isArray(game.completedVotes)
+        ? game.completedVotes.map(id => id.toString())
+        : [];
+      const alreadyCompleted = completedVoteIds.includes(voteId.toString());
       // Agregar a votaciones completadas
-      game.completedVotes.push(voteId);
+      if (!alreadyCompleted) game.completedVotes.push(voteId);
 
       // Limpiar votación activa
       game.activeVoting = null;
@@ -221,10 +237,12 @@ async function endVoting(io, socket, data = {}) {
       await game.save();
 
       // Actualizar puntos del jugador
-      const player = await Player.findById(results.performerId);
-      if (player) {
-        player.stats.points = (player.stats?.points || 0) + results.bonusPoints;
-        await player.save();
+      if (!alreadyCompleted) {
+        const player = await Player.findById(results.performerId);
+        if (player) {
+          player.stats.points = (player.stats?.points || 0) + results.bonusPoints;
+          await player.save();
+        }
       }
     }
 

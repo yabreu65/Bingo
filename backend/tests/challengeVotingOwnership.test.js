@@ -222,13 +222,84 @@ describe('challenge and voting socket identity', () => {
 
     await triviaAnswered({ roomCode: room.code, playerId: player._id, answer: 1, correct: 0 });
 
-    expect(emit).toHaveBeenCalledWith('trivia-answered', expect.objectContaining({
-      playerId: player._id, answer: 1, isCorrect: true
+    expect(emit).toHaveBeenCalledWith('trivia-answered', {
+      playerId: player._id, answer: 1
+    });
+    expect(emit).not.toHaveBeenCalledWith('trivia-answered', expect.objectContaining({
+      correct: expect.anything(), isCorrect: expect.anything()
     }));
-    expect(emit).not.toHaveBeenCalledWith('trivia-answered', expect.objectContaining({ correct: expect.anything() }));
     expect(socket.emit).toHaveBeenCalledWith('trivia-result', expect.objectContaining({
       playerId: player._id, answer: 1, correct: 1, isCorrect: true
     }));
+  });
+
+  test('evaluates riddles server-side without broadcasting the accepted answers', async () => {
+    const room = {
+      _id: 'room-a', code: 'ROOMA1', currentGame: 'game-a',
+      save: jest.fn().mockResolvedValue(undefined)
+    };
+    const player = {
+      _id: 'player-a', room: room._id, socketId: 'socket-a', isConnected: true
+    };
+    const game = {
+      activeChallenge: {
+        id: 'riddle-a', type: 'riddle', player: player._id,
+        data: { prompt: '¿Qué tiene hojas y no es árbol?', answers: ['libro'] },
+        responses: []
+      },
+      save: jest.fn().mockResolvedValue(undefined)
+    };
+    Room.findOne.mockResolvedValue(room);
+    Player.findOne.mockResolvedValue(player);
+    Game.findById.mockResolvedValue(game);
+    const socket = makeSocket({ playerId: player._id });
+    const { io, emit } = makeIO();
+
+    await handleChallengeAnswer(io, socket)({
+      roomCode: room.code, playerId: player._id, challengeId: 'riddle-a', answer: '¡LIBRO!'
+    });
+
+    expect(socket.emit).toHaveBeenCalledWith('challenge-result', expect.objectContaining({
+      result: expect.objectContaining({ success: true, points: 30 })
+    }));
+    expect(emit).toHaveBeenCalledWith('challenge-result-public', expect.objectContaining({
+      result: { answer: '¡LIBRO!' }
+    }));
+    expect(emit).not.toHaveBeenCalledWith('challenge-result-public', expect.objectContaining({
+      result: expect.objectContaining({ success: true })
+    }));
+    expect(game.save).toHaveBeenCalledTimes(1);
+  });
+
+  test('requires every group participant before completing a group challenge', async () => {
+    const room = {
+      _id: 'room-a', code: 'ROOMA1', currentGame: 'game-a',
+      save: jest.fn().mockResolvedValue(undefined)
+    };
+    const playerA = { _id: 'player-a', room: room._id, socketId: 'socket-a', isConnected: true };
+    const game = {
+      activeChallenge: {
+        id: 'group-a', type: 'group', player: playerA._id,
+        participants: [
+          { playerId: 'player-a', playerName: 'A' },
+          { playerId: 'player-b', playerName: 'B' }
+        ], responses: []
+      },
+      save: jest.fn().mockResolvedValue(undefined)
+    };
+    Room.findOne.mockResolvedValue(room);
+    Player.findOne.mockResolvedValue(playerA);
+    Game.findById.mockResolvedValue(game);
+    const socket = makeSocket({ playerId: playerA._id });
+    const { io, emit } = makeIO();
+
+    await handleChallengeComplete(io, socket)({
+      roomCode: room.code, playerId: playerA._id, challengeId: 'group-a', type: 'group'
+    });
+
+    expect(game.activeChallenge.responses).toHaveLength(1);
+    expect(game.save).toHaveBeenCalledTimes(1);
+    expect(emit).not.toHaveBeenCalledWith('challenge-completed', expect.anything());
   });
 
   test('rejects a host ending a voting record belonging to a different room', async () => {
@@ -369,7 +440,7 @@ describe('challenge and voting socket identity', () => {
     game.activeChallenge.type = 'karaoke';
     await handleKaraokeVideoEnd(io, tvSocket)({ roomCode: 'ROOMA1' });
     expect(emit).toHaveBeenCalledWith('challenge-completed', { success: true });
-    expect(game.save).toHaveBeenCalledTimes(1);
+    expect(game.save).toHaveBeenCalledTimes(2);
     expect(room.save).toHaveBeenCalledTimes(1);
     expect(gameHandlers.immediateNextNumber).toHaveBeenCalledWith(io, 'ROOMA1');
   });

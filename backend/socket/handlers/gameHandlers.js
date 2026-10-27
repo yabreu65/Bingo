@@ -1,6 +1,7 @@
 const Room = require('../../models/Room');
 const Player = require('../../models/Player');
 const Game = require('../../models/Game');
+const { randomUUID } = require('node:crypto');
 const logger = require('../../config/logger');
 const { GAME_CONSTANTS } = require('../../constants');
 const { isRoomHost, emitPermissionError } = require('../../middleware/socketAuthMiddleware');
@@ -31,6 +32,16 @@ const {
   clearAllRoomTimers
 } = require('../utils/roomTimer');
 const { updateRoomActivity } = require('../../utils/roomActivity');
+
+const challengeTimers = new Map();
+
+function clearChallengeTimer(roomCode) {
+  const timer = challengeTimers.get(roomCode);
+  if (!timer) return;
+  clearTimeout(timer.timeout);
+  clearInterval(timer.countdownInterval);
+  challengeTimers.delete(roomCode);
+}
 
 /**
  * Llama el siguiente número inmediatamente sin esperar el intervalo
@@ -85,7 +96,7 @@ async function immediateNextNumber(io, roomCode) {
 /**
  * Dispara un reto/challenge
  */
-async function triggerChallenge(io, roomCode) {
+async function triggerChallenge(io, roomCode, options = {}) {
   try {
     logger.info(`[${roomCode}] triggerChallenge called`);
 
@@ -98,6 +109,10 @@ async function triggerChallenge(io, roomCode) {
     const game = await Game.findById(room.currentGame);
     if (!game) {
       logger.warn(`[${roomCode}] Game not found when triggering challenge`);
+      return;
+    }
+    if (game.activeChallenge) {
+      logger.warn(`[${roomCode}] Challenge already active; ignoring duplicate trigger`);
       return;
     }
 
@@ -164,7 +179,10 @@ async function triggerChallenge(io, roomCode) {
 
   // Obtener el siguiente tipo de reto basado en el último tipo del juego
   const lastType = game.lastChallengeType || null;
-  const nextType = getNextChallengeType(lastType);
+  const configuredTypes = Object.entries(room.config?.enabledChallengeTypes || {})
+    .filter(([, enabled]) => enabled !== false)
+    .map(([type]) => type);
+  const nextType = options.type || getNextChallengeType(lastType, configuredTypes);
 
   logger.info(`[${roomCode}] Challenge type: ${nextType} (previous: ${lastType})`);
 
@@ -194,15 +212,37 @@ async function triggerChallenge(io, roomCode) {
   console.log('🎯 Challenge data being sent:', JSON.stringify(challengeData, null, 2));
 
   // Guardar en el juego
+  const challengeId = randomUUID();
+  const privateData = nextType === GAME_CONSTANTS.CHALLENGE_TYPES.TRIVIA
+    ? { question: challenge.question, options: challenge.options, correct: challenge.correct }
+    : nextType === GAME_CONSTANTS.CHALLENGE_TYPES.RIDDLE
+      ? { prompt: challenge.prompt, answers: challenge.answers, id: challenge.id }
+      : challenge.text || challenge;
+  const participants = nextType === GAME_CONSTANTS.CHALLENGE_TYPES.GROUP
+    ? allEligiblePlayers.map((participant) => ({
+      playerId: participant._id,
+      playerName: participant.name,
+      role: 'participant'
+    }))
+    : [{ playerId: chosenPlayer._id, playerName: chosenPlayer.name, role: 'performer' }];
+
   game.activeChallenge = {
+    id: challengeId,
+    status: 'active',
     type: nextType,
     player: chosenPlayer._id,
-    data: nextType === GAME_CONSTANTS.CHALLENGE_TYPES.TRIVIA
-      ? { question: challenge.question, options: challenge.options, correct: challenge.correct }
-      : challenge.text || challenge,
+    data: privateData,
+    participants,
     text: challenge.text,
     deezerId: challenge.deezerId,
-    startTime: new Date()
+    karaokeId: challenge.karaokeId,
+    title: challenge.title,
+    artist: challenge.artist,
+    localFile: challenge.localFile,
+    startTime: new Date(),
+    duration: nextType === GAME_CONSTANTS.CHALLENGE_TYPES.KARAOKE ? 300 : GAME_CONSTANTS.CHALLENGE_DURATION,
+    responses: [],
+    pointsAwarded: false
   };
   game.numbersSinceChallenge = 0;
 
@@ -218,6 +258,8 @@ async function triggerChallenge(io, roomCode) {
 
   // Emitir eventos
   io.to(roomCode).emit('game-state-changed', { state: 'paused' });
+  challengeData.challengeId = challengeId;
+  challengeData.participants = participants;
 
   // Para trivia y karaoke, emitir solo al jugador seleccionado y a la TV
   logger.info(`[${roomCode}] Challenge type is: ${nextType}`);
@@ -230,6 +272,7 @@ async function triggerChallenge(io, roomCode) {
 
   // TRIVIA y KARAOKE: solo jugador seleccionado + TV
   if (nextType === GAME_CONSTANTS.CHALLENGE_TYPES.TRIVIA ||
+      nextType === GAME_CONSTANTS.CHALLENGE_TYPES.RIDDLE ||
       nextType === GAME_CONSTANTS.CHALLENGE_TYPES.KARAOKE) {
 
     logger.info(`[${roomCode}] 🎯 ${nextType.toUpperCase()} DETECTED - Sending only to player and TV`);
@@ -269,7 +312,7 @@ async function triggerChallenge(io, roomCode) {
   });
 
   // Countdown timer
-  let timeLeft = GAME_CONSTANTS.CHALLENGE_DURATION;
+  let timeLeft = game.activeChallenge.duration || GAME_CONSTANTS.CHALLENGE_DURATION;
   const countdownInterval = setInterval(() => {
     timeLeft--;
     if (timeLeft >= 0) {
@@ -280,8 +323,8 @@ async function triggerChallenge(io, roomCode) {
     }
   }, 1000);
 
-  // Después de 30 segundos, completar el reto
-  setTimeout(async () => {
+  // Después de la duración del reto, completar el reto
+  const timeout = setTimeout(async () => {
     try {
       clearInterval(countdownInterval);
 
@@ -290,6 +333,7 @@ async function triggerChallenge(io, roomCode) {
 
       const updatedGame = await Game.findById(updatedRoom.currentGame);
       if (!updatedGame) return;
+      if (updatedGame.activeChallenge?.id !== challengeId) return;
 
       updatedGame.activeChallenge = null;
       await updatedGame.save();
@@ -308,8 +352,12 @@ async function triggerChallenge(io, roomCode) {
       ensureWatchdog(roomCode, (rc) => scheduleRoomInterval(io, rc), updatedRoom.config);
     } catch (error) {
       logger.error(`[${roomCode}] Error completing challenge asynchronously:`, error);
+    } finally {
+      const timer = challengeTimers.get(roomCode);
+      if (timer?.challengeId === challengeId) clearChallengeTimer(roomCode);
     }
-  }, GAME_CONSTANTS.CHALLENGE_DURATION * 1000);
+  }, timeLeft * 1000);
+  challengeTimers.set(roomCode, { timeout, countdownInterval, challengeId });
   } catch (error) {
     logger.error(`[${roomCode}] ❌ CRITICAL ERROR in triggerChallenge:`, error);
     logger.error(`[${roomCode}] Error stack:`, error.stack);
@@ -586,6 +634,7 @@ function handleGameStateChange(io, socket) {
         if (state === 'paused' || state === 'finished') {
           clearAllRoomTimers(roomCode);
         }
+        if (state === 'finished') clearChallengeTimer(roomCode);
 
         io.to(roomCode).emit('game-state-changed', { state });
 
@@ -638,6 +687,7 @@ function handleResetGame(io, socket) {
       room.gameState = 'waiting';
       await room.save();
       clearAllRoomTimers(roomCode);
+      clearChallengeTimer(roomCode);
 
       io.to(roomCode).emit('game-reset');
       io.to(roomCode).emit('game-state-changed', { state: 'waiting' });
@@ -807,6 +857,22 @@ function handleLaunchEvent(io, socket) {
           name: winner.name,
           message: `¡Felicidades a ${winner.name}, el ganador del Cartonazo!`
         });
+      } else if (type === 'challenge' || Object.values(GAME_CONSTANTS.CHALLENGE_TYPES).includes(type)) {
+        if (!room) {
+          socket.emit('error', { message: 'Sala no encontrada' });
+          return;
+        }
+        const game = room.currentGame ? await Game.findById(room.currentGame) : null;
+        if (!game || game.status === 'finished') {
+          socket.emit('error', { message: 'No hay una partida activa para lanzar el reto' });
+          return;
+        }
+        if (game.activeChallenge) {
+          socket.emit('error', { message: 'Ya hay un reto activo' });
+          return;
+        }
+        clearRoomInterval(roomCode);
+        await triggerChallenge(io, roomCode, type === 'challenge' ? {} : { type });
       } else {
         // Comportamiento original para otros eventos
         io.to(roomCode).emit('launch-event', { type, text });
@@ -845,5 +911,6 @@ module.exports = {
   handleResumeGame,
   handleResetGame,
   handleStartCountdown,
-  handleLaunchEvent
+  handleLaunchEvent,
+  clearChallengeTimer
 };

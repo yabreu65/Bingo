@@ -11,8 +11,10 @@ const stripTriviaAnswers = (value) => {
   }
 
   const redactChallengeAnswer = (challenge) => {
-    if (challenge?.type === 'trivia' && challenge.data && typeof challenge.data === 'object') {
+    if ((challenge?.type === 'trivia' || challenge?.type === 'riddle') &&
+        challenge.data && typeof challenge.data === 'object') {
       delete challenge.data.correct;
+      delete challenge.data.answers;
     }
   };
   redactChallengeAnswer(safeValue);

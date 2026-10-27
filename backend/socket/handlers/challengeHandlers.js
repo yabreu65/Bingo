@@ -2,6 +2,7 @@ const logger = require('../../config/logger');
 const Room = require('../../models/Room');
 const Player = require('../../models/Player');
 const Game = require('../../models/Game');
+const { getChallengePoints } = require('../../utils/challengeRules');
 
 const matchesBoundRoom = (socket, data) => {
   const requestedRoom = typeof data?.roomCode === 'string' ? data.roomCode.toUpperCase() : '';
@@ -37,11 +38,61 @@ async function findActiveChallengeActor(socket, data) {
   const game = await Game.findById(actor.room.currentGame);
   const activeChallenge = game?.activeChallenge;
   const challengePlayerId = activeChallenge?.player?._id || activeChallenge?.player;
-  if (!activeChallenge || !challengePlayerId ||
-      challengePlayerId.toString() !== actor.playerId.toString() ||
+  const participantIds = Array.isArray(activeChallenge?.participants)
+    ? activeChallenge.participants.map(participant => participant.playerId?.toString())
+    : [];
+  const isParticipant = activeChallenge?.type === 'group'
+    ? participantIds.includes(actor.playerId.toString())
+    : challengePlayerId?.toString() === actor.playerId.toString();
+  if (!activeChallenge || (!challengePlayerId && !isParticipant) || !isParticipant ||
       (data?.type && data.type !== activeChallenge.type)) return null;
 
-  return { ...actor, activeChallenge };
+  return { ...actor, game, activeChallenge };
+}
+
+async function finishChallenge(io, actor, { result, pointsPlayerIds = [], broadcastResult = true }) {
+  const { room, game, activeChallenge } = actor;
+  const roomCode = room.code;
+  const challengeId = activeChallenge.id;
+  const gameHandlers = require('./gameHandlers');
+
+  activeChallenge.status = 'completed';
+  activeChallenge.completedAt = new Date();
+  activeChallenge.result = result;
+  activeChallenge.pointsAwarded = true;
+  game.activeChallenge = null;
+  if (typeof game.save === 'function') await game.save();
+
+  const uniquePlayerIds = [...new Set(pointsPlayerIds.map(playerId => playerId?.toString()).filter(Boolean))];
+  for (const playerId of uniquePlayerIds) {
+    if (typeof Player.findOneAndUpdate !== 'function') continue;
+    await Player.findOneAndUpdate(
+      { _id: playerId, room: room._id },
+      { $inc: { 'stats.points': result.points || 0, 'stats.challengesCompleted': 1 } }
+    );
+  }
+
+  if (typeof gameHandlers.clearChallengeTimer === 'function') {
+    gameHandlers.clearChallengeTimer(roomCode);
+  }
+  room.gameState = 'playing';
+  if (typeof room.save === 'function') await room.save();
+
+  if (broadcastResult) {
+    io.to(roomCode).emit('challenge-result', {
+      playerId: activeChallenge.player,
+      challengeId,
+      result
+    });
+  }
+  io.to(roomCode).emit('challenge-complete', { success: true, result });
+  io.to(roomCode).emit('challenge-completed', { success: true, result });
+  io.to(roomCode).emit('game-state-changed', { state: 'playing' });
+
+  await gameHandlers.immediateNextNumber(io, roomCode);
+  await gameHandlers.scheduleRoomInterval(io, roomCode);
+  const { ensureWatchdog } = require('../utils/roomTimer');
+  ensureWatchdog(roomCode, (rc) => gameHandlers.scheduleRoomInterval(io, rc), room.config);
 }
 
 /**
@@ -60,6 +111,47 @@ function handleChallengeAnswer(io, socket) {
       const { challengeId, answer } = data;
       const roomCode = actor.room.code;
       const playerId = actor.playerId;
+
+      if (challengeId && actor.activeChallenge.id && challengeId !== actor.activeChallenge.id) {
+        return socket.emit('error', { message: 'El desafío ya no está activo' });
+      }
+
+      if (actor.activeChallenge.type === 'riddle') {
+        if (typeof answer !== 'string' || answer.trim().length === 0 || answer.length > 200) {
+          return socket.emit('error', { message: 'La respuesta de la adivinanza es inválida' });
+        }
+        const responses = Array.isArray(actor.activeChallenge.responses)
+          ? actor.activeChallenge.responses
+          : [];
+        if (responses.some(response => response.playerId?.toString() === playerId.toString())) {
+          return socket.emit('error', { message: 'Ya respondiste este desafío' });
+        }
+        const { evaluateRiddleAnswer } = require('../../utils/challengeRules');
+        const isCorrect = evaluateRiddleAnswer(answer, actor.activeChallenge.data?.answers);
+        const points = getChallengePoints('riddle', { success: isCorrect });
+        actor.activeChallenge.responses = [
+          ...responses,
+          { playerId, answer, success: isCorrect, points, submittedAt: new Date() }
+        ];
+        actor.activeChallenge.status = 'evaluating';
+        actor.activeChallenge.result = { answer, success: isCorrect, points };
+        socket.emit('challenge-result', {
+          playerId,
+          challengeId,
+          result: { answer, success: isCorrect, points }
+        });
+        io.to(roomCode).emit('challenge-result-public', {
+          playerId,
+          challengeId,
+          result: { answer }
+        });
+        await finishChallenge(io, actor, {
+          result: { answer, success: isCorrect, points },
+          pointsPlayerIds: [playerId],
+          broadcastResult: false
+        });
+        return;
+      }
 
       io.to(roomCode).emit('challenge-result', {
         playerId,
@@ -92,10 +184,35 @@ function handleChallengeComplete(io, socket) {
       const roomCode = actor.room.code;
       const playerId = actor.playerId;
 
-      io.to(roomCode).emit('challenge-result', {
-        playerId,
-        challengeId,
-        result: { type, success: true }
+      const points = getChallengePoints(type, { success: true });
+      const responses = Array.isArray(actor.activeChallenge.responses)
+        ? actor.activeChallenge.responses
+        : [];
+      if (responses.some(response => response.playerId?.toString() === playerId.toString())) {
+        return socket.emit('error', { message: 'Ya completaste este desafío' });
+      }
+      actor.activeChallenge.responses = [
+        ...responses,
+        { playerId, success: true, points, submittedAt: new Date() }
+      ];
+
+      const participantIds = actor.activeChallenge.type === 'group'
+        ? (Array.isArray(actor.activeChallenge.participants) ? actor.activeChallenge.participants : [])
+          .map(participant => participant.playerId?.toString()).filter(Boolean)
+        : [playerId.toString()];
+      const responseIds = new Set(actor.activeChallenge.responses.map(response => response.playerId?.toString()));
+      const allParticipantsCompleted = participantIds.every(participantId => responseIds.has(participantId));
+      if (!allParticipantsCompleted) {
+        await actor.game.save();
+        socket.emit('challenge-result', { playerId, challengeId, result: { type, success: true, points } });
+        return;
+      }
+
+      await finishChallenge(io, actor, {
+        result: { type, success: true, points },
+        pointsPlayerIds: actor.activeChallenge.type === 'group'
+          ? actor.activeChallenge.responses.map(response => response.playerId)
+          : [playerId]
       });
 
       logger.info(`[${roomCode}] Challenge completed`, { playerId, challengeId, type });
@@ -138,6 +255,8 @@ function handleKaraokeVideoEnd(io, socket) {
       // Limpiar el challenge activo
       game.activeChallenge = null;
       await game.save();
+      const clearChallengeTimer = require('./gameHandlers').clearChallengeTimer;
+      if (typeof clearChallengeTimer === 'function') clearChallengeTimer(roomCode);
 
       // Reanudar el juego
       room.gameState = 'playing';
@@ -197,6 +316,31 @@ function handleTriviaAnswered(io, socket) {
       const isCorrect = answerNum === correctNum;
       const challengeStartedAt = activeChallenge.startTime?.getTime?.() ?? null;
 
+      const existingResponses = Array.isArray(activeChallenge.responses) ? activeChallenge.responses : [];
+      if (existingResponses.some(response => response.playerId?.toString() === playerId.toString())) {
+        return socket.emit('error', { message: 'Ya respondiste este desafío' });
+      }
+      const points = getChallengePoints('trivia', { success: isCorrect });
+      activeChallenge.responses = [
+        ...existingResponses,
+        { playerId, answer: answerNum, success: isCorrect, points, submittedAt: new Date() }
+      ];
+      activeChallenge.status = 'evaluating';
+      activeChallenge.result = { answer: answerNum, success: isCorrect, points };
+      if (typeof game.save === 'function') await game.save();
+
+      if (typeof Player.findOneAndUpdate === 'function' && playerId && actor.room?._id) {
+        const statUpdate = {
+          'stats.triviaAttempted': 1,
+          'stats.points': points
+        };
+        if (isCorrect) statUpdate['stats.triviaCorrect'] = 1;
+        await Player.findOneAndUpdate(
+          { _id: playerId, room: actor.room._id },
+          { $inc: statUpdate }
+        );
+      }
+
       logger.info(`[${roomCode}] Trivia answered`, {
         playerId,
         answerNum,
@@ -206,8 +350,7 @@ function handleTriviaAnswered(io, socket) {
       // Crear el objeto de respuesta con valores numéricos
       const publicResponseData = {
         playerId,
-        answer: answerNum,
-        isCorrect
+        answer: answerNum
       };
 
       logger.info(`[${roomCode}] Broadcasting trivia result`);
@@ -224,7 +367,9 @@ function handleTriviaAnswered(io, socket) {
       io.to(roomCode).emit('trivia-result-public', publicResponseData);
       socket.emit('trivia-result', {
         ...publicResponseData,
-        correct: correctNum
+        correct: correctNum,
+        isCorrect,
+        points
       });
       logger.info(`[${roomCode}] ✅ trivia-answered emitted to room ${roomCode}`);
 
@@ -244,6 +389,16 @@ function handleTriviaAnswered(io, socket) {
               currentChallengePlayerId.toString() !== playerId.toString() ||
               (challengeStartedAt !== null && currentChallengeStartedAt !== challengeStartedAt)) return;
 
+          currentGame.activeChallenge.status = 'completed';
+          currentGame.activeChallenge.completedAt = new Date();
+          currentGame.activeChallenge.endTime = new Date();
+          currentGame.activeChallenge.result = {
+            answer: answerNum,
+            isCorrect,
+            points,
+            correct: correctNum
+          };
+
           // Limpiar solo el challenge cuya respuesta acaba de aceptarse.
           currentGame.activeChallenge = null;
           await currentGame.save();
@@ -253,8 +408,15 @@ function handleTriviaAnswered(io, socket) {
           await room.save();
 
           // Emitir que el challenge se completó
-          io.to(roomCode).emit('challenge-complete', { success: true });
-          io.to(roomCode).emit('challenge-completed', { success: true });
+          io.to(roomCode).emit('trivia-result-public', {
+            playerId,
+            answer: answerNum,
+            isCorrect,
+            points,
+            correct: correctNum
+          });
+          io.to(roomCode).emit('challenge-complete', { success: true, result: { isCorrect, points } });
+          io.to(roomCode).emit('challenge-completed', { success: true, result: { isCorrect, points } });
           io.to(roomCode).emit('game-state-changed', { state: 'playing' });
 
           // Continuar con el siguiente número

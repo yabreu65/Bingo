@@ -22,7 +22,10 @@ function shuffleArray(array) {
 function initializeChallengePools() {
   return {
     trivia: shuffleArray(CHALLENGE_POOLS.trivia),
+    riddle: shuffleArray(CHALLENGE_POOLS.riddle),
     dance: shuffleArray(CHALLENGE_POOLS.dance),
+    sing: shuffleArray(CHALLENGE_POOLS.sing),
+    group: shuffleArray(CHALLENGE_POOLS.group),
     karaoke: shuffleArray(CHALLENGE_POOLS.karaoke)
   };
 }
@@ -31,13 +34,18 @@ function initializeChallengePools() {
  * Selecciona el siguiente tipo de reto basado en el último tipo usado
  * Rota entre: trivia -> dance -> karaoke -> trivia...
  */
-function getNextChallengeType(lastChallengeType) {
+function getNextChallengeType(lastChallengeType, enabledTypes = null) {
   // Rotación fija: trivia -> dance -> karaoke
-  const rotation = [
+  const defaultRotation = [
     GAME_CONSTANTS.CHALLENGE_TYPES.TRIVIA,
     GAME_CONSTANTS.CHALLENGE_TYPES.DANCE,
     GAME_CONSTANTS.CHALLENGE_TYPES.KARAOKE
   ];
+  const rotation = Array.isArray(enabledTypes) && enabledTypes.length > 0
+    ? enabledTypes.filter(type => CHALLENGE_POOLS[type])
+    : defaultRotation;
+
+  if (rotation.length === 0) return null;
 
   if (!lastChallengeType) {
     return rotation[0]; // Empezar con trivia
@@ -92,6 +100,17 @@ function selectRandomChallenge(challengeType, availablePools) {
         options: selected.options,
         correct: selected.correct,
         deezerId: null
+      },
+      updatedPools: availablePools
+    };
+  }
+
+  if (challengeType === GAME_CONSTANTS.CHALLENGE_TYPES.RIDDLE) {
+    return {
+      challenge: {
+        prompt: selected.prompt,
+        answers: selected.answers,
+        id: selected.id
       },
       updatedPools: availablePools
     };
@@ -212,6 +231,13 @@ function createChallengeData(challengeType, selectedPlayer, challenge) {
       question: challenge.question,
       options: challenge.options
     };
+  }
+  else if (challengeType === GAME_CONSTANTS.CHALLENGE_TYPES.RIDDLE) {
+    baseData.data = {
+      prompt: challenge.prompt,
+      id: challenge.id
+    };
+    baseData.text = challenge.prompt;
   }
   // Para karaoke, incluir datos adicionales y duración más larga
   else if (challengeType === GAME_CONSTANTS.CHALLENGE_TYPES.KARAOKE) {

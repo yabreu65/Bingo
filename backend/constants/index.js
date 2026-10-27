@@ -62,6 +62,7 @@ const GAME_CONSTANTS = {
     DANCE: 'dance',
     SING: 'sing',
     TRIVIA: 'trivia',
+    RIDDLE: 'riddle',
     GROUP: 'group',
     KARAOKE: 'karaoke'
   },
@@ -75,6 +76,7 @@ const GAME_CONSTANTS = {
     FULL_CARD: 500,
     CHALLENGE_COMPLETED: 50,
     TRIVIA_CORRECT: 30,
+    RIDDLE_CORRECT: 30,
     KARAOKE_COMPLETED: 75,
     FIRST_BINGO_BONUS: 200
   },
@@ -172,6 +174,38 @@ const CHALLENGE_POOLS = {
       question: '¿Cuántos números tiene un cartón completo de bingo?',
       options: ['15 números', '24 números', '25 números', '30 números'],
       correct: 1
+    }
+  ],
+  riddle: [
+    {
+      id: 'riddle-001',
+      prompt: 'Tengo agujas y no sé coser; tengo números y no sé leer. ¿Qué soy?',
+      answers: ['reloj']
+    },
+    {
+      id: 'riddle-002',
+      prompt: 'Cuanto más quitas, más grande se vuelve. ¿Qué es?',
+      answers: ['un agujero', 'agujero']
+    },
+    {
+      id: 'riddle-003',
+      prompt: 'Tiene dientes y no come; tiene cabeza y no es persona. ¿Qué es?',
+      answers: ['un ajo', 'ajo']
+    },
+    {
+      id: 'riddle-004',
+      prompt: 'Vuelo sin alas, lloro sin ojos. ¿Qué soy?',
+      answers: ['una nube', 'nube']
+    },
+    {
+      id: 'riddle-005',
+      prompt: 'Siempre está delante de ti, pero no lo puedes ver. ¿Qué es?',
+      answers: ['el futuro', 'futuro']
+    },
+    {
+      id: 'riddle-006',
+      prompt: '¿Qué sube y baja sin moverse de su lugar?',
+      answers: ['la escalera', 'escalera']
     }
   ],
   karaoke: [
