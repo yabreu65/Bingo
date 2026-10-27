@@ -17,8 +17,20 @@ const stripTriviaAnswers = (value) => {
       delete challenge.data.answers;
     }
   };
+  const redactPoolAnswers = (pools) => {
+    if (!pools || typeof pools !== 'object') return;
+    for (const [type, entries] of Object.entries(pools)) {
+      if (!Array.isArray(entries)) continue;
+      for (const entry of entries) {
+        if (!entry || typeof entry !== 'object') continue;
+        if (type === 'trivia') delete entry.correct;
+        if (type === 'riddle') delete entry.answers;
+      }
+    }
+  };
   redactChallengeAnswer(safeValue);
   redactChallengeAnswer(safeValue.activeChallenge);
+  redactPoolAnswers(safeValue.availablePools);
   return safeValue;
 };
 

@@ -336,6 +336,10 @@ describe('trivia answer HTTP disclosure boundary', () => {
   const answerCanary = 'PRIVATE_TRIVIA_ANSWER_CANARY';
   const makeGame = () => ({
     _id: new mongoose.Types.ObjectId(),
+    availablePools: {
+      trivia: [{ question: 'Pool question', options: ['A', 'B'], correct: answerCanary }],
+      riddle: [{ prompt: 'Pool riddle', answers: [answerCanary] }]
+    },
     activeChallenge: {
       type: 'trivia',
       player: 'aaaaaaaaaaaaaaaaaaaaaaaa',
@@ -497,6 +501,18 @@ describe('player-id REST ownership', () => {
     expect(player.stats.points).toBe(10);
     expect(Player.findOneAndUpdate).not.toHaveBeenCalled();
     expect(player.save).not.toHaveBeenCalled();
+  });
+
+  test('rejects a valid player capability from self-awarding points', async () => {
+    const { player, secret } = setupGuest();
+    const response = await request(app)
+      .patch(`/api/players/${player._id}/points`)
+      .set('x-player-capability', secret)
+      .send({ points: 500 });
+
+    expect(response.status).toBe(403);
+    expect(player.stats.points).toBe(10);
+    expect(Player.findOneAndUpdate).not.toHaveBeenCalled();
   });
 });
 

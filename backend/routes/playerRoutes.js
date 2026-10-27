@@ -71,6 +71,7 @@ router.patch('/:id/points', async (req, res) => {
     const result = await findAuthorizedPlayer(req, req.params.id);
     if (result.missing) return res.status(404).json({ error: 'Jugador no encontrado' });
     if (!result.authorized) return res.status(403).json({ error: 'No tienes permisos para modificar este jugador' });
+    if (!result.isHost) return res.status(403).json({ error: 'Solo el organizador puede modificar puntos' });
 
     const filter = {
       _id: result.player._id,
