@@ -52,7 +52,11 @@ const roomSchema = new mongoose.Schema({
       default: 'full'
     },
     tieBreakEnabled: { type: Boolean, default: false },
-    maxPlayers: { type: Number, default: 50 }
+    maxPlayers: { type: Number, default: 50 },
+    eventName: { type: String, trim: true, maxlength: 160, default: '' },
+    resultVisibility: { type: String, enum: ['public', 'organizer'], default: 'public' },
+    activePlaylist: { type: mongoose.Schema.Types.ObjectId, ref: 'Playlist', default: null },
+    managedContentEnabled: { type: Boolean, default: false }
   },
   currentGame: {
     type: mongoose.Schema.Types.ObjectId,

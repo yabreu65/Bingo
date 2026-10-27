@@ -173,7 +173,7 @@ function handleChallengeAnswer(io, socket) {
         }
         const { evaluateRiddleAnswer } = require('../../utils/challengeRules');
         const isCorrect = evaluateRiddleAnswer(answer, actor.activeChallenge.data?.answers);
-        const points = getChallengePoints('riddle', { success: isCorrect });
+        const points = getChallengePoints('riddle', { success: isCorrect, configuredPoints: actor.activeChallenge.points });
         actor.activeChallenge.responses = [
           ...responses,
           { playerId, answer, success: isCorrect, points, submittedAt: new Date() }
@@ -230,7 +230,7 @@ function handleChallengeComplete(io, socket) {
       const playerId = actor.playerId;
 
       if (actor.activeChallenge.type === 'group') {
-        const points = getChallengePoints(type, { success: true });
+        const points = getChallengePoints(type, { success: true, configuredPoints: actor.activeChallenge.points });
         const groupActor = await appendGroupResponse(actor, {
           playerId,
           success: true,
@@ -268,7 +268,7 @@ function handleChallengeComplete(io, socket) {
         return;
       }
 
-      const points = getChallengePoints(type, { success: true });
+      const points = getChallengePoints(type, { success: true, configuredPoints: actor.activeChallenge.points });
       const responses = Array.isArray(actor.activeChallenge.responses)
         ? actor.activeChallenge.responses
         : [];
@@ -337,7 +337,7 @@ function handleKaraokeVideoEnd(io, socket) {
       }
 
       const karaokePlayerId = game.activeChallenge.player?._id || game.activeChallenge.player;
-      const karaokePoints = getChallengePoints('karaoke', { success: true });
+      const karaokePoints = getChallengePoints('karaoke', { success: true, configuredPoints: game.activeChallenge.points });
       if (karaokePlayerId && typeof Player.findOneAndUpdate === 'function') {
         await Player.findOneAndUpdate(
           { _id: karaokePlayerId, room: room._id },
@@ -416,7 +416,7 @@ function handleTriviaAnswered(io, socket) {
       if (existingResponses.some(response => response.playerId?.toString() === playerId.toString())) {
         return socket.emit('error', { message: 'Ya respondiste este desafío' });
       }
-      const points = getChallengePoints('trivia', { success: isCorrect });
+      const points = getChallengePoints('trivia', { success: isCorrect, configuredPoints: activeChallenge.points });
       activeChallenge.responses = [
         ...existingResponses,
         { playerId, answer: answerNum, success: isCorrect, points, submittedAt: new Date() }

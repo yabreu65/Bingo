@@ -17,6 +17,7 @@ const evaluateRiddleAnswer = (answer, acceptedAnswers) => {
 
 const getChallengePoints = (type, outcome = {}) => {
   if (outcome.cancelled || outcome.expired || !outcome.success) return 0;
+  if (Number.isInteger(outcome.configuredPoints) && outcome.configuredPoints >= 0) return outcome.configuredPoints;
   if (type === GAME_CONSTANTS.CHALLENGE_TYPES.TRIVIA) return GAME_CONSTANTS.POINTS.TRIVIA_CORRECT;
   if (type === GAME_CONSTANTS.CHALLENGE_TYPES.RIDDLE) return GAME_CONSTANTS.POINTS.RIDDLE_CORRECT;
   if (type === GAME_CONSTANTS.CHALLENGE_TYPES.KARAOKE) return GAME_CONSTANTS.POINTS.KARAOKE_COMPLETED;

@@ -19,15 +19,30 @@ function shuffleArray(array) {
  * Inicializa los pools disponibles para un juego nuevo
  * @returns {Object} - Pools mezclados para cada tipo de challenge
  */
-function initializeChallengePools() {
+function initializeChallengePools(customPools = {}) {
   return {
-    trivia: shuffleArray(CHALLENGE_POOLS.trivia),
-    riddle: shuffleArray(CHALLENGE_POOLS.riddle),
-    dance: shuffleArray(CHALLENGE_POOLS.dance),
-    sing: shuffleArray(CHALLENGE_POOLS.sing),
-    group: shuffleArray(CHALLENGE_POOLS.group),
-    karaoke: shuffleArray(CHALLENGE_POOLS.karaoke)
+    trivia: shuffleArray(customPools.trivia?.length ? customPools.trivia : CHALLENGE_POOLS.trivia),
+    riddle: shuffleArray(customPools.riddle?.length ? customPools.riddle : CHALLENGE_POOLS.riddle),
+    dance: shuffleArray(customPools.dance?.length ? customPools.dance : CHALLENGE_POOLS.dance),
+    sing: shuffleArray(customPools.sing?.length ? customPools.sing : CHALLENGE_POOLS.sing),
+    group: shuffleArray(customPools.group?.length ? customPools.group : CHALLENGE_POOLS.group),
+    karaoke: shuffleArray(customPools.karaoke?.length ? customPools.karaoke : CHALLENGE_POOLS.karaoke)
   };
+}
+
+async function loadChallengePoolsForRoom(roomId) {
+  if (!roomId) return initializeChallengePools();
+  try {
+    const AdminContent = require('../../models/AdminContent');
+    const { contentToChallenge } = require('../../utils/adminCatalog');
+    const items = await AdminContent.find({ room: roomId, enabled: true, archivedAt: null });
+    const pools = {};
+    items.forEach(item => { if (!pools[item.kind]) pools[item.kind] = []; pools[item.kind].push(contentToChallenge(item)); });
+    return initializeChallengePools(pools);
+  } catch (error) {
+    logger.warn(`Managed content unavailable; using legacy pools: ${error.message}`);
+    return initializeChallengePools();
+  }
 }
 
 /**
@@ -64,7 +79,7 @@ function getNextChallengeType(lastChallengeType, enabledTypes = null) {
  * @returns {Object} - Challenge seleccionado y pools actualizados
  */
 function selectRandomChallenge(challengeType, availablePools) {
-  const sourcePool = CHALLENGE_POOLS[challengeType];
+  const sourcePool = CHALLENGE_POOLS[challengeType] || availablePools?.[challengeType];
 
   if (!Array.isArray(sourcePool)) {
     logger.warn(`Challenge type "${challengeType}" is not supported`);
@@ -266,5 +281,6 @@ module.exports = {
   shouldTriggerChallenge,
   createChallengeData,
   initializeChallengePools,
+  loadChallengePoolsForRoom,
   shuffleArray
 };

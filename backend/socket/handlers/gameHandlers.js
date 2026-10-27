@@ -13,7 +13,8 @@ const {
   selectEligiblePlayers,
   selectRandomPlayer,
   createChallengeData,
-  initializeChallengePools
+  initializeChallengePools,
+  loadChallengePoolsForRoom
 } = require('../utils/challengeSelector');
 const {
   selectRandomNumber,
@@ -239,8 +240,11 @@ async function triggerChallenge(io, roomCode, options = {}) {
     title: challenge.title,
     artist: challenge.artist,
     localFile: challenge.localFile,
+    points: Number.isInteger(challenge.points) ? challenge.points : null,
     startTime: new Date(),
-    duration: nextType === GAME_CONSTANTS.CHALLENGE_TYPES.KARAOKE ? 300 : GAME_CONSTANTS.CHALLENGE_DURATION,
+    duration: nextType === GAME_CONSTANTS.CHALLENGE_TYPES.KARAOKE
+      ? 300
+      : (Number.isInteger(challenge.duration) ? challenge.duration : GAME_CONSTANTS.CHALLENGE_DURATION),
     responses: [],
     pointsAwarded: false
   };
@@ -543,7 +547,7 @@ function handleStartGame(io, socket) {
         room: room._id,
         gameMode: room.config?.gameMode || 'full',
         startTime: new Date(),
-        availablePools: initializeChallengePools(),
+        availablePools: room.config?.managedContentEnabled ? await loadChallengePoolsForRoom(room._id) : initializeChallengePools(),
         lastChallengeType: null
       });
       await game.save();

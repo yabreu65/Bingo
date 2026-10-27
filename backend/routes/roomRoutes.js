@@ -257,6 +257,11 @@ router.patch('/:code/config', generalApiLimiter, optionalAuth, validateRequest(u
     if (!(await isRoomHost(req, room, capability))) {
       return res.status(403).json({ error: 'No tienes permisos para modificar la sala' });
     }
+    if (room.gameState && room.gameState !== 'waiting' &&
+        (Object.prototype.hasOwnProperty.call(req.body.config, 'gameMode') ||
+         Object.prototype.hasOwnProperty.call(req.body.config, 'maxPlayers'))) {
+      return res.status(409).json({ error: 'Esta configuración no puede cambiar durante una partida' });
+    }
     const currentConfig = typeof room.config?.toObject === 'function'
       ? room.config.toObject()
       : { ...(room.config || {}) };

@@ -28,7 +28,11 @@ const createRoomSchema = z.object({
 
       gameMode: z.enum(['line', 'fourCorners', 'centralCross', 'full']).optional(),
 
-      tieBreakEnabled: z.boolean().optional().default(false)
+      tieBreakEnabled: z.boolean().optional().default(false),
+      eventName: z.string().max(160).optional(),
+      resultVisibility: z.enum(['public', 'organizer']).optional(),
+      activePlaylist: objectIdSchema.nullable().optional(),
+      managedContentEnabled: z.boolean().optional()
     }).optional()
   })
 });
@@ -113,7 +117,11 @@ const updateConfigSchema = z.object({
 
       gameMode: z.enum(['line', 'fourCorners', 'centralCross', 'full']).optional(),
 
-      tieBreakEnabled: z.boolean().optional()
+      tieBreakEnabled: z.boolean().optional(),
+      eventName: z.string().max(160).optional(),
+      resultVisibility: z.enum(['public', 'organizer']).optional(),
+      activePlaylist: objectIdSchema.nullable().optional(),
+      managedContentEnabled: z.boolean().optional()
     })
   })
 });

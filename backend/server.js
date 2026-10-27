@@ -18,6 +18,7 @@ const spotifyRoutes = require('./routes/spotifyRoutes');
 const deezerRoutes = require('./routes/deezerRoutes');
 const authRoutes = require('./routes/authRoutes');
 const recordingsRoutes = require('./routes/recordings');
+const adminRoutes = require('./routes/adminRoutes');
 const socketHandlers = require('./socket/socketHandlers');
 const { socketAuthMiddleware } = require('./middleware/socketAuthMiddleware');
 const logger = require('./config/logger');
@@ -113,6 +114,7 @@ app.use('/api/games', gameRoutes);
 app.use('/api/spotify', spotifyRoutes);
 app.use('/api/deezer', deezerRoutes);
 app.use('/api/recordings', recordingsRoutes);
+app.use('/api/admin/rooms/:code', adminRoutes);
 
 app.get('/api/health', (req, res) => {
   res.json({ status: 'OK', timestamp: new Date() });

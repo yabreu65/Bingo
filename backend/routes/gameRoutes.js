@@ -9,7 +9,7 @@ const { validateRequest } = require('../middleware/validateRequest');
 const { startGameSchema, getGameSchema } = require('../schemas/gameSchemas');
 const logger = require('../config/logger');
 const { stripTriviaAnswers } = require('../utils/publicData');
-const { initializeChallengePools } = require('../socket/utils/challengeSelector');
+const { initializeChallengePools, loadChallengePoolsForRoom } = require('../socket/utils/challengeSelector');
 
 router.post('/start', validateRequest(startGameSchema), optionalAuth, async (req, res) => {
   try {
@@ -37,7 +37,7 @@ router.post('/start', validateRequest(startGameSchema), optionalAuth, async (req
       room: room._id,
       gameMode: room.config?.gameMode || 'full',
       startTime: new Date(),
-      availablePools: initializeChallengePools()
+      availablePools: room.config?.managedContentEnabled ? await loadChallengePoolsForRoom(room._id) : initializeChallengePools()
     });
     await game.save();
 
