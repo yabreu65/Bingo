@@ -4,8 +4,12 @@ const Game = require('../models/Game');
 const Room = require('../models/Room');
 const { optionalAuth } = require('../middleware/authMiddleware');
 const { isRoomHost } = require('../middleware/socketAuthMiddleware');
+const { validateRequest } = require('../middleware/validateRequest');
+const { startGameSchema, getGameSchema } = require('../schemas/gameSchemas');
+const logger = require('../config/logger');
+const { stripTriviaAnswers } = require('../utils/publicData');
 
-router.post('/start', optionalAuth, async (req, res) => {
+router.post('/start', validateRequest(startGameSchema), optionalAuth, async (req, res) => {
   try {
     const room = await Room.findById(req.body.roomId).select('+hostCapabilityHash');
     if (!room) return res.status(404).json({ error: 'Sala no encontrada' });
@@ -26,16 +30,19 @@ router.post('/start', optionalAuth, async (req, res) => {
     
     res.json({ success: true, game });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    logger.error('Error starting game:', error);
+    res.status(500).json({ error: 'Error interno del servidor' });
   }
 });
 
-router.get('/:id', async (req, res) => {
+router.get('/:id', validateRequest(getGameSchema), async (req, res) => {
   try {
     const game = await Game.findById(req.params.id).populate('room');
-    res.json({ game });
+    if (!game) return res.status(404).json({ error: 'Partida no encontrada' });
+    res.json({ game: stripTriviaAnswers(game) });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    logger.error('Error getting game:', error);
+    res.status(500).json({ error: 'Error interno del servidor' });
   }
 });
 
