@@ -1,5 +1,16 @@
 const jwt = require('jsonwebtoken');
+const crypto = require('crypto');
 const User = require('../models/User');
+
+const createHostCapabilityHash = (capability, roomId) =>
+  crypto.createHash('sha256').update(`${roomId}:${capability}`).digest('hex');
+
+const matchesHostCapability = (capability, capabilityHash, roomId) => {
+  if (typeof capability !== 'string' || typeof capabilityHash !== 'string' || !roomId) return false;
+  const suppliedHash = Buffer.from(createHostCapabilityHash(capability, roomId), 'hex');
+  const expectedHash = Buffer.from(capabilityHash, 'hex');
+  return suppliedHash.length === expectedHash.length && crypto.timingSafeEqual(suppliedHash, expectedHash);
+};
 
 /**
  * Middleware de autenticación para Socket.io
@@ -75,9 +86,21 @@ const isHost = (socket) => {
  * @param {Object} room - Room document from database
  * @returns {Boolean} - True si el usuario es host de la sala o admin
  */
-const isRoomHost = async (socket, room) => {
+const isRoomHost = async (socket, room, hostCapability) => {
+  if (!room) return false;
+
   // Admins pueden hacer todo
   if (socket.user && socket.user.role === 'admin') {
+    return true;
+  }
+
+  let capabilityHash = room.hostCapabilityHash;
+  if (!capabilityHash && room._id) {
+    const Room = require('../models/Room');
+    const storedRoom = await Room.findById(room._id).select('+hostCapabilityHash');
+    capabilityHash = storedRoom?.hostCapabilityHash;
+  }
+  if (matchesHostCapability(hostCapability, capabilityHash, room._id)) {
     return true;
   }
 
@@ -92,12 +115,12 @@ const isRoomHost = async (socket, room) => {
   }
 
   // Por retrocompatibilidad, verificar si es el jugador marcado como host
-  if (room.players && room.players.length > 0) {
+  if (socket.user && room.players && room.players.length > 0) {
     const Player = require('../models/Player');
     const hostPlayer = await Player.findOne({
       room: room._id,
       isHost: true,
-      user: socket.user?.userId
+      user: socket.user.userId
     });
     return !!hostPlayer;
   }
@@ -158,6 +181,8 @@ module.exports = {
   socketAuthMiddleware,
   isHost,
   isRoomHost,
+  createHostCapabilityHash,
+  matchesHostCapability,
   requireHostForEvent,
   emitPermissionError
 };

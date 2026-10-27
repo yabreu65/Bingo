@@ -1,17 +1,9 @@
 const Room = require('../../models/Room');
-const Player = require('../../models/Player');
 const logger = require('../../config/logger');
+const { isRoomHost, emitPermissionError } = require('../../middleware/socketAuthMiddleware');
 
-/**
- * Verifica si el socket es del host de la sala
- * @param {Socket} socket
- * @returns {Promise<boolean>}
- */
-async function isHost(socket) {
-  if (!socket.playerId) return false;
-
-  const player = await Player.findById(socket.playerId);
-  return player && player.isHost;
+async function isHost(socket, room, data) {
+  return isRoomHost(socket, room, data?.hostCapability);
 }
 
 /**
@@ -28,8 +20,8 @@ function handleMusicPlay(io, socket) {
       }
 
       // Verificar que sea el host
-      if (!(await isHost(socket))) {
-        return socket.emit('error', { message: 'Solo el anfitrión puede controlar la música' });
+      if (!(await isHost(socket, room, data))) {
+        return emitPermissionError(socket);
       }
 
       room.musicState.isPlaying = true;
@@ -69,8 +61,8 @@ function handleMusicPause(io, socket) {
       }
 
       // Verificar que sea el host
-      if (!(await isHost(socket))) {
-        return socket.emit('error', { message: 'Solo el anfitrión puede controlar la música' });
+      if (!(await isHost(socket, room, data))) {
+        return emitPermissionError(socket);
       }
 
       room.musicState.isPlaying = false;
@@ -108,8 +100,8 @@ function handleMusicSongChange(io, socket) {
       }
 
       // Verificar que sea el host
-      if (!(await isHost(socket))) {
-        return socket.emit('error', { message: 'Solo el anfitrión puede controlar la música' });
+      if (!(await isHost(socket, room, data))) {
+        return emitPermissionError(socket);
       }
 
       room.musicState.currentSongId = songId;
@@ -147,8 +139,8 @@ function handleMusicVolumeChange(io, socket) {
       }
 
       // Verificar que sea el host
-      if (!(await isHost(socket))) {
-        return socket.emit('error', { message: 'Solo el anfitrión puede controlar la música' });
+      if (!(await isHost(socket, room, data))) {
+        return emitPermissionError(socket);
       }
 
       room.musicState.volume = volume;

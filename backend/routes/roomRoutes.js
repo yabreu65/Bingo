@@ -1,4 +1,5 @@
 const express = require('express');
+const crypto = require('crypto');
 const router = express.Router();
 const Room = require('../models/Room');
 const Player = require('../models/Player');
@@ -6,6 +7,8 @@ const { getCard } = require('../utils/bingoCards');
 const { validateRequest } = require('../middleware/validateRequest');
 const { updateRoomActivity } = require('../utils/roomActivity');
 const logger = require('../config/logger');
+const { optionalAuth } = require('../middleware/authMiddleware');
+const { createHostCapabilityHash, isRoomHost } = require('../middleware/socketAuthMiddleware');
 const {
   createRoomSchema,
   joinRoomSchema,
@@ -33,6 +36,7 @@ router.post('/create', createRoomLimiter, speedLimiter, validateRequest(createRo
     });
     await hostPlayer.save();
 
+    const hostCapability = crypto.randomBytes(32).toString('base64url');
     const room = new Room({
       code,
       name: req.body.roomName || `Sala ${code}`,
@@ -40,16 +44,18 @@ router.post('/create', createRoomLimiter, speedLimiter, validateRequest(createRo
       players: [hostPlayer._id],
       config: req.body.config || {}
     });
-    
+    room.hostCapabilityHash = createHostCapabilityHash(hostCapability, room._id);
     await room.save();
     
     hostPlayer.room = room._id;
     await hostPlayer.save();
+    room.hostCapabilityHash = undefined;
 
     res.json({
       success: true,
       room: await room.populate('players'),
-      player: hostPlayer
+      player: hostPlayer,
+      hostCapability
     });
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -187,14 +193,17 @@ router.post('/:code/select-card', selectCardLimiter, validateRequest(selectCardS
 });
 
 // Actualizar configuración
-router.patch('/:code/config', generalApiLimiter, validateRequest(updateConfigSchema), async (req, res) => {
+router.patch('/:code/config', generalApiLimiter, optionalAuth, validateRequest(updateConfigSchema), async (req, res) => {
   try {
-    const room = await Room.findOneAndUpdate(
-      { code: req.params.code.toUpperCase() },
-      { config: req.body.config },
-      { new: true }
-    );
-
+    const room = await Room.findOne({ code: req.params.code.toUpperCase() }).select('+hostCapabilityHash');
+    if (!room) return res.status(404).json({ error: 'Sala no encontrada' });
+    const capability = req.get('x-room-host-capability');
+    if (!(await isRoomHost(req, room, capability))) {
+      return res.status(403).json({ error: 'No tienes permisos para modificar la sala' });
+    }
+    room.config = req.body.config;
+    await room.save();
+    room.hostCapabilityHash = undefined;
     res.json({ success: true, room });
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -277,7 +286,7 @@ router.post('/:code/reconnect', generalApiLimiter, validateRequest(reconnectSche
 const { successResponse, errorResponse, conflictErrorResponse, notFoundErrorResponse } = require('../utils/errorResponses');
 
 // Asignar cartón manual a jugador
-router.post('/:code/assign-manual-card', generalApiLimiter, async (req, res) => {
+router.post('/:code/assign-manual-card', generalApiLimiter, optionalAuth, async (req, res) => {
   try {
     const { code } = req.params;
     const { playerName, cardNumber } = req.body;
@@ -297,9 +306,12 @@ router.post('/:code/assign-manual-card', generalApiLimiter, async (req, res) => 
       );
     }
 
-    const room = await Room.findOne({ code });
+    const room = await Room.findOne({ code: code.toUpperCase() }).select('+hostCapabilityHash');
     if (!room) {
       return res.status(404).json(notFoundErrorResponse('Sala'));
+    }
+    if (!(await isRoomHost(req, room, req.get('x-room-host-capability')))) {
+      return res.status(403).json(errorResponse('INSUFFICIENT_PERMISSIONS', 'No tienes permisos para modificar la sala'));
     }
 
     // Verificar que el cartón no esté ya asignado
@@ -387,13 +399,16 @@ router.get('/:code/available-manual-cards', generalApiLimiter, async (req, res) 
 });
 
 // Remover jugador manual
-router.delete('/:code/manual-players/:playerId', generalApiLimiter, async (req, res) => {
+router.delete('/:code/manual-players/:playerId', generalApiLimiter, optionalAuth, async (req, res) => {
   try {
     const { code, playerId } = req.params;
 
-    const room = await Room.findOne({ code });
+    const room = await Room.findOne({ code: code.toUpperCase() }).select('+hostCapabilityHash');
     if (!room) {
       return res.status(404).json(notFoundErrorResponse('Sala'));
+    }
+    if (!(await isRoomHost(req, room, req.get('x-room-host-capability')))) {
+      return res.status(403).json(errorResponse('INSUFFICIENT_PERMISSIONS', 'No tienes permisos para modificar la sala'));
     }
 
     const playerIndex = room.manualPlayers.findIndex(p => p.playerId === playerId);

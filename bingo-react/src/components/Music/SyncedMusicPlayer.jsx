@@ -4,7 +4,7 @@ import ReactPlayer from 'react-player';
 import { useSocket } from '../../context/useSocket';
 import './MusicPlayer.css';
 
-const SyncedMusicPlayer = ({ roomCode, isHost, playlist = [], currentIndex: externalIndex = 0, onSongChange }) => {
+const SyncedMusicPlayer = ({ roomCode, isHost, hostCapability, playlist = [], currentIndex: externalIndex = 0, onSongChange }) => {
   const { socket } = useSocket();
   const [currentIndex, setCurrentIndex] = useState(externalIndex);
   const [playing, setPlaying] = useState(false);
@@ -80,7 +80,8 @@ const SyncedMusicPlayer = ({ roomCode, isHost, playlist = [], currentIndex: exte
       setCurrentIndex(nextIndex);
       socket?.emit('music-song-change', {
         roomCode,
-        songId: nextSong.id
+        songId: nextSong.id,
+        hostCapability
       });
 
       // Auto-play la siguiente canción si estaba reproduciendo
@@ -88,7 +89,8 @@ const SyncedMusicPlayer = ({ roomCode, isHost, playlist = [], currentIndex: exte
         socket?.emit('music-play', {
           roomCode,
           songId: nextSong.id,
-          currentTime: 0
+          currentTime: 0,
+          hostCapability
         });
       }
     }
@@ -107,14 +109,16 @@ const SyncedMusicPlayer = ({ roomCode, isHost, playlist = [], currentIndex: exte
 
     socket?.emit('music-song-change', {
       roomCode,
-      songId: nextSong.videoId || nextSong.id
+      songId: nextSong.videoId || nextSong.id,
+      hostCapability
     });
 
     if (playing) {
       socket?.emit('music-play', {
         roomCode,
         songId: nextSong.videoId || nextSong.id,
-        currentTime: 0
+        currentTime: 0,
+        hostCapability
       });
     }
   };
@@ -132,14 +136,16 @@ const SyncedMusicPlayer = ({ roomCode, isHost, playlist = [], currentIndex: exte
 
     socket?.emit('music-song-change', {
       roomCode,
-      songId: prevSong.videoId || prevSong.id
+      songId: prevSong.videoId || prevSong.id,
+      hostCapability
     });
 
     if (playing) {
       socket?.emit('music-play', {
         roomCode,
         songId: prevSong.videoId || prevSong.id,
-        currentTime: 0
+        currentTime: 0,
+        hostCapability
       });
     }
   };
@@ -154,13 +160,15 @@ const SyncedMusicPlayer = ({ roomCode, isHost, playlist = [], currentIndex: exte
       socket?.emit('music-play', {
         roomCode,
         songId: currentSong.videoId || currentSong.id,
-        currentTime: playerRef.current?.getCurrentTime() || 0
+        currentTime: playerRef.current?.getCurrentTime() || 0,
+        hostCapability
       });
       setMuted(false);
     } else {
       socket?.emit('music-pause', {
         roomCode,
-        currentTime: playerRef.current?.getCurrentTime() || 0
+        currentTime: playerRef.current?.getCurrentTime() || 0,
+        hostCapability
       });
     }
   };
@@ -179,7 +187,8 @@ const SyncedMusicPlayer = ({ roomCode, isHost, playlist = [], currentIndex: exte
     syncTimeoutRef.current = setTimeout(() => {
       socket?.emit('music-volume-change', {
         roomCode,
-        volume: newVolume
+        volume: newVolume,
+        hostCapability
       });
     }, 200);
   };
@@ -200,14 +209,16 @@ const SyncedMusicPlayer = ({ roomCode, isHost, playlist = [], currentIndex: exte
 
     socket?.emit('music-song-change', {
       roomCode,
-      songId: selectedSong.videoId || selectedSong.id
+      songId: selectedSong.videoId || selectedSong.id,
+      hostCapability
     });
 
     if (playing) {
       socket?.emit('music-play', {
         roomCode,
         songId: selectedSong.videoId || selectedSong.id,
-        currentTime: 0
+        currentTime: 0,
+        hostCapability
       });
     }
   };

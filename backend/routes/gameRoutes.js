@@ -2,10 +2,18 @@ const express = require('express');
 const router = express.Router();
 const Game = require('../models/Game');
 const Room = require('../models/Room');
+const { optionalAuth } = require('../middleware/authMiddleware');
+const { isRoomHost } = require('../middleware/socketAuthMiddleware');
 
-router.post('/start', async (req, res) => {
+router.post('/start', optionalAuth, async (req, res) => {
   try {
-    const room = await Room.findById(req.body.roomId);
+    const room = await Room.findById(req.body.roomId).select('+hostCapabilityHash');
+    if (!room) return res.status(404).json({ error: 'Sala no encontrada' });
+    const capability = req.get('x-room-host-capability');
+    if (!(await isRoomHost(req, room, capability))) {
+      return res.status(403).json({ error: 'No tienes permisos para iniciar la sala' });
+    }
+
     const game = new Game({
       room: room._id,
       startTime: new Date()

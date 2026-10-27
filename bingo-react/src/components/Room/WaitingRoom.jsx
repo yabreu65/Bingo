@@ -139,7 +139,11 @@ const WaitingRoom = ({ roomData, onGameStart }) => {
             />
           </div>
         </div>
-        <SyncedMusicPlayer roomCode={roomData.roomCode} isHost={roomData.isHost} />
+        <SyncedMusicPlayer
+          roomCode={roomData.roomCode}
+          isHost={roomData.isHost}
+          hostCapability={roomData.isHost ? roomData.hostCapability : undefined}
+        />
       </div>
     );
   }
@@ -285,6 +289,7 @@ const WaitingRoom = ({ roomData, onGameStart }) => {
       <SyncedMusicPlayer
         roomCode={roomData.roomCode}
         isHost={roomData.isHost}
+        hostCapability={roomData.isHost ? roomData.hostCapability : undefined}
       />
       {countdown != null && (
         <div className="countdown-overlay" style={{ position: 'fixed', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.35)', color: '#fff', fontSize: '6rem', fontWeight: 800 }}>

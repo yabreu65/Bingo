@@ -164,6 +164,7 @@ function App() {
           playerId: session.playerId,
           playerName: session.playerName || 'Jugador',
           isHost: session.isHost || false,
+          hostCapability: session.isHost ? session.hostCapability : undefined,
           cardNumber: session.cardNumber || null,
           bingoCard: session.bingoCard || null,
           // Restaurar también el estado del juego
@@ -204,6 +205,7 @@ function App() {
         playerId: roomData.playerId,
         playerName: roomData.playerName,
         isHost: roomData.isHost,
+        hostCapability: roomData.isHost ? roomData.hostCapability : undefined,
         cardNumber: roomData.cardNumber,
         bingoCard: roomData.bingoCard,
         // Guardar también el estado del juego para reconexión
@@ -213,7 +215,11 @@ function App() {
         timestamp: Date.now()
       };
       localStorage.setItem(STORAGE_KEY, JSON.stringify(session));
-      console.log('💾 Session saved:', session);
+      console.log('💾 Session saved:', {
+        roomCode: session.roomCode,
+        playerId: session.playerId,
+        isHost: session.isHost
+      });
     }
   }, [roomData, mode]);
 

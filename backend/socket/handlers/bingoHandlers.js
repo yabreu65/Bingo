@@ -4,6 +4,9 @@ const Game = require('../../models/Game');
 const logger = require('../../config/logger');
 const { isFullCard } = require('../utils/bingoValidator');
 const { clearAllRoomTimers } = require('../utils/roomTimer');
+const { isRoomHost, emitPermissionError } = require('../../middleware/socketAuthMiddleware');
+
+const canControlRoom = (socket, room, data) => isRoomHost(socket, room, data?.hostCapability);
 const votingHandlers = require('./votingHandlers');
 const votingService = require('../../services/votingService');
 const EventEmitter = require('events');
@@ -239,6 +242,9 @@ function handleCallNumber(io, socket) {
       if (!room) {
         return socket.emit('error', { message: 'Sala no encontrada' });
       }
+      if (!(await canControlRoom(socket, room, data))) {
+        return emitPermissionError(socket);
+      }
 
       const game = await Game.findById(room.currentGame);
       if (!game) {
@@ -282,6 +288,10 @@ function handleStartTiebreakPerformance(io, socket) {
   return async (data) => {
     try {
       const { roomCode, performerId } = data;
+      const room = await Room.findOne({ code: roomCode });
+      if (!(await canControlRoom(socket, room, data))) {
+        return emitPermissionError(socket);
+      }
 
       logger.info(`[${roomCode}] Organizador inició performance para ${performerId}`);
 
@@ -314,6 +324,9 @@ function handleStartTiebreakVoting(io, socket) {
       const room = await Room.findOne({ code: roomCode });
       if (!room) {
         return socket.emit('error', { message: 'Sala no encontrada' });
+      }
+      if (!(await canControlRoom(socket, room, data))) {
+        return emitPermissionError(socket);
       }
 
       const game = await Game.findById(room.currentGame);
@@ -501,6 +514,9 @@ function handleVerifyBingoManual(io, socket) {
       if (!room) {
         return socket.emit('error', { message: 'Sala no encontrada' });
       }
+      if (!(await canControlRoom(socket, room, data))) {
+        return emitPermissionError(socket);
+      }
 
       const game = await Game.findById(room.currentGame);
       if (!game) {
@@ -578,5 +594,6 @@ module.exports = {
   handleCallNumber,
   handleStartTiebreakPerformance,
   handleStartTiebreakVoting,
-  handleCastTiebreakVote
+  handleCastTiebreakVote,
+  handleVerifyBingoManual
 };

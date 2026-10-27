@@ -390,7 +390,7 @@ const ManualBingoValidator = ({ isOpen, onClose, player, calledNumbers, gameMode
 // --- Componente Principal del Dashboard ---
 
 export default function OrganizerDashboard({ roomData }) {
-  const { socket } = useSocket();
+  const { socket, joinRoom } = useSocket();
 
   // Estados del componente con valores por defecto seguros
   const [roomState, setRoomState] = useState(roomData.room || {
@@ -423,10 +423,7 @@ export default function OrganizerDashboard({ roomData }) {
     if (!socket || !roomData) return;
 
     console.log('🎮 Dashboard joining room:', roomState.code);
-    socket.emit('join-room', {
-      roomCode: roomState.code,
-      playerId: roomData.playerId
-    }, (response) => {
+    joinRoom(roomState.code, roomData.playerId, roomData.hostCapability, (response) => {
       if (response?.success) {
         console.log('✅ Dashboard joined room successfully');
 
@@ -459,7 +456,7 @@ export default function OrganizerDashboard({ roomData }) {
     return () => {
       console.log('🎮 Dashboard component unmounting (but NOT leaving room for reconnection)');
     };
-  }, [socket, roomState.code, roomData]);
+  }, [joinRoom, socket, roomState.code, roomData]);
 
   // Efectos para la comunicación con el socket
   useEffect(() => {
@@ -553,21 +550,21 @@ export default function OrganizerDashboard({ roomData }) {
       return;
     }
     console.log('🎮 Starting game for room:', roomState.code);
-    socket?.emit('start-game', { roomCode: roomState.code });
+    socket?.emit('start-game', { roomCode: roomState.code, hostCapability: roomData.hostCapability });
   };
   
   const handlePauseGame = () => {
       if (gameState === 'playing') {
-        socket?.emit('pause-game', { roomCode: roomState.code });
+        socket?.emit('pause-game', { roomCode: roomState.code, hostCapability: roomData.hostCapability });
       } else {
-        socket?.emit('resume-game', { roomCode: roomState.code });
+        socket?.emit('resume-game', { roomCode: roomState.code, hostCapability: roomData.hostCapability });
       }
   };
 
   const handleResetGame = () => {
       if (window.confirm('¿Estás seguro de reiniciar el juego? Esto reiniciará los números pero mantendrá la sala activa.')) {
           console.log('🔄 Resetting game for room:', roomState.code);
-          socket?.emit('reset-game', { roomCode: roomState.code });
+          socket?.emit('reset-game', { roomCode: roomState.code, hostCapability: roomData.hostCapability });
           setGameState('waiting');
           setCurrentNumber(null);
           setCalledNumbers([]);
@@ -578,7 +575,10 @@ export default function OrganizerDashboard({ roomData }) {
     try {
       const res = await fetch(`${API_URL}/api/rooms/${roomState.code}/config`, {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'x-room-host-capability': roomData.hostCapability
+        },
         body: JSON.stringify({ config: { ...roomState.config, tieBreakEnabled: !tieBreakOn } })
       });
       const data = await res.json();
@@ -596,7 +596,7 @@ export default function OrganizerDashboard({ roomData }) {
   const handleFinishGame = () => {
       if (window.confirm('¿Estás seguro de finalizar y cerrar la sala? Todos los jugadores serán desconectados y la sala será eliminada.')) {
           console.log('🛑 Closing room:', roomState.code);
-          socket?.emit('close-room', { roomCode: roomState.code });
+          socket?.emit('close-room', { roomCode: roomState.code, hostCapability: roomData.hostCapability });
           // Limpiar localStorage
           localStorage.clear();
           // Redirigir a la página principal
@@ -609,12 +609,16 @@ export default function OrganizerDashboard({ roomData }) {
 
   const handleKickPlayer = (playerId) => {
       if (window.confirm('¿Estás seguro de expulsar a este jugador?')) {
-          socket?.emit('kick-player', { roomCode: roomState.code, playerId });
+          socket?.emit('kick-player', { roomCode: roomState.code, playerId, hostCapability: roomData.hostCapability });
       }
   };
   
   const handleLaunchEvent = (eventType) => {
-      socket?.emit('trigger-challenge', { roomCode: roomState.code, type: eventType });
+      socket?.emit('launch-event', {
+        roomCode: roomState.code,
+        type: eventType,
+        hostCapability: roomData.hostCapability
+      });
       toast.success(`Lanzando ${eventType}...`);
   };
 
@@ -676,7 +680,10 @@ export default function OrganizerDashboard({ roomData }) {
     try {
       const res = await fetch(`${API_URL}/api/rooms/${roomState.code}/assign-manual-card`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'x-room-host-capability': roomData.hostCapability
+        },
         body: JSON.stringify({
           playerName: manualPlayerForm.name.trim(),
           cardNumber: manualPlayerForm.cardNumber
@@ -705,7 +712,8 @@ export default function OrganizerDashboard({ roomData }) {
 
     try {
       const res = await fetch(`${API_URL}/api/rooms/${roomState.code}/manual-players/${playerId}`, {
-        method: 'DELETE'
+        method: 'DELETE',
+        headers: { 'x-room-host-capability': roomData.hostCapability }
       });
 
       const data = await res.json();
@@ -732,7 +740,8 @@ export default function OrganizerDashboard({ roomData }) {
       roomCode: roomState.code,
       playerName: player.playerName,
       cardNumber: player.cardNumber,
-      playerId: player.playerId
+      playerId: player.playerId,
+      hostCapability: roomData.hostCapability
     });
 
     showSuccess(`¡BINGO confirmado para ${player.playerName}!`);

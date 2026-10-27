@@ -69,6 +69,7 @@ const RoomSetup = ({ onRoomReady }) => {
           playerId: data.player._id,
           playerName: playerName.trim(),
           isHost: true,
+          hostCapability: data.hostCapability,
           room: data.room
         });
       } else {

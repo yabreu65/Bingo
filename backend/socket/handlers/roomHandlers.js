@@ -37,36 +37,87 @@ async function broadcastRoomInfo(io, roomCode) {
 function handleJoinRoom(io, socket) {
   return async (data, callback) => {
     try {
-      const { roomCode, playerId } = data;
-
-      socket.join(roomCode);
-      socket.roomCode = roomCode;
-      socket.playerId = playerId;
-
-      // Solo actualizar el jugador si no es tv-display
-      if (playerId !== 'tv-display') {
-        await Player.findByIdAndUpdate(playerId, {
-          socketId: socket.id,
-          isConnected: true
-        });
+      const { roomCode, playerId, hostCapability } = data;
+      const requestedRoomCode = typeof roomCode === 'string' ? roomCode.toUpperCase() : '';
+      const boundRoomCode = typeof socket.roomCode === 'string' ? socket.roomCode.toUpperCase() : '';
+      if ((socket.roomCode && boundRoomCode !== requestedRoomCode) ||
+          (socket.playerId && socket.playerId !== playerId)) {
+        if (callback) callback({ success: false, error: 'Socket ya está vinculado a otro jugador o sala' });
+        return;
       }
 
       const room = await Room.findOne({ code: roomCode }).populate('players');
-      io.to(roomCode).emit('player-joined', {
+      if (!room) {
+        if (callback) callback({ success: false, error: 'Sala no encontrada' });
+        return;
+      }
+
+      if (playerId !== 'tv-display') {
+        const player = await Player.findById(playerId);
+        const playerRoomId = player?.room?._id || player?.room;
+        if (!player || playerRoomId?.toString() !== room._id.toString()) {
+          if (callback) callback({ success: false, error: 'Jugador no pertenece a la sala' });
+          return;
+        }
+
+        const previousSocketId = player.socketId;
+        const previousSocket = previousSocketId && previousSocketId !== socket.id
+          ? io.sockets?.sockets?.get(previousSocketId)
+          : null;
+        let authorizedHostReclaim = false;
+
+        if (player.isHost && previousSocketId !== socket.id) {
+          authorizedHostReclaim = await isRoomHost({ user: null }, room, hostCapability);
+          const previousSocketMatchesPlayer = previousSocket &&
+            previousSocket.roomCode?.toUpperCase() === room.code.toUpperCase() &&
+            previousSocket.playerId?.toString() === player._id.toString();
+          if (!authorizedHostReclaim || (previousSocket && !previousSocketMatchesPlayer)) {
+            if (callback) callback({ success: false, error: 'Jugador ya conectado' });
+            return;
+          }
+        }
+
+        if (previousSocket && !authorizedHostReclaim) {
+          if (callback) callback({ success: false, error: 'Jugador ya conectado' });
+          return;
+        }
+
+        const socketOwnershipFilter = previousSocketId
+          ? { socketId: previousSocketId }
+          : { $or: [{ socketId: { $exists: false } }, { socketId: null }] };
+        const claimFilter = { _id: player._id, room: room._id, ...socketOwnershipFilter };
+        if (authorizedHostReclaim) claimFilter.isHost = true;
+        const claimedPlayer = await Player.findOneAndUpdate(
+          claimFilter,
+          { $set: { socketId: socket.id, isConnected: true } },
+          { new: true }
+        );
+        if (!claimedPlayer) {
+          if (callback) callback({ success: false, error: 'Jugador ya conectado' });
+          return;
+        }
+
+        if (authorizedHostReclaim && previousSocket) previousSocket.disconnect(true);
+      }
+
+      socket.join(room.code);
+      socket.roomCode = room.code;
+      socket.playerId = playerId;
+
+      io.to(room.code).emit('player-joined', {
         playerId,
         players: room.players
       });
 
-      await broadcastRoomInfo(io, roomCode);
+      await broadcastRoomInfo(io, room.code);
 
-      logger.logRoomEvent(roomCode, playerId === 'tv-display' ? 'TV Display joined' : 'Player joined', {
+      logger.logRoomEvent(room.code, playerId === 'tv-display' ? 'TV Display joined' : 'Player joined', {
         playerId,
         socketId: socket.id
       });
 
-      // Confirmar al cliente que se unió exitosamente
       if (callback) {
-        callback({ success: true, roomCode, playerId });
+        callback({ success: true, roomCode: room.code, playerId });
       }
     } catch (error) {
       logger.error('Error in join-room:', error);
@@ -84,24 +135,46 @@ function handleJoinRoom(io, socket) {
 function handleLeaveRoom(io, socket) {
   return async (data) => {
     try {
-      const { roomCode } = data;
-
-      socket.leave(roomCode);
-
-      if (socket.playerId) {
-        await Player.findByIdAndUpdate(socket.playerId, { isConnected: false });
+      const requestedRoomCode = typeof data?.roomCode === 'string' ? data.roomCode.toUpperCase() : '';
+      const roomCode = socket.roomCode;
+      if (!roomCode || requestedRoomCode !== roomCode.toUpperCase()) {
+        socket.emit('error', { message: 'No tienes permisos para dejar esta sala' });
+        return;
       }
 
       const room = await Room.findOne({ code: roomCode }).populate('players');
+      if (!room) {
+        socket.emit('error', { message: 'Sala no encontrada' });
+        return;
+      }
+
+      const playerId = socket.playerId;
+      if (playerId && playerId !== 'tv-display') {
+        const releasedPlayer = await Player.findOneAndUpdate(
+          { _id: playerId, room: room._id, socketId: socket.id },
+          { $set: { isConnected: false, socketId: null } },
+          { new: true }
+        );
+        if (!releasedPlayer) {
+          socket.emit('error', { message: 'No tienes permisos para dejar esta sala' });
+          return;
+        }
+      }
+
+      socket.leave(roomCode);
+      socket.roomCode = undefined;
+      socket.playerId = undefined;
+
+      const updatedRoom = await Room.findOne({ code: roomCode }).populate('players');
       io.to(roomCode).emit('player-left', {
-        playerId: socket.playerId,
-        players: room ? room.players : []
+        playerId,
+        players: updatedRoom ? updatedRoom.players : []
       });
 
       await broadcastRoomInfo(io, roomCode);
 
       logger.logRoomEvent(roomCode, 'Player left', {
-        playerId: socket.playerId
+        playerId
       });
     } catch (error) {
       logger.error('Error in leave-room:', error);
@@ -122,7 +195,7 @@ function handleCloseRoom(io, socket) {
 
       if (room) {
         // Verificar permisos de host
-        const hasPermission = await isRoomHost(socket, room);
+        const hasPermission = await isRoomHost(socket, room, data?.hostCapability);
         if (!hasPermission) {
           logger.warn(`[${roomCode}] Unauthorized close-room attempt by socket ${socket.id}`);
           return emitPermissionError(socket);
@@ -213,7 +286,7 @@ function handleKickPlayer(io, socket) {
 
       // Verificar permisos de host
       const room = await Room.findOne({ code: roomCode });
-      const hasPermission = await isRoomHost(socket, room);
+      const hasPermission = await isRoomHost(socket, room, data?.hostCapability);
       if (!hasPermission) {
         logger.warn(`[${roomCode}] Unauthorized kick-player attempt by socket ${socket.id}`);
         return emitPermissionError(socket);
@@ -222,6 +295,11 @@ function handleKickPlayer(io, socket) {
       const player = await Player.findById(playerId);
 
       if (player) {
+        const playerRoomId = player.room?._id || player.room;
+        if (playerRoomId?.toString() !== room._id.toString()) {
+          return emitPermissionError(socket);
+        }
+
         player.isConnected = false;
         await player.save();
 
@@ -255,63 +333,36 @@ function handleKickPlayer(io, socket) {
 function handleDisconnect(io, socket) {
   return async () => {
     try {
-      // Skip if playerId is 'tv-display' or other special non-ObjectId values
-      if (socket.playerId && socket.playerId !== 'tv-display') {
-        await Player.findByIdAndUpdate(socket.playerId, {
-          isConnected: false,
-          socketId: null
-        });
+      if (!socket.playerId || socket.playerId === 'tv-display' || !socket.roomCode) return;
 
-        if (socket.roomCode) {
-          const room = await Room.findOne({ code: socket.roomCode }).populate('players');
-
-          // IMPORTANTE: Si el jugador que se desconectó tenía un challenge activo, cancelarlo
-          if (room && room.currentGame) {
-            const Game = require('../../models/Game');
-            const game = await Game.findById(room.currentGame);
-
-            if (game?.activeChallenge && game.activeChallenge.player?.toString() === socket.playerId) {
-              logger.warn(`[${socket.roomCode}] ⚠️ Player with active challenge disconnected, auto-canceling challenge`);
-
-              // Limpiar el challenge
-              game.activeChallenge = null;
-              await game.save();
-
-              // Reanudar el juego
-              room.gameState = 'playing';
-              await room.save();
-
-              // Emitir eventos
-              io.to(socket.roomCode).emit('challenge-complete', { success: false, reason: 'Player disconnected' });
-              io.to(socket.roomCode).emit('game-state-changed', { state: 'playing' });
-
-              // Continuar con el siguiente número
-              const gameHandlers = require('./gameHandlers');
-              await gameHandlers.immediateNextNumber(io, socket.roomCode);
-              await gameHandlers.scheduleRoomInterval(io, socket.roomCode);
-
-              const { ensureWatchdog } = require('../utils/roomTimer');
-              ensureWatchdog(socket.roomCode, (rc) => gameHandlers.scheduleRoomInterval(io, rc), room.config);
-
-              logger.info(`[${socket.roomCode}] ✅ Challenge auto-canceled, game resumed`);
-            }
-          }
-
-          io.to(socket.roomCode).emit('player-left', {
-            playerId: socket.playerId,
-            players: room ? room.players : []
-          });
-          await broadcastRoomInfo(io, socket.roomCode);
-        }
-
-        logger.logSocketEvent(socket.id, 'Player disconnected', {
-          playerId: socket.playerId,
-          roomCode: socket.roomCode
-        });
+      const room = await Room.findOne({ code: socket.roomCode }).populate('players');
+      const player = await Player.findById(socket.playerId);
+      const playerRoomId = player?.room?._id || player?.room;
+      if (!room || !player || playerRoomId?.toString() !== room._id.toString() || player.socketId !== socket.id) {
+        return;
       }
+
+      const disconnectedPlayer = await Player.findOneAndUpdate(
+        { _id: player._id, room: room._id, socketId: socket.id },
+        { $set: { isConnected: false, socketId: null } },
+        { new: true }
+      );
+      if (!disconnectedPlayer) return;
+
+      // Challenges finish through their existing timeout; a disconnect must not alter game state or timers.
+      const updatedRoom = await Room.findOne({ code: room.code }).populate('players');
+      io.to(room.code).emit('player-left', {
+        playerId: socket.playerId,
+        players: updatedRoom ? updatedRoom.players : []
+      });
+      await broadcastRoomInfo(io, room.code);
+
+      logger.logSocketEvent(socket.id, 'Player disconnected', {
+        playerId: socket.playerId,
+        roomCode: room.code
+      });
       // DON'T clear the interval when a player disconnects!
-      // The interval should only be cleared when the room is explicitly closed
-      // The watchdog will handle restarting stalled intervals
+      // The interval should only be cleared when the room is explicitly closed.
     } catch (error) {
       logger.error(`Error on disconnect for socket ${socket.id}:`, error);
     }

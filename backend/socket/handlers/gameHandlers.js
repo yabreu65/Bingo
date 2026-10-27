@@ -4,6 +4,8 @@ const Game = require('../../models/Game');
 const logger = require('../../config/logger');
 const { GAME_CONSTANTS } = require('../../constants');
 const { isRoomHost, emitPermissionError } = require('../../middleware/socketAuthMiddleware');
+
+const canControlRoom = (socket, room, data) => isRoomHost(socket, room, data?.hostCapability);
 const {
   getNextChallengeType,
   selectRandomChallenge,
@@ -421,7 +423,7 @@ function handleStartGame(io, socket) {
       const room = await Room.findOne({ code: roomCode });
 
       // Verificar permisos de host
-      if (!(await isRoomHost(socket, room))) {
+      if (!(await isRoomHost(socket, room, data?.hostCapability))) {
         logger.warn(`[${roomCode}] Unauthorized start-game attempt by socket ${socket.id}`);
         return emitPermissionError(socket);
       }
@@ -485,7 +487,7 @@ function handleGameStateChange(io, socket) {
 
       if (room) {
         // Verificar permisos de host
-        const hasPermission = await isRoomHost(socket, room);
+        const hasPermission = await canControlRoom(socket, room, data);
         if (!hasPermission) {
           logger.warn(`[${roomCode}] Unauthorized game-state-change attempt by socket ${socket.id}`);
           return emitPermissionError(socket);
@@ -514,17 +516,18 @@ function handleResetGame(io, socket) {
       const { roomCode } = data;
 
       const room = await Room.findOne({ code: roomCode });
-
-      // Verificar permisos de host
-      if (room) {
-        const hasPermission = await isRoomHost(socket, room);
-        if (!hasPermission) {
-          logger.warn(`[${roomCode}] Unauthorized reset-game attempt by socket ${socket.id}`);
-          return emitPermissionError(socket);
-        }
+      if (!room) {
+        return emitPermissionError(socket);
       }
 
-      if (room && room.currentGame) {
+      // Verificar permisos de host
+      const hasPermission = await canControlRoom(socket, room, data);
+      if (!hasPermission) {
+        logger.warn(`[${roomCode}] Unauthorized reset-game attempt by socket ${socket.id}`);
+        return emitPermissionError(socket);
+      }
+
+      if (room.currentGame) {
         const game = await Game.findById(room.currentGame);
         if (game) {
           game.calledNumbers = [];
@@ -551,6 +554,10 @@ function handleStartCountdown(io, socket) {
   return async (data) => {
     try {
       const { roomCode } = data;
+      const room = await Room.findOne({ code: roomCode });
+      if (!(await canControlRoom(socket, room, data))) {
+        return emitPermissionError(socket);
+      }
 
       io.to(roomCode).emit('countdown-started');
 
@@ -576,6 +583,9 @@ function handlePauseGame(io, socket) {
       if (!room) {
         logger.warn(`[${roomCode}] Room not found for pause`);
         return;
+      }
+      if (!(await canControlRoom(socket, room, data))) {
+        return emitPermissionError(socket);
       }
 
       room.gameState = 'paused';
@@ -607,6 +617,9 @@ function handleResumeGame(io, socket) {
         logger.warn(`[${roomCode}] Room not found for resume`);
         return;
       }
+      if (!(await canControlRoom(socket, room, data))) {
+        return emitPermissionError(socket);
+      }
 
       room.gameState = 'playing';
       await room.save();
@@ -629,11 +642,14 @@ function handleLaunchEvent(io, socket) {
   return async (data) => {
     try {
       const { roomCode, type, text } = data;
+      const room = await Room.findOne({ code: roomCode }).populate('players');
+      if (!(await canControlRoom(socket, room, data))) {
+        return emitPermissionError(socket);
+      }
 
       if (type === 'cartonazo') {
         logger.info(`[${roomCode}] Cartonazo event triggered`);
 
-        const room = await Room.findOne({ code: roomCode }).populate('players');
         if (!room) {
           logger.warn(`[${roomCode}] Room not found for Cartonazo`);
           return;

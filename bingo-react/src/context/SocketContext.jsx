@@ -44,9 +44,11 @@ export const SocketProvider = ({ children }) => {
 
       // Auto-rejoin room after reconnection
       if (roomDataRef.current) {
-        const { roomCode, playerId } = roomDataRef.current;
+        const { roomCode, playerId, hostCapability } = roomDataRef.current;
         console.log('🔄 Auto-rejoining room after reconnection:', roomCode);
-        newSocket.emit('join-room', { roomCode, playerId }, (response) => {
+        const joinPayload = { roomCode, playerId };
+        if (hostCapability) joinPayload.hostCapability = hostCapability;
+        newSocket.emit('join-room', joinPayload, (response) => {
           if (response?.success) {
             console.log('✅ Successfully rejoined room');
 
@@ -210,16 +212,22 @@ export const SocketProvider = ({ children }) => {
   }, []);
 
   // Room Management
-  const joinRoom = useCallback((roomCode, playerId) => {
+  const joinRoom = useCallback((roomCode, playerId, hostCapability, callback) => {
     if (!socket) {
       console.error('Socket not initialized');
       return;
     }
     console.log('📥 Joining room:', roomCode);
-    socket.emit('join-room', { roomCode, playerId });
+    const joinPayload = { roomCode, playerId };
+    if (hostCapability) joinPayload.hostCapability = hostCapability;
+    if (callback) {
+      socket.emit('join-room', joinPayload, callback);
+    } else {
+      socket.emit('join-room', joinPayload);
+    }
     setCurrentRoom(roomCode);
-    // Store room data for auto-rejoin on reconnection
-    roomDataRef.current = { roomCode, playerId };
+    // Store the host-only capability for authenticated room-control reconnects.
+    roomDataRef.current = { roomCode, playerId, hostCapability };
   }, [socket]);
 
   const leaveRoom = useCallback(() => {
@@ -232,16 +240,25 @@ export const SocketProvider = ({ children }) => {
   }, [socket, currentRoom]);
 
   // Game Actions
-  const startGame = useCallback((roomCode) => {
+  const startGame = useCallback((roomCode, hostCapability) => {
     if (!socket) return;
+    const retainedCapability = roomDataRef.current?.roomCode === roomCode
+      ? roomDataRef.current.hostCapability
+      : undefined;
     console.log('🎮 Starting game in room:', roomCode);
-    socket.emit('start-game', { roomCode });
+    socket.emit('start-game', {
+      roomCode,
+      hostCapability: hostCapability || retainedCapability
+    });
   }, [socket]);
 
-  const callNumber = useCallback((roomCode, number) => {
+  const callNumber = useCallback((roomCode, number, hostCapability) => {
     if (!socket) return;
+    const retainedCapability = roomDataRef.current?.roomCode === roomCode
+      ? roomDataRef.current.hostCapability
+      : undefined;
     console.log('🔢 Calling number:', number);
-    socket.emit('call-number', { roomCode, number });
+    socket.emit('call-number', { roomCode, number, hostCapability: hostCapability || retainedCapability });
   }, [socket]);
 
   const markCell = useCallback((roomCode, playerId, row, col) => {

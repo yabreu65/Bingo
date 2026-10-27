@@ -18,6 +18,10 @@ const roomSchema = new mongoose.Schema({
     ref: 'Player',
     required: true
   },
+  hostCapabilityHash: {
+    type: String,
+    select: false
+  },
   players: [{
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Player'
