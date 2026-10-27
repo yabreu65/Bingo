@@ -29,6 +29,7 @@ const ChallengeModal = ({
   const [selectedAnswer, setSelectedAnswer] = useState(null);
   const [textAnswer, setTextAnswer] = useState('');
   const [showResult, setShowResult] = useState(false);
+  const [submitted, setSubmitted] = useState(false);
   const [timer, setTimer] = useState(0);
   const timerIntervalRef = useRef(null);
   const [deezerSong, setDeezerSong] = useState(null);
@@ -80,6 +81,7 @@ const ChallengeModal = ({
       setSelectedAnswer(null);
       setTextAnswer('');
       setShowResult(false);
+      setSubmitted(false);
       setCurrentLyricIndex(0);
 
       // Seleccionar canción de Deezer para challenges de baile, canto y grupo
@@ -194,7 +196,8 @@ const ChallengeModal = ({
 
   const handleComplete = () => {
     // Para trivias, ya se llamó completeChallenge en handleTriviaAnswer
-    if (activeChallenge.type !== 'trivia') {
+    if (activeChallenge.type !== 'trivia' && !submitted) {
+      if (activeChallenge.type === 'group') setSubmitted(true);
       completeChallenge(true);
     }
   };
@@ -396,8 +399,8 @@ const ChallengeModal = ({
               ⏱️ {timer > 0 ? `${timer} segundos` : '¡Tiempo terminado!'}
             </div>
 
-            <button className="btn-close-challenge" onClick={handleComplete}>
-              Completar Reto
+            <button className="btn-close-challenge" onClick={handleComplete} disabled={submitted}>
+              {submitted ? 'Respuesta enviada' : 'Completar Reto'}
             </button>
           </>
         )}

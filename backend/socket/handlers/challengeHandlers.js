@@ -60,6 +60,18 @@ async function finishChallenge(io, actor, { result, pointsPlayerIds = [], broadc
   activeChallenge.completedAt = new Date();
   activeChallenge.result = result;
   activeChallenge.pointsAwarded = true;
+  game.gameEvents = Array.isArray(game.gameEvents) ? game.gameEvents : [];
+  game.gameEvents.push({
+    type: 'challenge_completed',
+    player: activeChallenge.player,
+    data: {
+      challengeId,
+      challengeType: activeChallenge.type,
+      result,
+      responses: activeChallenge.responses || []
+    },
+    timestamp: new Date()
+  });
   game.activeChallenge = null;
   if (typeof game.save === 'function') await game.save();
 
@@ -93,6 +105,39 @@ async function finishChallenge(io, actor, { result, pointsPlayerIds = [], broadc
   await gameHandlers.scheduleRoomInterval(io, roomCode);
   const { ensureWatchdog } = require('../utils/roomTimer');
   ensureWatchdog(roomCode, (rc) => gameHandlers.scheduleRoomInterval(io, rc), room.config);
+}
+
+async function appendGroupResponse(actor, response) {
+  const challengeId = actor.activeChallenge.id;
+  const playerId = response.playerId;
+
+  if (actor.game._id && typeof Game.findOneAndUpdate === 'function') {
+    const updatedGame = await Game.findOneAndUpdate(
+      {
+        _id: actor.game._id,
+        'activeChallenge.id': challengeId,
+        'activeChallenge.type': 'group',
+        'activeChallenge.responses.playerId': { $ne: playerId }
+      },
+      { $push: { 'activeChallenge.responses': response } },
+      { new: true }
+    );
+
+    return updatedGame
+      ? { ...actor, game: updatedGame, activeChallenge: updatedGame.activeChallenge }
+      : null;
+  }
+
+  const responses = Array.isArray(actor.activeChallenge.responses)
+    ? actor.activeChallenge.responses
+    : [];
+  if (responses.some(existing => existing.playerId?.toString() === playerId.toString())) {
+    return null;
+  }
+
+  actor.activeChallenge.responses = [...responses, response];
+  await actor.game.save();
+  return actor;
 }
 
 /**
@@ -183,6 +228,45 @@ function handleChallengeComplete(io, socket) {
       const { challengeId, type } = data;
       const roomCode = actor.room.code;
       const playerId = actor.playerId;
+
+      if (actor.activeChallenge.type === 'group') {
+        const points = getChallengePoints(type, { success: true });
+        const groupActor = await appendGroupResponse(actor, {
+          playerId,
+          success: true,
+          points,
+          submittedAt: new Date()
+        });
+        if (!groupActor) {
+          return socket.emit('error', { message: 'Ya respondiste este desafío o ya finalizó' });
+        }
+
+        const participantIds = (Array.isArray(groupActor.activeChallenge.participants)
+          ? groupActor.activeChallenge.participants
+          : [])
+          .map(participant => participant.playerId?.toString())
+          .filter(Boolean);
+        const responseIds = new Set((groupActor.activeChallenge.responses || [])
+          .map(response => response.playerId?.toString()));
+        const allParticipantsCompleted = participantIds.length > 0 &&
+          participantIds.every(participantId => responseIds.has(participantId));
+
+        if (!allParticipantsCompleted) {
+          socket.emit('challenge-result', {
+            playerId,
+            challengeId,
+            result: { type, success: true, points }
+          });
+          return;
+        }
+
+        await finishChallenge(io, groupActor, {
+          result: { type, success: true, points },
+          pointsPlayerIds: groupActor.activeChallenge.responses.map(response => response.playerId)
+        });
+        logger.info(`[${roomCode}] Group challenge completed`, { playerId, challengeId, type });
+        return;
+      }
 
       const points = getChallengePoints(type, { success: true });
       const responses = Array.isArray(actor.activeChallenge.responses)

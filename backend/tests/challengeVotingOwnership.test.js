@@ -1,6 +1,10 @@
 jest.mock('../models/Room', () => ({ findOne: jest.fn() }));
 jest.mock('../models/Player', () => ({ findOne: jest.fn(), findOneAndUpdate: jest.fn() }));
-jest.mock('../models/Game', () => ({ findById: jest.fn(), findOne: jest.fn() }));
+jest.mock('../models/Game', () => ({
+  findById: jest.fn(),
+  findOne: jest.fn(),
+  findOneAndUpdate: jest.fn()
+}));
 jest.mock('../models/Vote', () => ({ findById: jest.fn() }));
 jest.mock('../services/votingService', () => ({
   hasVoted: jest.fn(),
@@ -300,6 +304,94 @@ describe('challenge and voting socket identity', () => {
     expect(game.activeChallenge.responses).toHaveLength(1);
     expect(game.save).toHaveBeenCalledTimes(1);
     expect(emit).not.toHaveBeenCalledWith('challenge-completed', expect.anything());
+  });
+
+  test('atomically records the final group response and awards each participant once', async () => {
+    const room = {
+      _id: 'room-a', code: 'ROOMA1', currentGame: 'game-a',
+      save: jest.fn().mockResolvedValue(undefined)
+    };
+    const playerB = { _id: 'player-b', room: room._id, socketId: 'socket-b', isConnected: true };
+    const updatedGame = {
+      _id: 'game-a',
+      activeChallenge: {
+        id: 'group-a', type: 'group', player: 'player-a',
+        participants: [
+          { playerId: 'player-a', playerName: 'A' },
+          { playerId: 'player-b', playerName: 'B' }
+        ],
+        responses: [
+          { playerId: 'player-a', success: true, points: 50 },
+          { playerId: 'player-b', success: true, points: 50 }
+        ]
+      },
+      save: jest.fn().mockResolvedValue(undefined)
+    };
+    Room.findOne.mockResolvedValue(room);
+    Player.findOne.mockResolvedValue(playerB);
+    Game.findById.mockResolvedValue({
+      _id: 'game-a',
+      activeChallenge: updatedGame.activeChallenge
+    });
+    Game.findOneAndUpdate.mockResolvedValue(updatedGame);
+    const socket = makeSocket({ id: 'socket-b', playerId: playerB._id });
+    const { io, emit } = makeIO();
+
+    await handleChallengeComplete(io, socket)({
+      roomCode: room.code, playerId: playerB._id, challengeId: 'group-a', type: 'group'
+    });
+
+    expect(Game.findOneAndUpdate).toHaveBeenCalledWith(
+      {
+        _id: 'game-a',
+        'activeChallenge.id': 'group-a',
+        'activeChallenge.type': 'group',
+        'activeChallenge.responses.playerId': { $ne: 'player-b' }
+      },
+      { $push: { 'activeChallenge.responses': expect.objectContaining({ playerId: 'player-b', points: 50 }) } },
+      { new: true }
+    );
+    expect(Player.findOneAndUpdate).toHaveBeenCalledTimes(2);
+    expect(Player.findOneAndUpdate).toHaveBeenCalledWith(
+      { _id: 'player-a', room: room._id },
+      { $inc: { 'stats.points': 50, 'stats.challengesCompleted': 1 } }
+    );
+    expect(Player.findOneAndUpdate).toHaveBeenCalledWith(
+      { _id: 'player-b', room: room._id },
+      { $inc: { 'stats.points': 50, 'stats.challengesCompleted': 1 } }
+    );
+    expect(updatedGame.activeChallenge).toBeNull();
+    expect(updatedGame.save).toHaveBeenCalledTimes(1);
+    expect(emit).toHaveBeenCalledWith('challenge-completed', expect.objectContaining({
+      success: true,
+      result: { type: 'group', success: true, points: 50 }
+    }));
+  });
+
+  test('rejects a duplicate group response after the atomic guard loses the race', async () => {
+    const room = { _id: 'room-a', code: 'ROOMA1', currentGame: 'game-a' };
+    const playerB = { _id: 'player-b', room: room._id, socketId: 'socket-b', isConnected: true };
+    Room.findOne.mockResolvedValue(room);
+    Player.findOne.mockResolvedValue(playerB);
+    Game.findById.mockResolvedValue({
+      _id: 'game-a',
+      activeChallenge: {
+        id: 'group-a', type: 'group', player: 'player-a',
+        participants: [{ playerId: 'player-a' }, { playerId: 'player-b' }],
+        responses: [{ playerId: 'player-a' }]
+      }
+    });
+    Game.findOneAndUpdate.mockResolvedValue(null);
+    const socket = makeSocket({ id: 'socket-b', playerId: playerB._id });
+    const { io } = makeIO();
+
+    await handleChallengeComplete(io, socket)({
+      roomCode: room.code, playerId: playerB._id, challengeId: 'group-a', type: 'group'
+    });
+
+    expect(socket.emit).toHaveBeenCalledWith('error', {
+      message: 'Ya respondiste este desafío o ya finalizó'
+    });
   });
 
   test('rejects a host ending a voting record belonging to a different room', async () => {

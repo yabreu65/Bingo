@@ -525,7 +525,7 @@ const PlayerCardView = ({ roomData }) => {
             }
 
             // No cerrar inmediatamente para trivias, esperar el evento del servidor
-            if (activeChallenge?.type !== 'trivia' && activeChallenge?.type !== 'riddle') {
+            if (!['trivia', 'riddle', 'group'].includes(activeChallenge?.type)) {
               setActiveChallenge(null);
             }
           }}

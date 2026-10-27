@@ -524,18 +524,78 @@ async function main() {
     await launchChallengeAndComplete('sing', async (page) => {
       await page.locator('.challenge-modal .btn-close-challenge').click();
     });
+
+    const groupBeforeStats = new Map();
+    for (const session of [playerASession, playerBSession]) {
+      const player = await Player.findById(session.playerId);
+      groupBeforeStats.set(session.playerId.toString(), {
+        points: player.stats.points,
+        challengesCompleted: player.stats.challengesCompleted
+      });
+    }
+
+    await launchChallenge('group');
+    await Promise.all(challengePages.map(([, page]) =>
+      page.locator('.challenge-type-group').waitFor({ state: 'visible', timeout: 10000 })
+    ));
+    const interactiveGroup = await gameForRoom();
+    const interactiveGroupId = interactiveGroup?.activeChallenge?.id;
+    const groupParticipantIds = (interactiveGroup?.activeChallenge?.participants || [])
+      .map((participant) => participant.playerId.toString());
+    assert.ok(interactiveGroupId, 'Interactive group challenge was not persisted');
+    assert.deepEqual(
+      new Set(groupParticipantIds),
+      new Set([playerASession.playerId.toString(), playerBSession.playerId.toString()]),
+      'Interactive group challenge did not select both connected players'
+    );
+
+    const interactiveGroupStartedAt = Date.now();
+    await Promise.all(challengePages.map(([, page]) =>
+      page.locator('.challenge-modal .btn-close-challenge').click()
+    ));
+    const completedGroup = await waitForMongoDocument(
+      gameForRoom,
+      (game) => game?.gameEvents?.some((event) =>
+        event.type === 'challenge_completed' && event.data?.challengeId === interactiveGroupId
+      ),
+      'interactive group response persistence',
+      10000
+    );
+    const groupEvent = completedGroup.gameEvents.find((event) =>
+      event.type === 'challenge_completed' && event.data?.challengeId === interactiveGroupId
+    );
+    assert.equal(groupEvent.data.responses.length, groupParticipantIds.length);
+    assert.deepEqual(
+      new Set(groupEvent.data.responses.map((response) => response.playerId.toString())),
+      new Set(groupParticipantIds),
+      'Interactive group completion did not persist every participant response'
+    );
+    assert.ok(Date.now() - interactiveGroupStartedAt < 30000, 'Group completion used the timeout path');
+    for (const session of [playerASession, playerBSession]) {
+      const player = await Player.findById(session.playerId);
+      const before = groupBeforeStats.get(session.playerId.toString());
+      assert.equal(player.stats.points, before.points + 50, 'Group points were not awarded exactly once');
+      assert.equal(
+        player.stats.challengesCompleted,
+        before.challengesCompleted + 1,
+        'Group completion was counted more than once or not at all'
+      );
+    }
+    const completedRoom = await Room.findOne({ code: roomCode });
+    assert.equal(completedRoom.gameState, 'playing', 'Bingo did not resume after interactive group completion');
+
     await launchChallenge('group');
     await waitForChallengePage(challengePages, 'group');
-    for (const [, page] of challengePages) {
-      await page.locator('.challenge-modal .btn-close-challenge').click();
-      await new Promise((resolvePromise) => setTimeout(resolvePromise, 300));
-    }
-    await waitForMongoDocument(gameForRoom, (game) => !game?.activeChallenge, 'group completion or timeout', 40000);
+    const timeoutGroup = await gameForRoom();
+    assert.ok(timeoutGroup?.activeChallenge?.id, 'Timeout group challenge was not persisted');
+    await waitForMongoDocument(gameForRoom, (game) => !game?.activeChallenge, 'group timeout recovery', 40000);
+    const timeoutRoom = await Room.findOne({ code: roomCode });
+    assert.equal(timeoutRoom.gameState, 'playing', 'Bingo did not resume after group timeout');
     await launchChallenge('karaoke');
     await waitForChallengePage([['player-a', playerAPage], ['player-b', playerBPage], ['tv', tvPage]], 'karaoke');
     tvControlSocket.emit('karaoke-video-end', { roomCode });
     await waitForMongoDocument(gameForRoom, (game) => !game?.activeChallenge, 'karaoke completion');
-    console.log('  all Phase 2 challenge types exercised through real browser clients and timeout recovery');
+    console.log('  group responses completed interactively in both browsers, points persisted once, and timeout recovery also passed');
 
     console.log('  disconnecting and reconnecting player A after visual marks');
     const savedPlayerASession = await playerAPage.evaluate((key) => JSON.parse(localStorage.getItem(key)), storageKey);

@@ -16,7 +16,9 @@
   completados.
   Las actualizaciones de jugadores usan incrementos atómicos.
 - Los retos grupales esperan una respuesta válida de cada participante antes de
-  finalizar; si el tiempo vence, el temporizador del servidor reanuda la sala.
+  finalizar; las respuestas se registran con una actualización atómica y el
+  historial del juego conserva el resultado. Si el tiempo vence, el
+  temporizador del servidor reanuda la sala.
 - El organizador puede lanzar explícitamente cada tipo de reto. La TV recibe
   los retos privados necesarios, controla el fin de karaoke y muestra el estado
   de votación.
@@ -39,17 +41,16 @@
 
 ## Pruebas ejecutadas
 
-- Backend Jest completo: 16 suites, 182 tests aprobados.
+- Backend Jest completo: 16 suites, 184 tests aprobados.
 - Frontend Vitest completo: 9 archivos, 20 tests aprobados.
 - ESLint y build Vite aprobados.
 - Playwright E2E existente: paridad de 200 cartones, flujo organizador/
   jugadores/TV, trivia, bingo, reconexión, seguridad REST, desempate y
   votación.
 - El flujo E2E extendido valida la presentación de riddle, dance, sing, group
-  y karaoke con MongoDB efímero. La finalización de grupo tiene además prueba
-  de handler que exige a todos los participantes; el escenario de navegador
-  conserva la ruta de expiración del temporizador como fallback para no
-  depender de medios privados.
+  y karaoke con MongoDB efímero. El escenario de navegador completa el reto
+  grupal desde ambos navegadores, verifica respuestas, puntos y reanudación,
+  y conserva además una ejecución separada de expiración del temporizador.
 
 ## Datos y seguridad
 
