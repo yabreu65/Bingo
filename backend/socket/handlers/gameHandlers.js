@@ -44,6 +44,72 @@ function clearChallengeTimer(roomCode) {
   challengeTimers.delete(roomCode);
 }
 
+function scheduleChallengeCompletion(io, roomCode, challenge) {
+  const challengeId = challenge.id;
+  const startedAt = challenge.startTime?.getTime?.() || Date.now();
+  const durationSeconds = Number.isFinite(challenge.duration)
+    ? challenge.duration
+    : GAME_CONSTANTS.CHALLENGE_DURATION;
+  const timeLeft = Math.max(0, durationSeconds - Math.floor((Date.now() - startedAt) / 1000));
+  let countdownInterval;
+  if (timeLeft > 0) {
+    let remaining = timeLeft;
+    countdownInterval = setInterval(() => {
+      remaining--;
+      if (remaining >= 0) io.to(roomCode).emit('challenge-countdown', { timeLeft: remaining });
+      if (remaining <= 0) clearInterval(countdownInterval);
+    }, 1000);
+  }
+
+  const timeout = setTimeout(async () => {
+    try {
+      if (countdownInterval) clearInterval(countdownInterval);
+      const updatedRoom = await Room.findOne({ code: roomCode });
+      if (!updatedRoom) return;
+      const updatedGame = await Game.findById(updatedRoom.currentGame);
+      if (!updatedGame || updatedGame.activeChallenge?.id !== challengeId) return;
+      updatedGame.activeChallenge.status = 'expired';
+      updatedGame.activeChallenge.completedAt = new Date();
+      updatedGame.activeChallenge.result = { expired: true, points: 0 };
+      updatedGame.activeChallenge = null;
+      await updatedGame.save();
+      updatedRoom.gameState = 'playing';
+      await updatedRoom.save();
+      io.to(roomCode).emit('challenge-complete', { success: true, result: { expired: true, points: 0 } });
+      io.to(roomCode).emit('challenge-completed', { success: true, result: { expired: true, points: 0 } });
+      io.to(roomCode).emit('game-state-changed', { state: 'playing' });
+      await immediateNextNumber(io, roomCode);
+      await scheduleRoomInterval(io, roomCode);
+      ensureWatchdog(roomCode, (rc) => scheduleRoomInterval(io, rc), updatedRoom.config);
+    } catch (error) {
+      logger.error(`[${roomCode}] Error completing challenge asynchronously:`, error);
+    } finally {
+      const timer = challengeTimers.get(roomCode);
+      if (timer?.challengeId === challengeId) clearChallengeTimer(roomCode);
+    }
+  }, timeLeft * 1000);
+  challengeTimers.set(roomCode, { timeout, countdownInterval, challengeId });
+}
+
+async function recoverPersistedRooms(io) {
+  try {
+    const rooms = await Room.find({ isActive: true, currentGame: { $ne: null } });
+    for (const room of rooms) {
+      const game = await Game.findById(room.currentGame);
+      if (!game || game.status === 'finished') continue;
+      if (game.activeChallenge) {
+        scheduleChallengeCompletion(io, room.code, game.activeChallenge);
+      } else if (room.gameState === 'playing') {
+        await scheduleRoomInterval(io, room.code);
+        ensureWatchdog(room.code, (rc) => scheduleRoomInterval(io, rc), room.config);
+      }
+    }
+    logger.info(`Recovered persisted timers for ${rooms.length} active rooms`);
+  } catch (error) {
+    logger.error('Error recovering persisted room timers:', error);
+  }
+}
+
 /**
  * Llama el siguiente número inmediatamente sin esperar el intervalo
  */
@@ -315,53 +381,7 @@ async function triggerChallenge(io, roomCode, options = {}) {
     text: challenge.text
   });
 
-  // Countdown timer
-  let timeLeft = game.activeChallenge.duration || GAME_CONSTANTS.CHALLENGE_DURATION;
-  const countdownInterval = setInterval(() => {
-    timeLeft--;
-    if (timeLeft >= 0) {
-      io.to(roomCode).emit('challenge-countdown', { timeLeft });
-    }
-    if (timeLeft <= 0) {
-      clearInterval(countdownInterval);
-    }
-  }, 1000);
-
-  // Después de la duración del reto, completar el reto
-  const timeout = setTimeout(async () => {
-    try {
-      clearInterval(countdownInterval);
-
-      const updatedRoom = await Room.findOne({ code: roomCode });
-      if (!updatedRoom) return;
-
-      const updatedGame = await Game.findById(updatedRoom.currentGame);
-      if (!updatedGame) return;
-      if (updatedGame.activeChallenge?.id !== challengeId) return;
-
-      updatedGame.activeChallenge = null;
-      await updatedGame.save();
-
-      updatedRoom.gameState = 'playing';
-      await updatedRoom.save();
-
-    // IMPORTANTE: Emitir challenge-complete PRIMERO para que el frontend
-    // actualice el flag antes de recibir game-state-changed
-      io.to(roomCode).emit('challenge-complete', { success: true });
-      io.to(roomCode).emit('challenge-completed', { success: true });
-      io.to(roomCode).emit('game-state-changed', { state: 'playing' });
-
-      await immediateNextNumber(io, roomCode);
-      await scheduleRoomInterval(io, roomCode);
-      ensureWatchdog(roomCode, (rc) => scheduleRoomInterval(io, rc), updatedRoom.config);
-    } catch (error) {
-      logger.error(`[${roomCode}] Error completing challenge asynchronously:`, error);
-    } finally {
-      const timer = challengeTimers.get(roomCode);
-      if (timer?.challengeId === challengeId) clearChallengeTimer(roomCode);
-    }
-  }, timeLeft * 1000);
-  challengeTimers.set(roomCode, { timeout, countdownInterval, challengeId });
+  scheduleChallengeCompletion(io, roomCode, game.activeChallenge);
   } catch (error) {
     logger.error(`[${roomCode}] ❌ CRITICAL ERROR in triggerChallenge:`, error);
     logger.error(`[${roomCode}] Error stack:`, error.stack);
@@ -908,6 +928,7 @@ module.exports = {
   // Exports para otros módulos y testing
   immediateNextNumber,
   scheduleRoomInterval,
+  recoverPersistedRooms,
   triggerChallenge,
   handleStartGame,
   handleGameStateChange,

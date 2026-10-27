@@ -25,6 +25,7 @@ const logger = require('./config/logger');
 const requestLogger = require('./middleware/requestLogger');
 const { errorHandler, notFoundHandler } = require('./middleware/errorHandler');
 const roomCleanupService = require('./services/roomCleanup');
+const { recoverPersistedRooms } = require('./socket/handlers/gameHandlers');
 
 const app = express();
 const server = http.createServer(app);
@@ -76,7 +77,7 @@ const io = socketIo(server, {
 // Socket.io authentication middleware
 io.use(socketAuthMiddleware);
 
-connectDB();
+connectDB().then(() => recoverPersistedRooms(io));
 
 // Iniciar servicio de limpieza de salas inactivas
 roomCleanupService.start();
