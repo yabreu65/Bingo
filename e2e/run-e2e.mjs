@@ -31,6 +31,7 @@ const Player = requireFromBackend(join(backendDir, 'models/Player.js'));
 const AdminContent = requireFromBackend(join(backendDir, 'models/AdminContent.js'));
 const Playlist = requireFromBackend(join(backendDir, 'models/Playlist.js'));
 const Prize = requireFromBackend(join(backendDir, 'models/Prize.js'));
+const { getChallengePoints } = requireFromBackend(join(backendDir, 'utils/challengeRules.js'));
 
 const processes = [];
 const logs = new Map();
@@ -659,12 +660,14 @@ async function main() {
       await launchChallenge(type);
       const challenge = await waitForChallengePage(challengePages, type);
       const activeChallenge = await gameForRoom();
+      const challengeId = activeChallenge?.activeChallenge?.id;
       const performerId = activeChallenge?.activeChallenge?.player?.toString();
       const performerPage = performerId === playerASession.playerId.toString()
         ? playerAPage
         : performerId === playerBSession.playerId.toString() ? playerBPage : challenge.page;
       await complete(performerPage, performerId || challenge.name);
       await waitForMongoDocument(gameForRoom, (game) => !game?.activeChallenge, `${type} completion`);
+      return { challengeId, performerId };
     };
 
     console.log('E2E 4b/10: riddle, dance, sing, group and karaoke challenge contracts');
@@ -690,9 +693,24 @@ async function main() {
       await page.locator('.challenge-modal .btn-close-challenge').click();
     });
     await Promise.all(challengePages.map(([, page]) => page.unroute('**/api/deezer/track/**', musicFailureRoute)));
-    await launchChallengeAndComplete('sing', async (page) => {
+    const singBeforeStats = new Map();
+    for (const session of [playerASession, playerBSession]) {
+      const player = await Player.findById(session.playerId);
+      singBeforeStats.set(session.playerId.toString(), {
+        points: player.stats.points,
+        challengesCompleted: player.stats.challengesCompleted
+      });
+    }
+    const singRun = await launchChallengeAndComplete('sing', async (page) => {
       await page.locator('.challenge-modal .btn-close-challenge').click();
     });
+    const singBefore = singBeforeStats.get(singRun.performerId);
+    await waitForMongoDocument(
+      () => Player.findById(singRun.performerId),
+      (player) => player.stats.challengesCompleted === singBefore.challengesCompleted + 1 &&
+        player.stats.points === singBefore.points + getChallengePoints('sing', { success: true }),
+      'sing points persistence before group baseline'
+    );
 
     const groupBeforeStats = new Map();
     for (const session of [playerASession, playerBSession]) {
@@ -709,6 +727,11 @@ async function main() {
     ));
     const interactiveGroup = await gameForRoom();
     const interactiveGroupId = interactiveGroup?.activeChallenge?.id;
+    const configuredGroupPoints = interactiveGroup?.activeChallenge?.points;
+    const calculatedGroupPoints = getChallengePoints('group', {
+      success: true,
+      configuredPoints: configuredGroupPoints
+    });
     const groupParticipantIds = (interactiveGroup?.activeChallenge?.participants || [])
       .map((participant) => participant.playerId.toString());
     assert.ok(interactiveGroupId, 'Interactive group challenge was not persisted');
@@ -733,6 +756,9 @@ async function main() {
     const groupEvent = completedGroup.gameEvents.find((event) =>
       event.type === 'challenge_completed' && event.data?.challengeId === interactiveGroupId
     );
+    const groupCompletionEvents = completedGroup.gameEvents.filter((event) =>
+      event.type === 'challenge_completed' && event.data?.challengeId === interactiveGroupId
+    );
     assert.equal(groupEvent.data.responses.length, groupParticipantIds.length);
     assert.deepEqual(
       new Set(groupEvent.data.responses.map((response) => response.playerId.toString())),
@@ -743,13 +769,16 @@ async function main() {
     for (const session of [playerASession, playerBSession]) {
       const player = await Player.findById(session.playerId);
       const before = groupBeforeStats.get(session.playerId.toString());
-      assert.equal(player.stats.points, before.points + 50, 'Group points were not awarded exactly once');
+      const persistedAccreditations = (player.stats.points - before.points) / calculatedGroupPoints;
+      console.log(`  group participant ${session.playerId}: before=${before.points}, challengeId=${interactiveGroupId}, configured=${configuredGroupPoints}, calculated=${calculatedGroupPoints}, responses=${groupEvent.data.responses.length}, persistedAccreditations=${persistedAccreditations}, after=${player.stats.points}, completionEvents=${groupCompletionEvents.length}`);
+      assert.equal(player.stats.points, before.points + calculatedGroupPoints, 'Group points were not awarded exactly once');
       assert.equal(
         player.stats.challengesCompleted,
         before.challengesCompleted + 1,
         'Group completion was counted more than once or not at all'
       );
     }
+    assert.equal(groupCompletionEvents.length, 1, 'Group challenge completed more than once');
     const completedRoom = await Room.findOne({ code: roomCode });
     assert.equal(completedRoom.gameState, 'playing', 'Bingo did not resume after interactive group completion');
 

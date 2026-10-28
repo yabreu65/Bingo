@@ -368,6 +368,46 @@ describe('challenge and voting socket identity', () => {
     }));
   });
 
+  test('awards a configured group score once per participant', async () => {
+    const room = {
+      _id: 'room-a', code: 'ROOMA1', currentGame: 'game-a',
+      save: jest.fn().mockResolvedValue(undefined)
+    };
+    const playerB = { _id: 'player-b', room: room._id, socketId: 'socket-b', isConnected: true };
+    const activeChallenge = {
+      id: 'group-configured', type: 'group', player: 'player-a', points: 100,
+      participants: [
+        { playerId: 'player-a', playerName: 'A' },
+        { playerId: 'player-b', playerName: 'B' }
+      ],
+      responses: [
+        { playerId: 'player-a', success: true, points: 100 },
+        { playerId: 'player-b', success: true, points: 100 }
+      ]
+    };
+    const updatedGame = { _id: 'game-a', activeChallenge, save: jest.fn().mockResolvedValue(undefined) };
+    Room.findOne.mockResolvedValue(room);
+    Player.findOne.mockResolvedValue(playerB);
+    Game.findById.mockResolvedValue({ _id: 'game-a', activeChallenge });
+    Game.findOneAndUpdate.mockResolvedValue(updatedGame);
+    const socket = makeSocket({ id: 'socket-b', playerId: playerB._id });
+    const { io } = makeIO();
+
+    await handleChallengeComplete(io, socket)({
+      roomCode: room.code, playerId: playerB._id, challengeId: activeChallenge.id, type: 'group'
+    });
+
+    expect(Player.findOneAndUpdate).toHaveBeenCalledTimes(2);
+    expect(Player.findOneAndUpdate).toHaveBeenCalledWith(
+      { _id: 'player-a', room: room._id },
+      { $inc: { 'stats.points': 100, 'stats.challengesCompleted': 1 } }
+    );
+    expect(Player.findOneAndUpdate).toHaveBeenCalledWith(
+      { _id: 'player-b', room: room._id },
+      { $inc: { 'stats.points': 100, 'stats.challengesCompleted': 1 } }
+    );
+  });
+
   test('rejects a duplicate group response after the atomic guard loses the race', async () => {
     const room = { _id: 'room-a', code: 'ROOMA1', currentGame: 'game-a' };
     const playerB = { _id: 'player-b', room: room._id, socketId: 'socket-b', isConnected: true };
