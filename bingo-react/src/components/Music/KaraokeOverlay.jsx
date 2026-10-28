@@ -22,7 +22,7 @@ export default function KaraokeOverlay({ localFile, maxDuration = 60, onVideoEnd
   if (!localFile) return null;
 
   return (
-    <div style={{ marginTop: '20px', maxWidth: '800px', margin: '20px auto' }}>
+    <div className="pf-karaoke-overlay" style={{ marginTop: '20px', maxWidth: '800px', margin: '20px auto' }}>
       <video
         ref={videoRef}
         src={videoPath}

@@ -408,3 +408,45 @@
     font-size: 1.2em;
   }
 }
+
+
+/* U5 — Premium Festivo winner and prize celebration. */
+.special-rankings-overlay {
+  box-sizing: border-box;
+  padding: var(--pf-space-4);
+  background: rgba(9,9,13,.92);
+  backdrop-filter: blur(12px);
+}
+.special-rankings-content {
+  box-sizing: border-box;
+  max-height: min(94dvh, 1000px);
+  border: 1px solid var(--pf-border);
+  border-radius: var(--pf-radius-lg);
+  background: linear-gradient(145deg, var(--pf-surface-raised), var(--pf-surface));
+  color: var(--pf-text);
+  box-shadow: var(--pf-shadow-panel);
+}
+.rankings-header h1,
+.special-awards h2,
+.top-performances h2 { color: var(--pf-accent-strong); text-shadow: none; font-size: clamp(1.5rem, 4vw, 3.5rem); }
+.main-winner {
+  border: 1px solid var(--pf-accent-strong);
+  background: radial-gradient(circle at 50% 25%, rgba(240,200,121,.36), rgba(44,32,20,.96) 72%);
+  color: var(--pf-text);
+  box-shadow: 0 18px 50px rgba(214,168,92,.2);
+}
+.main-winner h2, .winner-name { color: var(--pf-accent-strong); text-shadow: none; }
+.winner-score { color: var(--pf-text); }
+.award-card { border: 1px solid var(--pf-border); box-shadow: none; }
+.award-karaoke, .award-dance, .award-sing, .award-funny, .award-group { background: rgba(214,168,92,.1); color: var(--pf-text); }
+.award-title, .award-winner { color: var(--pf-text); }
+.top3-item { border-color: var(--pf-border); background: rgba(214,168,92,.08); }
+.rank-badge { background: var(--pf-accent); color: #17100a; box-shadow: none; }
+@media (max-width: 600px) {
+  .special-rankings-overlay { padding: var(--pf-space-2); }
+  .special-rankings-content { padding: var(--pf-space-4); }
+  .awards-grid { grid-template-columns: 1fr; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .special-rankings-overlay *, .special-rankings-overlay *::before, .special-rankings-overlay *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
+}

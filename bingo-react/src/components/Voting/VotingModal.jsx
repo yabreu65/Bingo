@@ -85,7 +85,7 @@ const VotingModal = ({
   };
 
   return (
-    <div className="voting-modal-overlay">
+    <div className="voting-modal-overlay pf-voting-modal-overlay" role="dialog" aria-modal="true" aria-label="Votación">
       <div className="voting-modal-content">
         {/* Header */}
         <div className="voting-header">

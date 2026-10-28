@@ -41,7 +41,7 @@ const VotingResults = ({
   };
 
   return (
-    <div className="voting-results-overlay">
+    <div className="voting-results-overlay pf-voting-results-overlay" role="dialog" aria-modal="true" aria-label="Resultados de votación">
       <div className="voting-results-content">
         {/* Header con confeti */}
         <div className="results-header">

@@ -237,7 +237,7 @@ const ChallengeModal = ({
   const { type, player, data } = activeChallenge;
 
   return (
-    <div className="challenge-modal">
+    <div className="challenge-modal pf-challenge-modal" role="dialog" aria-modal="true" aria-label="Reto activo">
       {/* Elementos de audio ocultos para sonidos de trivia */}
       <audio ref={applauseAudioRef} src="/sounds/aplauso.mp3" preload="auto" />
       <audio ref={donkeyAudioRef} src="/sounds/burro.mp3" preload="auto" />

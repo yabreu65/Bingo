@@ -68,7 +68,7 @@ const TiebreakVotingModal = ({
     candidates.every(c => votes[c.performerId] !== undefined);
 
   return (
-    <div className="voting-modal-overlay">
+    <div className="voting-modal-overlay pf-voting-modal-overlay" role="dialog" aria-modal="true" aria-label="Votación de desempate">
       <div className="voting-modal-content" style={{ maxWidth: '700px' }}>
         {/* Header */}
         <div className="voting-header">

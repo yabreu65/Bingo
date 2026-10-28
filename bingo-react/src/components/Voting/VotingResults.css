@@ -250,3 +250,53 @@
     font-size: 1.2em;
   }
 }
+
+
+/* U5 — Premium Festivo voting result and celebration. */
+.pf-voting-results-overlay {
+  box-sizing: border-box;
+  padding: var(--pf-space-3);
+  background: rgba(9,9,13,.92);
+  backdrop-filter: blur(12px);
+  overflow-y: auto;
+}
+.pf-voting-results-overlay .voting-results-content {
+  box-sizing: border-box;
+  width: min(100%, 760px);
+  max-height: min(92dvh, 900px);
+  padding: clamp(var(--pf-space-4), 5vw, var(--pf-space-7));
+  border: 1px solid var(--pf-border);
+  border-radius: var(--pf-radius-lg);
+  background: linear-gradient(145deg, var(--pf-surface-raised), var(--pf-surface));
+  color: var(--pf-text);
+  box-shadow: var(--pf-shadow-panel);
+}
+.pf-voting-results-overlay .results-header h2 { color: var(--pf-accent-strong); font-size: clamp(1.25rem, 4vw, 2.4rem); text-shadow: none; }
+.pf-voting-results-overlay .results-performer .performer-name,
+.pf-voting-results-overlay .results-score { border: 1px solid var(--pf-border); background: rgba(214,168,92,.08); }
+.pf-voting-results-overlay .score-average,
+.pf-voting-results-overlay .dist-label,
+.pf-voting-results-overlay .bonus-points { color: var(--pf-accent-strong); text-shadow: none; }
+.pf-voting-results-overlay .results-distribution { color: var(--pf-text); }
+.pf-voting-results-overlay .distribution-bars { background: rgba(9,9,13,.45); border: 1px solid var(--pf-border); }
+.pf-voting-results-overlay .dist-bar-container { background: #322b30; }
+.pf-voting-results-overlay .dist-bar { background: var(--pf-accent); box-shadow: none; }
+.pf-voting-results-overlay .results-bonus { border: 1px solid var(--pf-success); background: rgba(139,207,155,.14); box-shadow: none; color: var(--pf-success); }
+.pf-voting-results-overlay .btn-continue {
+  min-height: 48px;
+  padding: var(--pf-space-3) var(--pf-space-5);
+  border: 1px solid var(--pf-accent-strong);
+  border-radius: var(--pf-radius-sm);
+  background: var(--pf-accent);
+  color: #17100a;
+  box-shadow: none;
+}
+.pf-voting-results-overlay .btn-continue:focus-visible { outline: 3px solid var(--pf-focus); outline-offset: 3px; }
+@media (max-width: 600px) {
+  .pf-voting-results-overlay .voting-results-content { border-radius: var(--pf-radius-md); padding: var(--pf-space-4); }
+  .pf-voting-results-overlay .distribution-row { gap: 6px; }
+  .pf-voting-results-overlay .dist-label { min-width: 92px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .pf-voting-results-overlay *, .pf-voting-results-overlay *::before, .pf-voting-results-overlay *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
+}
