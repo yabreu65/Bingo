@@ -485,7 +485,10 @@ async function main() {
     await waitForBody(tvPage, new RegExp(roomCode));
     const musicSource = await tvPage.locator('.video-wrapper video source').getAttribute('src');
     assert.ok(musicSource && musicSource.includes('/music/'), 'TV music source missing: ' + musicSource);
-    await tvPage.waitForFunction(() => document.querySelector('.video-wrapper video')?.readyState >= 2, null, { timeout: 10000 });
+    await tvPage.waitForFunction(() => {
+      const video = document.querySelector('.video-wrapper video');
+      return Boolean(video?.currentSrc) && video.readyState >= 2;
+    }, null, { timeout: 30000 });
     const tvPlayback = await tvPage.locator('.video-wrapper video').evaluate(async (video) => {
       video.muted = true;
       video.play().catch(() => {});

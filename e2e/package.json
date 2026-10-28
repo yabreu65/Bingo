@@ -3,7 +3,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node run-phase1-parity.mjs && node run-e2e.mjs && node run-phase1-engine.mjs",
+    "test": "node media-audit.mjs && node run-phase1-parity.mjs && node run-e2e.mjs && node run-phase1-engine.mjs",
+    "test:media": "node media-audit.mjs",
     "test:phase4": "node phase4-load.mjs"
   },
   "dependencies": {

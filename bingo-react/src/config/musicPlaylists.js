@@ -1,4 +1,4 @@
-import { LOCAL_MEDIA_FILES } from './localMediaFiles';
+import { LOCAL_MEDIA_FILES } from './localMediaFiles.js';
 
 /**
  * Playlist General de Música para Bingo Bailable
@@ -106,7 +106,7 @@ export const MUSIC_PLAYLISTS = [
   {
     "title": "Meneaito",
     "artist": "Gaby",
-    "localFile": "Gaby - Meneaito.mp4"
+    "localFile": "karaoke/el-meneaito.mp4"
   },
   {
     "title": "La Gozadera",
