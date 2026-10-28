@@ -40,6 +40,7 @@ const TVDisplay = ({ roomCode, tvCapability }) => {
   const [manualPlayerResults, setManualPlayerResults] = useState({});
   const [riddleResult, setRiddleResult] = useState(null);
   const [effectsMuted, setEffectsMuted] = useState(() => localStorage.getItem('bingo-tv-effects-muted') === 'true');
+  const [musicStatus, setMusicStatus] = useState('loading');
   const [activeVoting, setActiveVoting] = useState(null);
 
   // Estados para tie-break
@@ -1033,12 +1034,24 @@ const TVDisplay = ({ roomCode, tvCapability }) => {
             controls
             autoPlay
             playsInline
+            onLoadStart={() => setMusicStatus(currentSong?.localFile ? 'loading' : 'unavailable')}
+            onCanPlay={() => setMusicStatus('ready')}
+            onPlaying={() => setMusicStatus('playing')}
+            onError={() => setMusicStatus('unavailable')}
           >
             {currentSong?.localFile && (
               <source src={`/music/${encodeURIComponent(currentSong.localFile)}`} type="video/mp4" />
             )}
             Tu navegador no soporta el elemento de video.
           </video>
+          {musicStatus === 'unavailable' && (
+            <p role="alert">La pista local no está disponible. El bingo puede continuar sin música.</p>
+          )}
+          {musicStatus === 'ready' && (
+            <button type="button" onClick={() => videoPlayerRef.current?.play().then(() => setMusicStatus('playing')).catch(() => setMusicStatus('unavailable'))}>
+              Reproducir música
+            </button>
+          )}
         </div>
         <div className="now-playing-bar">
           <span>🎵</span>

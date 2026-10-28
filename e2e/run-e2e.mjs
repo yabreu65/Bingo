@@ -363,8 +363,8 @@ async function main() {
       await hostPage.getByRole('button', { name: /Guardar/ }).click();
       await waitForBody(hostPage, /Contenido guardado/);
     };
-    await createTrack('Pista visual uno', 'e2e-one.mp4');
-    await createTrack('Pista visual dos', 'e2e-two.mp4');
+    await createTrack('Pista visual uno', 'Michael Jackson - Thriller.mp4');
+    await createTrack('Pista visual dos', 'Daddy Yankee - Gasolina.mp4');
     await hostPage.getByRole('button', { name: 'Música' }).click();
     await hostPage.getByText('Pista visual uno').locator('..').locator('input[type="checkbox"]').check();
     await hostPage.getByText('Pista visual dos').locator('..').locator('input[type="checkbox"]').check();
@@ -393,7 +393,8 @@ async function main() {
     assert.equal(configuredRoom.config.tieBreakEnabled, true);
     assert.equal(configuredRoom.config.activePlaylist.name, 'Playlist E2E local');
     assert.equal(configuredRoom.config.activePlaylist.tracks.length, 2);
-    await hostPage.getByLabel('Frecuencia de retos').fill('1');
+    await hostPage.getByLabel('Frecuencia de retos').fill('10');
+    await hostPage.getByLabel('Intervalo (s)').fill('7');
     await hostPage.getByLabel('Modalidad').selectOption('full');
     await hostPage.getByLabel('Máximo de jugadores').fill('50');
     await hostPage.getByRole('button', { name: /Guardar/ }).click();
@@ -482,8 +483,17 @@ async function main() {
     await tvPage.waitForLoadState('domcontentloaded');
     await waitForBody(tvPage, /Bingo Bailable|Bingo Navideño/);
     await waitForBody(tvPage, new RegExp(roomCode));
-    const musicSource = await tvPage.locator('video source').getAttribute('src');
+    const musicSource = await tvPage.locator('.video-wrapper video source').getAttribute('src');
     assert.ok(musicSource && musicSource.includes('/music/'), 'TV music source missing: ' + musicSource);
+    await tvPage.waitForFunction(() => document.querySelector('.video-wrapper video')?.readyState >= 2, null, { timeout: 10000 });
+    const tvPlayback = await tvPage.locator('.video-wrapper video').evaluate(async (video) => {
+      video.muted = true;
+      video.play().catch(() => {});
+      await new Promise(resolve => setTimeout(resolve, 500));
+      return { readyState: video.readyState, paused: video.paused, duration: video.duration };
+    });
+    assert.ok(tvPlayback.readyState >= 2 && !tvPlayback.paused && tvPlayback.duration > 0,
+      `TV media did not start: ${JSON.stringify(tvPlayback)}`);
     const tvInitialText = await tvPage.locator('body').innerText();
     assert.match(tvInitialText, /Bingo Bailable/);
     await waitForBody(tvPage, /En Espera|En Juego|CANTADOS|Únete al Bingo/);
@@ -562,7 +572,7 @@ async function main() {
     const visualMarkedPlayer = await Player.findById(playerASession.playerId);
     assert.equal(visualMarkedPlayer.bingoCard.markedCells.length, 4, 'Only the free cell and three visual marks should be persisted');
     console.log('  three visual numbers from distinct rows were marked and persisted with real coordinates');
-    await configureRoom(hostPage, roomCode, hostSession.hostCapability, { challengeFrequency: 1 });
+    await configureRoom(hostPage, roomCode, hostSession.hostCapability, { challengeFrequency: 1, timeBetweenNumbers: 7 });
 
     console.log('E2E 4/10: automatic trivia challenge, answer flow and public synchronization');
     const scenarioPages = [['player-a', playerAPage], ['player-b', playerBPage], ['tv', tvPage], ['host', hostPage]];

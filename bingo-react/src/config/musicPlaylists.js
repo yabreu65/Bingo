@@ -1,3 +1,5 @@
+import { LOCAL_MEDIA_FILES } from './localMediaFiles';
+
 /**
  * Playlist General de Música para Bingo Bailable
  *
@@ -366,7 +368,7 @@ export const MUSIC_PLAYLISTS = [
     "artist": "Michael Jackson",
     "localFile": "Michael Jackson - Thriller.mp4"
   }
-]
+].filter(song => LOCAL_MEDIA_FILES.has(song.localFile));
 
 /**
  * Función para mezclar el playlist aleatoriamente

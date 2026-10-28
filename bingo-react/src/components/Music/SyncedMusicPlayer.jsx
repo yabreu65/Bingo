@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
 import toast from 'react-hot-toast';
-import ReactPlayer from 'react-player';
+import LocalMediaPlayer from './LocalMediaPlayer';
 import { useSocket } from '../../context/useSocket';
 import { MUSIC_PLAYLISTS } from '../../config/musicPlaylists';
 import './MusicPlayer.css';
@@ -280,26 +280,14 @@ const SyncedMusicPlayer = ({ roomCode, isHost, hostCapability, playlist: supplie
             </div>
           </div>
 
-          {/* Player de YouTube (oculto) */}
-          <div style={{ display: 'none' }}>
-          <ReactPlayer
+          <LocalMediaPlayer
             ref={playerRef}
-            url={currentSong.localFile ? `/music/${encodeURI(currentSong.localFile.replace(/^\/+/, ''))}` : (currentSong.videoId ? `https://www.youtube.com/watch?v=${currentSong.videoId}` : undefined)}
+            song={currentSong}
             playing={playing}
             volume={volume}
             muted={muted}
             onEnded={handleEnded}
-            config={{
-              youtube: {
-                playerVars: {
-                  autoplay: 1,
-                  controls: 0,
-                  modestbranding: 1
-                }
-              }
-            }}
           />
-          </div>
 
           {/* Controles */}
           <div className="player-controls">

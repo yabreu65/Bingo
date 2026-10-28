@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import ReactPlayer from 'react-player';
+import LocalMediaPlayer from './LocalMediaPlayer';
 import { MUSIC_PLAYLISTS, shufflePlaylist } from '../../config/musicPlaylists';
 import './MusicPlayer.css';
 
@@ -115,26 +115,14 @@ const MusicPlayer = ({ onSongChange, syncMode = false, currentSongId = null }) =
             </div>
           </div>
 
-          {/* Player de YouTube (oculto) */}
-          <div style={{ display: 'none' }}>
-            <ReactPlayer
+          <LocalMediaPlayer
               ref={playerRef}
-              url={`https://www.youtube.com/watch?v=${currentSong.videoId}`}
+              song={currentSong}
               playing={playing}
               volume={volume}
               muted={muted}
               onEnded={handleEnded}
-              config={{
-                youtube: {
-                  playerVars: {
-                    autoplay: 1,
-                    controls: 0,
-                    modestbranding: 1
-                  }
-                }
-              }}
-            />
-          </div>
+          />
 
           {/* Controles */}
           <div className="player-controls">
