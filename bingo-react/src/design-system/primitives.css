@@ -1,0 +1,31 @@
+.pf-container { width: min(100% - 2 * var(--pf-space-5), 1440px); margin-inline: auto; }
+.pf-stack { display: flex; flex-direction: column; gap: var(--pf-space-4); }
+.pf-cluster { display: flex; flex-wrap: wrap; align-items: center; gap: var(--pf-space-3); }
+.pf-panel { color: var(--pf-text); background: var(--pf-surface); border: 1px solid var(--pf-border); border-radius: var(--pf-radius-md); box-shadow: var(--pf-shadow-panel); }
+.pf-card { color: var(--pf-text); background: var(--pf-surface); border: 1px solid var(--pf-border); border-radius: var(--pf-radius-md); padding: var(--pf-space-5); }
+.pf-card--raised { background: var(--pf-surface-raised); border-radius: var(--pf-radius-lg); }
+.pf-button { min-width: var(--pf-touch-target); min-height: var(--pf-touch-target); display: inline-flex; align-items: center; justify-content: center; gap: var(--pf-space-2); padding: var(--pf-space-3) var(--pf-space-5); border: 1px solid transparent; border-radius: var(--pf-radius-sm); color: var(--pf-text); font: inherit; font-weight: 700; line-height: 1.2; cursor: pointer; transition: transform var(--pf-duration-fast) var(--pf-ease-standard), background-color var(--pf-duration-fast) var(--pf-ease-standard), border-color var(--pf-duration-fast) var(--pf-ease-standard); }
+.pf-button:hover:not(:disabled) { transform: translateY(-1px); }
+.pf-button:active:not(:disabled) { transform: translateY(0); }
+.pf-button:disabled { cursor: not-allowed; opacity: 0.55; }
+.pf-button--primary { color: #20170e; background: var(--pf-accent); }
+.pf-button--primary:hover:not(:disabled) { background: var(--pf-accent-strong); }
+.pf-button--secondary { background: rgba(214, 168, 92, 0.12); border-color: var(--pf-border); }
+.pf-button--ghost { background: transparent; border-color: transparent; }
+.pf-field { display: flex; flex-direction: column; gap: var(--pf-space-2); color: var(--pf-text); }
+.pf-field__label { font-size: var(--pf-text-sm); font-weight: 700; }
+.pf-field__control { min-height: var(--pf-touch-target); width: 100%; padding: var(--pf-space-3); color: var(--pf-text); background: var(--pf-surface); border: 1px solid var(--pf-border); border-radius: var(--pf-radius-sm); font: inherit; }
+.pf-field__hint { color: var(--pf-text-muted); font-size: var(--pf-text-sm); }
+.pf-status { min-height: var(--pf-touch-target); display: inline-flex; align-items: center; gap: var(--pf-space-2); padding: var(--pf-space-2) var(--pf-space-3); border: 1px solid var(--pf-border); border-radius: 999px; color: var(--pf-text); background: rgba(214, 168, 92, 0.12); font-size: var(--pf-text-sm); font-weight: 700; }
+.pf-status--success { color: var(--pf-success); }
+.pf-status--danger { color: var(--pf-danger); }
+.pf-modal__backdrop { position: fixed; inset: 0; z-index: 1000; display: grid; place-items: center; padding: var(--pf-space-4); background: rgba(9, 9, 13, 0.78); }
+.pf-modal { width: min(100%, 640px); max-height: min(720px, calc(100dvh - 32px)); display: flex; flex-direction: column; overflow: hidden; color: var(--pf-text); background: var(--pf-surface-raised); border: 1px solid var(--pf-border); border-radius: var(--pf-radius-lg); box-shadow: var(--pf-shadow-panel); }
+.pf-modal__header, .pf-modal__footer { flex: 0 0 auto; display: flex; align-items: center; justify-content: space-between; gap: var(--pf-space-3); padding: var(--pf-space-5); }
+.pf-modal__body { min-height: 0; overflow-y: auto; padding: 0 var(--pf-space-5) var(--pf-space-5); }
+.pf-modal__close { min-width: var(--pf-touch-target); min-height: var(--pf-touch-target); }
+.pf-focusable:focus-visible, .pf-button:focus-visible, .pf-field__control:focus-visible { outline: 3px solid var(--pf-focus); outline-offset: 2px; }
+.pf-motion-enter { animation: pf-fade-slide-in var(--pf-duration-standard) var(--pf-ease-standard) both; }
+@keyframes pf-fade-slide-in { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+@media (max-width: 767px) { .pf-container { width: min(100% - 2 * var(--pf-space-4), 100%); } .pf-card { padding: var(--pf-space-4); } .pf-modal__header, .pf-modal__footer { padding: var(--pf-space-4); } .pf-modal__body { padding: 0 var(--pf-space-4) var(--pf-space-4); } }
+@media (prefers-reduced-motion: reduce) { .pf-motion-enter, .pf-button { animation: none; transition-duration: 0.01ms; } }
