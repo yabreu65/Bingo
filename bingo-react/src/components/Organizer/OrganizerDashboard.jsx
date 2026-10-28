@@ -12,6 +12,7 @@ import RecordingChallenge from '../Recording/RecordingChallenge';
 import { getShareableUrl } from '../../utils/networkUtils';
 import { createTVDisplayURL, openTVDisplay } from '../../utils/tvAuthorization';
 import AdminCenter from './AdminCenter';
+import './OrganizerDashboard.css';
 import {
   CARD_MATRIX_VERSION,
   checkBingoWithCalledNumbers,
@@ -835,7 +836,7 @@ export default function OrganizerDashboard({ roomData }) {
   const currentStatus = gameStatusMap[gameState] || { text: 'Desconocido', color: 'bg-slate-500' };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 text-slate-200 p-4 lg:p-6 font-sans relative overflow-hidden">
+    <div className="organizer-dashboard min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 text-slate-200 p-4 lg:p-6 font-sans relative overflow-hidden">
       {/* Background decorativo */}
       <div className="absolute inset-0 opacity-20">
         <div className="absolute top-0 left-0 w-96 h-96 bg-indigo-600 rounded-full filter blur-3xl"></div>
