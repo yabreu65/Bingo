@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -11,6 +11,10 @@ const frontendDir = join(root, 'bingo-react');
 const baseURL = 'http://127.0.0.1:5174';
 const backendURL = 'http://127.0.0.1:5101';
 const storageKey = 'bingo_session';
+const ciMediaFixtureName = 'media-audit-fixtures';
+const ciMediaFixtureSource = join(root, 'e2e', 'fixtures', 'media');
+const ciMediaFixturePublicDir = join(frontendDir, 'public', 'music', ciMediaFixtureName);
+const ciMediaAliasSource = join(ciMediaFixtureSource, 'ci-video.mp4');
 
 const requireFromE2E = createRequire(import.meta.url);
 const requireFromBackend = createRequire(join(backendDir, 'server.js'));
@@ -277,6 +281,19 @@ async function main() {
   const mongo = await MongoMemoryServer.create();
   const mongoUri = mongo.getUri('bingo-e2e');
   await mongoose.connect(mongoUri);
+  const ciMediaAliases = [];
+  if (process.env.MEDIA_AUDIT_MODE === 'ci') {
+    cpSync(ciMediaFixtureSource, ciMediaFixturePublicDir, { recursive: true });
+    const playlistSource = readFileSync(join(frontendDir, 'src/config/musicPlaylists.js'), 'utf8');
+    const localFiles = [...playlistSource.matchAll(/"localFile":\s*"([^"]+)"/g)].map(match => match[1]);
+    for (const localFile of localFiles) {
+      const target = join(frontendDir, 'public', 'music', localFile);
+      if (existsSync(target)) continue;
+      mkdirSync(join(target, '..'), { recursive: true });
+      cpSync(ciMediaAliasSource, target);
+      ciMediaAliases.push(target);
+    }
+  }
 
   startProcess('backend', process.execPath, ['server.js'], backendDir, {
     NODE_ENV: 'test',
@@ -363,8 +380,14 @@ async function main() {
       await hostPage.getByRole('button', { name: /Guardar/ }).click();
       await waitForBody(hostPage, /Contenido guardado/);
     };
-    await createTrack('Pista visual uno', 'Michael Jackson - Thriller.mp4');
-    await createTrack('Pista visual dos', 'Daddy Yankee - Gasolina.mp4');
+    const trackOne = process.env.MEDIA_AUDIT_MODE === 'ci'
+      ? `${ciMediaFixtureName}/ci-video.mp4`
+      : 'Michael Jackson - Thriller.mp4';
+    const trackTwo = process.env.MEDIA_AUDIT_MODE === 'ci'
+      ? `${ciMediaFixtureName}/ci-video.mp4`
+      : 'Daddy Yankee - Gasolina.mp4';
+    await createTrack('Pista visual uno', trackOne);
+    await createTrack('Pista visual dos', trackTwo);
     await hostPage.getByRole('button', { name: 'Música' }).click();
     await hostPage.getByText('Pista visual uno').locator('..').locator('input[type="checkbox"]').check();
     await hostPage.getByText('Pista visual dos').locator('..').locator('input[type="checkbox"]').check();
@@ -1060,6 +1083,8 @@ async function main() {
     if (browser) await browser.close().catch(() => {});
     await Promise.all(processes.reverse().map(({ child }) => stopProcess(child)));
     await mongo.stop();
+    for (const target of ciMediaAliases) rmSync(target, { force: true });
+    if (process.env.MEDIA_AUDIT_MODE === 'ci') rmSync(ciMediaFixturePublicDir, { recursive: true, force: true });
   }
 }
 

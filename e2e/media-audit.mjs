@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { execFileSync, spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { join, relative, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
@@ -11,6 +11,10 @@ const frontendDir = join(root, 'bingo-react');
 const publicDir = join(frontendDir, 'public');
 const baseURL = 'http://127.0.0.1:5185';
 const reportDir = join(root, 'e2e', 'artifacts', 'media-audit');
+const auditMode = process.env.MEDIA_AUDIT_MODE;
+const ciFixtureSource = join(root, 'e2e', 'fixtures', 'media');
+const ciFixturePublicName = 'media-audit-fixtures';
+const ciFixturePublicDir = join(publicDir, 'music', ciFixturePublicName);
 const requireFromE2E = createRequire(import.meta.url);
 const { chromium } = requireFromE2E('playwright');
 const { CHALLENGE_POOLS } = requireFromE2E(join(root, 'backend/constants/index.js'));
@@ -24,6 +28,8 @@ const mimeTypes = {
   '.ogg': 'audio/ogg',
   '.m4a': 'audio/mp4'
 };
+
+assert.ok(['local', 'ci'].includes(auditMode), 'Set MEDIA_AUDIT_MODE to "local" or "ci" explicitly');
 
 function findChromiumExecutable() {
   if (process.env.PLAYWRIGHT_CHROMIUM_PATH && existsSync(process.env.PLAYWRIGHT_CHROMIUM_PATH)) return process.env.PLAYWRIGHT_CHROMIUM_PATH;
@@ -112,6 +118,14 @@ function inspectWithFfprobe(filePath) {
   }
 }
 
+function assertFfprobeAvailable() {
+  try {
+    execFileSync('ffprobe', ['-version'], { stdio: 'ignore' });
+  } catch (error) {
+    throw new Error(`ffprobe is required for the ${auditMode} media audit: ${error.message}`);
+  }
+}
+
 function parsePlaylistReferences() {
   const source = readFileSync(join(frontendDir, 'src/config/musicPlaylists.js'), 'utf8');
   return [...source.matchAll(/\{\s*"title":\s*"([^"]*)",\s*"artist":\s*"([^"]*)",\s*"localFile":\s*"([^"]*)"\s*\}/g)].map(match => ({
@@ -145,6 +159,13 @@ function externalChallengeReferences() {
   return ['dance', 'sing', 'group'].flatMap(type => (CHALLENGE_POOLS[type] || []).map(song => ({
     catalog: `backend challenge ${type}`, title: song.text, deezerId: song.deezerId, status: 'PREVIEW DEEZER / EXTERNO'
   })));
+}
+
+function fixtureReferences() {
+  return [
+    { catalog: 'CI media fixture', title: 'CI tone', artist: 'Synthetic fixture', path: `music/${ciFixturePublicName}/ci-tone.mp3` },
+    { catalog: 'CI media fixture', title: 'CI video', artist: 'Synthetic fixture', path: `music/${ciFixturePublicName}/ci-video.mp4` }
+  ];
 }
 
 function encodeMediaPath(path) {
@@ -188,11 +209,17 @@ async function auditHttpAndPlayback(page, media) {
 function markdownReport(report) {
   const rows = report.references.map(item => [item.catalog, item.title || item.path, item.path, item.foundPath || '—', item.status].map(value => String(value).replaceAll('|', '\\|')));
   const table = ['| Catálogo | Recurso | Ruta esperada | Ruta encontrada | Estado |', '|---|---|---|---|---|', ...rows.map(row => `| ${row.join(' | ')} |`)].join('\n');
-  return `# Media audit\n\nGenerated: ${report.generatedAt}\n\n## Summary\n\n- Physical media: ${report.summary.physicalMedia}\n- Valid physical media: ${report.summary.validPhysicalMedia}\n- Reference records: ${report.summary.referenceRecords}\n- Missing references: ${report.summary.missingReferences}\n- Corrected/normalized references: ${report.summary.correctedReferences}\n- Duplicate checksums: ${report.summary.duplicateChecksums}\n- Unreferenced media: ${report.summary.unreferencedMedia}\n- Deezer preview references: ${report.summary.deezerPreviewReferences}\n\n## References\n\n${table}\n\n## Physical media\n\n${report.physicalMedia.map(item => `- ${item.path}: ${item.bytes} bytes, ${item.durationSeconds}s, ${item.mime}, ${item.playback?.status || 'not tested'}`).join('\n')}\n\n## HTTP safety\n\n- Missing media returns 404: ${report.httpSafety.missingMedia404}\n- Traversal attempt rejected: ${report.httpSafety.traversalRejected}\n`;
+  return `# Media audit\n\nGenerated: ${report.generatedAt}\n\n- Mode: ${report.mode}\n- Catalog audit: ${report.catalogAudit}\n\n## Summary\n\n- Physical media: ${report.summary.physicalMedia}\n- Valid physical media: ${report.summary.validPhysicalMedia}\n- Reference records: ${report.summary.referenceRecords}\n- Missing references: ${report.summary.missingReferences}\n- Corrected/normalized references: ${report.summary.correctedReferences}\n- Duplicate checksums: ${report.summary.duplicateChecksums}\n- Unreferenced media: ${report.summary.unreferencedMedia}\n- Deezer preview references: ${report.summary.deezerPreviewReferences}\n\n## References\n\n${table}\n\n## Physical media\n\n${report.physicalMedia.map(item => `- ${item.path}: ${item.bytes} bytes, ${item.durationSeconds}s, ${item.mime}, ${item.playback?.status || 'not tested'}`).join('\n')}\n\n## HTTP safety\n\n- Missing media returns 404: ${report.httpSafety.missingMedia404}\n- Traversal attempt rejected: ${report.httpSafety.traversalRejected}\n`;
 }
 
 async function main() {
-  const physicalFiles = walkMedia(publicDir);
+  assertFfprobeAvailable();
+  if (auditMode === 'ci') {
+    assert.ok(existsSync(ciFixtureSource), 'CI media fixtures directory is missing');
+    cpSync(ciFixtureSource, ciFixturePublicDir, { recursive: true });
+  }
+  const auditRoot = auditMode === 'ci' ? ciFixturePublicDir : publicDir;
+  const physicalFiles = walkMedia(auditRoot);
   const physicalPaths = physicalFiles.map(relativeMediaPath);
   const physicalMedia = physicalFiles.map(filePath => {
     const extension = filePath.slice(filePath.lastIndexOf('.')).toLowerCase();
@@ -204,13 +231,15 @@ async function main() {
       hasAudio: probe.streams.some(stream => stream.codec_type === 'audio'), hasVideo: probe.streams.some(stream => stream.codec_type === 'video')
     };
   });
-  const references = [
+  const catalogReferences = [
     ...parsePlaylistReferences(),
     ...(await loadKaraokeReferences()),
     ...loadBackendKaraokeReferences(),
     { catalog: 'TV/Challenges sound effects', title: 'Aplauso', artist: 'Local effect', path: 'sounds/aplauso.mp3' },
     { catalog: 'TV/Challenges sound effects', title: 'Burro', artist: 'Local effect', path: 'sounds/burro.mp3' }
-  ].map(reference => resolveReference(reference, physicalPaths));
+  ];
+  const references = (auditMode === 'ci' ? fixtureReferences() : catalogReferences)
+    .map(reference => resolveReference(reference, physicalPaths));
   const resolvedPaths = new Set(references.filter(item => item.foundPath).map(item => item.foundPath));
   const hashGroups = new Map();
   for (const item of physicalMedia) hashGroups.set(item.sha256, [...(hashGroups.get(item.sha256) || []), item.path]);
@@ -233,7 +262,9 @@ async function main() {
     const traversalResponse = await fetch(`${baseURL}/music/%252e%252e%252fforbidden.mp4`, { headers: { Range: 'bytes=0-1023' } });
     const externalReferences = externalChallengeReferences();
     const report = {
-      generatedAt: new Date().toISOString(), references, externalReferences, physicalMedia, duplicateGroups,
+      generatedAt: new Date().toISOString(), mode: auditMode,
+      catalogAudit: auditMode === 'local' ? 'full local catalog and physical library' : 'deferred: private/local catalog assets are not present in CI',
+      references, externalReferences, physicalMedia, duplicateGroups,
       httpSafety: {
         missingMedia404: missingResponse.status === 404, traversalRejected: traversalResponse.status === 404,
         missingMediaStatus: missingResponse.status, traversalStatus: traversalResponse.status
@@ -253,11 +284,16 @@ async function main() {
     writeFileSync(join(reportDir, 'latest.md'), markdownReport(report));
     assert.equal(report.httpSafety.missingMedia404, true, 'Missing media must return 404');
     assert.equal(report.httpSafety.traversalRejected, true, 'Traversal media request must be rejected');
-    assert.equal(report.summary.validPhysicalMedia, report.summary.physicalMedia, 'Every physical media file must be readable and playable');
+    assert.equal(report.summary.validPhysicalMedia, report.summary.physicalMedia, 'Every audited physical media file must be readable and playable');
+    if (auditMode === 'ci') {
+      assert.equal(physicalPaths.some(path => path.startsWith('music/') && !path.startsWith(`music/${ciFixturePublicName}/`)), false, 'CI must not require private/local music assets');
+      assert.equal(report.summary.missingReferences, 0, 'CI fixture references must be complete');
+    }
     console.log(`MEDIA AUDIT PASS: ${report.summary.validPhysicalMedia}/${report.summary.physicalMedia} physical resources tested; ${report.summary.missingReferences} missing references documented`);
   } finally {
     await browser?.close();
     await stopFrontend(frontend);
+    if (auditMode === 'ci') rmSync(ciFixturePublicDir, { recursive: true, force: true });
   }
 }
 

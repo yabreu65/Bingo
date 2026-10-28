@@ -4,7 +4,11 @@
   "type": "module",
   "scripts": {
     "test": "node media-audit.mjs && node run-phase1-parity.mjs && node run-e2e.mjs && node run-phase1-engine.mjs",
-    "test:media": "node media-audit.mjs",
+    "test:local": "MEDIA_AUDIT_MODE=local npm test",
+    "test:ci": "MEDIA_AUDIT_MODE=ci npm test",
+    "test:media": "npm run test:media:local",
+    "test:media:local": "MEDIA_AUDIT_MODE=local node media-audit.mjs",
+    "test:media:ci": "MEDIA_AUDIT_MODE=ci node media-audit.mjs",
     "test:phase4": "node phase4-load.mjs"
   },
   "dependencies": {
