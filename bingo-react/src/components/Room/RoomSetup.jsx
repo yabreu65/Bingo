@@ -2,6 +2,7 @@ import { useState } from 'react';
 import toast from 'react-hot-toast';
 import { useSocket } from '../../context/useSocket';
 import { API_URL } from '../../config/api';
+import { Button } from '../../design-system/primitives';
 import './RoomSetup.css';
 
 const RoomSetup = ({ onRoomReady }) => {
@@ -221,7 +222,8 @@ const RoomSetup = ({ onRoomReady }) => {
   return (
     <div className="room-setup">
       <div className="room-setup-container">
-        <button
+        <Button
+          variant="secondary"
           className="back-btn"
           onClick={() => {
             setMode(null);
@@ -229,7 +231,7 @@ const RoomSetup = ({ onRoomReady }) => {
           }}
         >
           ← Volver
-        </button>
+        </Button>
 
         <div className="christmas-header">
           <h1>🎄 {mode === 'create' ? 'Crear Sala' : 'Unirse a Sala'} 🎅</h1>
@@ -265,13 +267,13 @@ const RoomSetup = ({ onRoomReady }) => {
 
             {error && <div className="error-message">{error}</div>}
 
-            <button
+            <Button
               type="submit"
               className="submit-btn"
               disabled={loading}
             >
               {loading ? 'Creando...' : '🎮 Crear Sala'}
-            </button>
+            </Button>
           </form>
         ) : (
           <form onSubmit={handleJoinRoom} className="room-form">
@@ -305,13 +307,13 @@ const RoomSetup = ({ onRoomReady }) => {
 
             {error && <div className="error-message">{error}</div>}
 
-            <button
+            <Button
               type="submit"
               className="submit-btn"
               disabled={loading}
             >
               {loading ? 'Uniéndose...' : '🚪 Unirse a Sala'}
-            </button>
+            </Button>
           </form>
         )}
       </div>

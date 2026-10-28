@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import toast from 'react-hot-toast';
 import { API_URL } from '../../config/api';
+import { Button } from '../../design-system/primitives';
 import './QuickJoin.css';
 
 const QuickJoin = ({ roomCode, onJoinComplete }) => {
@@ -197,7 +198,7 @@ const QuickJoin = ({ roomCode, onJoinComplete }) => {
 
           {error && <div className="error-message">{error}</div>}
 
-          <button type="submit" className="join-button" disabled={loading}>
+          <Button type="submit" className="join-button" disabled={loading}>
             {loading ? (
               <>
                 <div className="spinner-small"></div>
@@ -209,7 +210,7 @@ const QuickJoin = ({ roomCode, onJoinComplete }) => {
                 Unirse al Juego
               </>
             )}
-          </button>
+          </Button>
         </form>
 
         <div className="quick-join-footer">

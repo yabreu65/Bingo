@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Button } from '../../design-system/primitives';
 import './LandingPage.css';
 
 const LandingPage = ({ onStartGame }) => {
@@ -103,11 +104,11 @@ const LandingPage = ({ onStartGame }) => {
 
         {/* Botón principal */}
         <div className="cta-section">
-          <button className="start-button" onClick={handleStart}>
+          <Button className="start-button" onClick={handleStart}>
             <span className="button-icon">🎲</span>
             <span className="button-text">Comenzar a Jugar</span>
             <span className="button-arrow">→</span>
-          </button>
+          </Button>
 
           <p className="helper-text">
             Crea una sala y comparte el código con tus amigos
