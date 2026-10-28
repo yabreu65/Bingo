@@ -156,6 +156,14 @@ const PlayerCardView = ({ roomData }) => {
     setTriviaResult(data);
   }, [roomData.playerId]);
 
+  const handleChallengeResult = useCallback((data) => {
+    if (data?.playerId?.toString() !== roomData.playerId?.toString()) return;
+    if (data.result?.success === undefined) return;
+    toast(data.result.success ? '✅ Respuesta correcta' : '❌ Respuesta incorrecta', {
+      icon: data.result.success ? '👏' : '🐴'
+    });
+  }, [roomData.playerId]);
+
   const handleVotingStarted = useCallback((data) => {
     setActiveVoting(data);
   }, []);
@@ -239,6 +247,7 @@ const PlayerCardView = ({ roomData }) => {
     socket?.on('challenge-triggered', handleChallengeTriggered);
     socket?.on('challenge-complete', handleChallengeComplete);
     socket?.on('trivia-result', handleTriviaResult);
+    socket?.on('challenge-result', handleChallengeResult);
     socket?.on('votingStarted', handleVotingStarted);
     socket?.on('votingResults', handleVotingResults);
     socket?.on('bingo-claimed', (data) => {
@@ -274,6 +283,7 @@ const PlayerCardView = ({ roomData }) => {
       socket?.off('challenge-triggered', handleChallengeTriggered);
       socket?.off('challenge-complete', handleChallengeComplete);
       socket?.off('trivia-result', handleTriviaResult);
+      socket?.off('challenge-result', handleChallengeResult);
       socket?.off('votingStarted', handleVotingStarted);
       socket?.off('votingResults', handleVotingResults);
       socket?.off('bingo-claimed');
@@ -283,7 +293,7 @@ const PlayerCardView = ({ roomData }) => {
       socket?.off('tiebreak-vote-confirmed', handleTiebreakVoteConfirmed);
       socket?.off('tiebreak-results', handleTiebreakResults);
     };
-  }, [socket, joinRoom, roomData.roomCode, roomData.playerId, roomData.playerCapability, handleCellMarked, handleGameStateUpdate, handleTriviaResult, handleVotingStarted, handleVotingResults]);
+  }, [socket, joinRoom, roomData.roomCode, roomData.playerId, roomData.playerCapability, handleCellMarked, handleGameStateUpdate, handleTriviaResult, handleChallengeResult, handleVotingStarted, handleVotingResults]);
 
   const handleTiebreakVote = (performerId, stars) => {
     console.log(`⭐ Voting for ${performerId}: ${stars} stars`);

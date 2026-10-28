@@ -1,6 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useGame } from '../../context/useGame';
-import ReactPlayer from 'react-player';
 import DeezerPlayer from '../Music/DeezerPlayer';
 import { getRandomSongForChallenge } from '../../data/deezerSongs';
 import { getKaraokeSongById } from '../../data/karaokeList';
@@ -44,8 +43,14 @@ const ChallengeModal = ({
 
   /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
-    if (activeChallenge?.type === 'trivia' && externalTriviaResult?.answer !== undefined) {
-      setSelectedAnswer(externalTriviaResult.answer);
+    const result = externalTriviaResult?.result || externalTriviaResult;
+    if (activeChallenge?.type === 'trivia' && result?.answer !== undefined) {
+      setSelectedAnswer(result.answer);
+      setShowResult(true);
+    }
+    if (activeChallenge?.type === 'riddle' && result?.answer !== undefined) {
+      setTextAnswer(result.answer);
+      setSubmitted(true);
       setShowResult(true);
     }
   }, [activeChallenge, externalTriviaResult]);
@@ -101,7 +106,11 @@ const ChallengeModal = ({
       else if (activeChallenge.type === 'karaoke') {
         const karaokeId = activeChallenge.data?.karaokeId;
         if (karaokeId) {
-          const song = getKaraokeSongById(karaokeId);
+          const song = getKaraokeSongById(karaokeId) || {
+            title: activeChallenge.title || activeChallenge.data || 'Karaoke',
+            artist: activeChallenge.artist || '',
+            localFile: activeChallenge.localFile
+          };
           setKaraokeSong(song);
           // No usar Deezer para karaoke, usaremos YouTube
           setDeezerSong(null);
@@ -122,8 +131,9 @@ const ChallengeModal = ({
         setTimer(30);
         startTimer(30);
       } else if (activeChallenge.type === 'karaoke') {
-        setTimer(90);
-        startTimer(90);
+        const duration = Number(activeChallenge.duration) || 60;
+        setTimer(duration);
+        startTimer(duration);
       }
     } else {
       if (timerIntervalRef.current) {
@@ -150,8 +160,7 @@ const ChallengeModal = ({
       const totalLines = karaokeSong.lyrics.length;
       if (totalLines === 0) return;
 
-      // Calcular cada cuánto tiempo cambiar de línea (90 segundos / número de líneas)
-      const KARAOKE_DURATION = 90;
+      const KARAOKE_DURATION = Number(activeChallenge.duration) || 60;
       const timePerLine = KARAOKE_DURATION / totalLines;
       const elapsed = KARAOKE_DURATION - timer;
       const newIndex = Math.min(
@@ -205,6 +214,7 @@ const ChallengeModal = ({
   const handleRiddleAnswer = () => {
     const answer = textAnswer.trim();
     if (!answer) return;
+    setSubmitted(true);
     completeChallenge(true, answer);
   };
 
@@ -314,10 +324,15 @@ const ChallengeModal = ({
             <button
               className="btn-close-challenge"
               onClick={handleRiddleAnswer}
-              disabled={!textAnswer.trim()}
+              disabled={submitted || !textAnswer.trim()}
             >
-              Enviar respuesta
+              {submitted ? 'Respuesta enviada' : 'Enviar respuesta'}
             </button>
+            {showResult && externalTriviaResult?.result && (
+              <div className={`trivia-result ${externalTriviaResult.result.success ? 'correct' : 'incorrect'}`}>
+                {externalTriviaResult.result.success ? '✅ ¡Respuesta correcta!' : '❌ Respuesta incorrecta'}
+              </div>
+            )}
           </>
         )}
 
@@ -460,34 +475,11 @@ const ChallengeModal = ({
               </div>
             )}
 
-            {/* Reproductor de YouTube (fallback) */}
-            {!karaokeSong?.localFile && karaokeSong?.youtubeId && (
-              <div className="karaoke-video-player">
-                <ReactPlayer
-                  url={`https://www.youtube.com/watch?v=${karaokeSong.youtubeId}`}
-                  playing={true}
-                  controls={true}
-                  width="100%"
-                  height="200px"
-                  volume={0.7}
-                  config={{
-                    youtube: {
-                      playerVars: {
-                        start: 0,
-                        end: 30,
-                        modestbranding: 1
-                      }
-                    }
-                  }}
-                />
-              </div>
-            )}
-
             {/* Mensaje si no hay video */}
-            {!karaokeSong?.localFile && !karaokeSong?.youtubeId && (
+            {!karaokeSong?.localFile && (
               <div className="karaoke-no-video">
-                <p>📹 Video no disponible</p>
-                <p className="text-sm">Agrega el localFile o youtubeId en karaokeList.js</p>
+                <p>📹 Video local no disponible</p>
+                <p className="text-sm">Podés continuar el reto sin reproducción.</p>
               </div>
             )}
 

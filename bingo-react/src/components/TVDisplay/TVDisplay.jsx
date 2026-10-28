@@ -1,5 +1,5 @@
 "use client";
-import { useState, useEffect, useRef } from 'react';
+import { useCallback, useState, useEffect, useRef } from 'react';
 // eslint-disable-next-line no-unused-vars
 import { AnimatePresence, motion } from 'framer-motion';
 import { useSocket } from '../../context/useSocket';
@@ -38,6 +38,8 @@ const TVDisplay = ({ roomCode, tvCapability }) => {
   const [triviaAnswer, setTriviaAnswer] = useState(null); // Para almacenar la respuesta del jugador
   const [manualPlayerAnswers, setManualPlayerAnswers] = useState({}); // Respuestas de jugadores manuales {playerId: answerIndex}
   const [manualPlayerResults, setManualPlayerResults] = useState({});
+  const [riddleResult, setRiddleResult] = useState(null);
+  const [effectsMuted, setEffectsMuted] = useState(() => localStorage.getItem('bingo-tv-effects-muted') === 'true');
   const [activeVoting, setActiveVoting] = useState(null);
 
   // Estados para tie-break
@@ -55,6 +57,13 @@ const TVDisplay = ({ roomCode, tvCapability }) => {
   const applauseAudioRef = useRef(null); // Ref para sonido de aplauso
   const donkeyAudioRef = useRef(null); // Ref para sonido de burro
   const currentSong = playlist[currentSongIndex];
+
+  const handleKaraokeVideoEnd = useCallback(() => {
+    socket?.emit('karaoke-video-end', {
+      roomCode,
+      challengeId: activeChallenge?.challengeId
+    });
+  }, [socket, roomCode, activeChallenge?.challengeId]);
 
   const handleStartTiebreakPerformance = () => {
     if (!tieBreakPerformer) return;
@@ -84,6 +93,9 @@ const TVDisplay = ({ roomCode, tvCapability }) => {
     };
     const handleRoomInfo = (data) => {
       setRoomInfo(data);
+      if (typeof data?.config?.challengeEffectsMuted === 'boolean') {
+        setEffectsMuted(data.config.challengeEffectsMuted);
+      }
     };
     const handleChallengeTriggered = (data) => {
         console.log('📺 TVDisplay: Challenge triggered received:', data);
@@ -189,6 +201,19 @@ const TVDisplay = ({ roomCode, tvCapability }) => {
       if (!challengePlayerId || data?.playerId?.toString() !== challengePlayerId.toString()) return;
       setTriviaAnswer(data);
       setManualPlayerResults(prev => ({ ...prev, [data.playerId]: data }));
+    };
+    const handleRiddleResult = (data) => {
+      const result = data.result || data;
+      if (!data?.challengeId || !result.answer) return;
+      const normalized = { ...data, answer: result.answer, success: data.success ?? result.success };
+      setRiddleResult(normalized);
+      if (!effectsMuted) {
+        const audioToPlay = normalized.success ? applauseAudioRef.current : donkeyAudioRef.current;
+        audioToPlay?.play().catch(() => {});
+      }
+      window.setTimeout(() => setRiddleResult(current => (
+        current?.challengeId === normalized.challengeId ? null : current
+      )), 6000);
     };
     const handleCountdownTick = (data) => {
         if (typeof data?.value === 'number') {
@@ -323,6 +348,7 @@ const TVDisplay = ({ roomCode, tvCapability }) => {
     socket.on('trivia-answered', handleTriviaAnswered);
     socket.on('trivia-result-public', handleTriviaAnswered);
     socket.on('trivia-result', handleTriviaResult);
+    socket.on('riddle-result-public', handleRiddleResult);
     socket.on('votingStarted', handleVotingStarted);
     socket.on('votingResults', handleVotingResults);
     socket.on('countdown-tick', handleCountdownTick);
@@ -356,6 +382,7 @@ const TVDisplay = ({ roomCode, tvCapability }) => {
       socket.off('trivia-answered', handleTriviaAnswered);
       socket.off('trivia-result-public', handleTriviaAnswered);
       socket.off('trivia-result', handleTriviaResult);
+      socket.off('riddle-result-public', handleRiddleResult);
       socket.off('votingStarted', handleVotingStarted);
       socket.off('votingResults', handleVotingResults);
       socket.off('countdown-tick', handleCountdownTick);
@@ -371,7 +398,7 @@ const TVDisplay = ({ roomCode, tvCapability }) => {
       socket.off('tiebreak-voting-progress', handleTiebreakVotingProgress);
       socket.off('tiebreak-results', handleTiebreakResults);
     };
-  }, [socket, roomCode, tvCapability, activeChallenge, gameState, playlist.length]); // Solo re-ejecutar si cambia el contexto de la sala o el estado del juego
+  }, [socket, roomCode, tvCapability, activeChallenge, gameState, playlist.length, effectsMuted]); // Solo re-ejecutar si cambia el contexto de la sala o el estado del juego
 
   // Manejar cuando termina una canción
   const handleVideoEnded = () => {
@@ -664,7 +691,7 @@ const TVDisplay = ({ roomCode, tvCapability }) => {
                 )}
 
                 {activeChallenge.type !== 'trivia' && (
-                  <p className="challenge-text">{activeChallenge.text}</p>
+                  <p className="challenge-text">{activeChallenge.type === 'riddle' ? activeChallenge.data?.prompt : activeChallenge.text}</p>
                 )}
 
                 {activeChallenge.deezerId && (
@@ -679,14 +706,32 @@ const TVDisplay = ({ roomCode, tvCapability }) => {
                 {activeChallenge.localFile && (
                   <KaraokeOverlay
                     localFile={activeChallenge.localFile}
-                    onVideoEnd={() => {
-                      console.log('🎤 Karaoke video ended, notifying backend');
-                      socket?.emit('karaoke-video-end', { roomCode });
-                    }}
+                      maxDuration={activeChallenge.duration}
+                      onVideoEnd={handleKaraokeVideoEnd}
+                      onUnavailable={(message) => console.warn(message)}
                   />
                 )}
 
                 <div className="challenge-timer">{challengeTimeLeft}s</div>
+            </div>
+          </MotionBox>
+        )}
+        {riddleResult && (
+          <MotionBox className="overlay challenge-overlay" role="status">
+            <div className="challenge-content">
+              <h2 className="challenge-title">RESULTADO DE LA ADIVINANZA</h2>
+              <p className="challenge-player">Jugador: {riddleResult.playerName || 'Jugador'}</p>
+              <p className="challenge-text">Respuesta: {riddleResult.answer}</p>
+              <p style={{ color: riddleResult.success ? '#22c55e' : '#ef4444', fontSize: '2rem', fontWeight: 'bold' }}>
+                {riddleResult.success ? '✅ ¡CORRECTO!' : '❌ INCORRECTO'}
+              </p>
+              <button type="button" onClick={() => {
+                const next = !effectsMuted;
+                setEffectsMuted(next);
+                localStorage.setItem('bingo-tv-effects-muted', String(next));
+              }}>
+                {effectsMuted ? 'Activar efectos' : 'Silenciar efectos'}
+              </button>
             </div>
           </MotionBox>
         )}

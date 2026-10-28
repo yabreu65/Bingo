@@ -1,3 +1,5 @@
+import { API_URL } from '../config/api';
+
 /**
  * Base de datos de canciones de Deezer para Challenges
  * Cada canción tiene 30 segundos de preview para los juegos
@@ -234,7 +236,7 @@ export const getAllDeezerSongs = () => {
 export const getDeezerPreviewUrl = async (trackId) => {
   try {
     // Llamar a tu backend que usa el servicio de Deezer
-    const response = await fetch(`http://localhost:5001/api/deezer/track/${trackId}`);
+    const response = await fetch(`${API_URL}/api/deezer/track/${trackId}`);
     const data = await response.json();
     return data.track.preview;
   } catch (error) {

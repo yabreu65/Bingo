@@ -1,5 +1,8 @@
 import { useState, useEffect, useRef } from 'react';
 import { Play, Pause, SkipForward, Volume2, VolumeX } from 'lucide-react';
+import { API_URL } from '../../config/api';
+
+const noop = () => {};
 
 /**
  * DeezerPlayer - Reproductor de previews de 30 segundos de Deezer
@@ -9,7 +12,8 @@ const DeezerPlayer = ({
   trackId,
   autoPlay = true,
   showControls = true,
-  onEnded = () => {},
+  onEnded = noop,
+  onUnavailable = noop,
   className = ''
 }) => {
   const [isPlaying, setIsPlaying] = useState(false);
@@ -37,13 +41,18 @@ const DeezerPlayer = ({
 
       console.log(`🎵 DeezerPlayer: Fetching track ${trackId} from Deezer...`);
 
+      const controller = new AbortController();
+      const timeout = window.setTimeout(() => controller.abort(), 8000);
+
       try {
-        const response = await fetch(`http://localhost:5001/api/deezer/track/${trackId}`);
+        const response = await fetch(`${API_URL}/api/deezer/track/${trackId}`, {
+          signal: controller.signal
+        });
 
         if (!response.ok) {
           const errorText = await response.text();
           console.error(`❌ DeezerPlayer: HTTP error ${response.status}:`, errorText);
-          throw new Error(`Error ${response.status}: No se pudo obtener la canción de Deezer`);
+          throw new Error('La música no está disponible ahora');
         }
 
         const data = await response.json();
@@ -56,29 +65,34 @@ const DeezerPlayer = ({
 
           if (!data.track.preview) {
             console.warn('⚠️ DeezerPlayer: Track has no preview URL');
-            throw new Error('Esta canción no tiene preview disponible');
+          throw new Error('La música no tiene un preview disponible');
           }
         } else {
           console.error('❌ DeezerPlayer: Invalid response format:', data);
-          throw new Error(data.error || 'Formato de respuesta inválido');
+          throw new Error('La música no está disponible ahora');
         }
       } catch (err) {
-        console.error('❌ DeezerPlayer: Error loading track:', err);
-        setError(err.message || 'No se pudo cargar el preview de Deezer');
+        const message = err.name === 'AbortError'
+          ? 'La música tardó demasiado en responder'
+          : 'La música no está disponible ahora';
+        console.warn('Deezer preview unavailable:', err.message);
+        setError(message);
+        onUnavailable(message);
       } finally {
+        window.clearTimeout(timeout);
         setLoading(false);
       }
     };
 
     fetchTrackInfo();
-  }, [trackId]);
+  }, [trackId, onUnavailable]);
 
   // Auto-play cuando el preview está listo
   useEffect(() => {
     if (previewUrl && autoPlay && audioRef.current) {
       audioRef.current.play()
         .then(() => setIsPlaying(true))
-        .catch(err => console.error('Auto-play failed:', err));
+        .catch(() => setError('La música está lista. Presioná reproducir para iniciar.'));
     }
   }, [previewUrl, autoPlay]);
 
@@ -121,7 +135,7 @@ const DeezerPlayer = ({
     } else {
       audioRef.current.play()
         .then(() => setIsPlaying(true))
-        .catch(err => console.error('Play failed:', err));
+        .catch(() => setError('No se pudo iniciar la música. Presioná reproducir nuevamente.'));
     }
   };
 
@@ -164,7 +178,7 @@ const DeezerPlayer = ({
     return (
       <div className={`deezer-player error ${className}`}>
         <div className="text-red-500 text-center py-4">
-          {error || 'No se pudo cargar el preview'}
+          {error || 'La música no está disponible ahora. El reto puede continuar sin música.'}
         </div>
       </div>
     );
