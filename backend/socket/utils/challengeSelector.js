@@ -138,11 +138,13 @@ function selectRandomChallenge(challengeType, availablePools) {
   if (challengeType === GAME_CONSTANTS.CHALLENGE_TYPES.KARAOKE) {
     return {
       challenge: {
-        text: `🎤 Canta: ${selected.title} - ${selected.artist}`,
+        text: selected.text || `🎤 Canta: ${selected.title} - ${selected.artist}`,
         localFile: selected.localFile,
         karaokeId: selected.id,
         title: selected.title,
-        artist: selected.artist
+        artist: selected.artist,
+        points: selected.points,
+        duration: selected.duration
       },
       updatedPools: availablePools
     };
@@ -264,7 +266,7 @@ function createChallengeData(challengeType, selectedPlayer, challenge) {
     baseData.title = challenge.title;
     baseData.artist = challenge.artist;
     baseData.localFile = challenge.localFile;
-    baseData.duration = 300; // 5 minutos máximo para karaoke (el video controlará el fin real)
+    baseData.duration = Number.isInteger(challenge.duration) ? challenge.duration : 60;
   }
   // Para otros tipos (dance, sing, group)
   else {

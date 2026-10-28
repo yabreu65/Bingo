@@ -50,7 +50,7 @@ async function findActiveChallengeActor(socket, data) {
   return { ...actor, game, activeChallenge };
 }
 
-async function finishChallenge(io, actor, { result, pointsPlayerIds = [], broadcastResult = true }) {
+async function finishChallenge(io, actor, { result, publicResult = result, pointsPlayerIds = [], broadcastResult = true }) {
   const { room, game, activeChallenge } = actor;
   const roomCode = room.code;
   const challengeId = activeChallenge.id;
@@ -97,8 +97,8 @@ async function finishChallenge(io, actor, { result, pointsPlayerIds = [], broadc
       result
     });
   }
-  io.to(roomCode).emit('challenge-complete', { success: true, result });
-  io.to(roomCode).emit('challenge-completed', { success: true, result });
+  io.to(roomCode).emit('challenge-complete', { success: true, result: publicResult });
+  io.to(roomCode).emit('challenge-completed', { success: true, result: publicResult });
   io.to(roomCode).emit('game-state-changed', { state: 'playing' });
 
   await gameHandlers.immediateNextNumber(io, roomCode);
@@ -185,15 +185,33 @@ function handleChallengeAnswer(io, socket) {
           challengeId,
           result: { answer, success: isCorrect, points }
         });
-        io.to(roomCode).emit('challenge-result-public', {
-          playerId,
-          challengeId,
-          result: { answer }
-        });
         await finishChallenge(io, actor, {
           result: { answer, success: isCorrect, points },
+          publicResult: {
+            playerId,
+            playerName: actor.player.name,
+            challengeId,
+            answer,
+            success: isCorrect,
+            points
+          },
           pointsPlayerIds: [playerId],
           broadcastResult: false
+        });
+        io.to(roomCode).emit('challenge-result-public', {
+          playerId,
+          playerName: actor.player.name,
+          challengeId,
+          success: isCorrect,
+          result: { answer }
+        });
+        io.to(roomCode).emit('riddle-result-public', {
+          playerId,
+          playerName: actor.player.name,
+          challengeId,
+          answer,
+          success: isCorrect,
+          points
         });
         return;
       }
@@ -332,12 +350,38 @@ function handleKaraokeVideoEnd(io, socket) {
         logger.warn(`[${roomCode}] Game not found`);
         return;
       }
-      if (game.activeChallenge?.type !== 'karaoke') {
+      const activeChallenge = game.activeChallenge;
+      if (activeChallenge?.type !== 'karaoke') {
         return socket.emit('error', { message: 'No hay un karaoke activo' });
       }
 
-      const karaokePlayerId = game.activeChallenge.player?._id || game.activeChallenge.player;
-      const karaokePoints = getChallengePoints('karaoke', { success: true, configuredPoints: game.activeChallenge.points });
+      if (data?.challengeId !== undefined &&
+          (typeof data.challengeId !== 'string' || data.challengeId !== activeChallenge.id)) {
+        return socket.emit('error', { message: 'El karaoke ya no está activo' });
+      }
+
+      let completedGame;
+      if (typeof Game.findOneAndUpdate === 'function') {
+        completedGame = await Game.findOneAndUpdate(
+          { _id: game._id, 'activeChallenge.id': activeChallenge.id, 'activeChallenge.type': 'karaoke' },
+          { $set: { activeChallenge: null } },
+          { new: true }
+        );
+        // Some lightweight test doubles do not implement the update return value.
+        if (completedGame === undefined) {
+          game.activeChallenge = null;
+          await game.save();
+          completedGame = game;
+        }
+      } else {
+        game.activeChallenge = null;
+        await game.save();
+        completedGame = game;
+      }
+      if (!completedGame) return;
+
+      const karaokePlayerId = activeChallenge.player?._id || activeChallenge.player;
+      const karaokePoints = getChallengePoints('karaoke', { success: true, configuredPoints: activeChallenge.points });
       if (karaokePlayerId && typeof Player.findOneAndUpdate === 'function') {
         await Player.findOneAndUpdate(
           { _id: karaokePlayerId, room: room._id },
@@ -345,9 +389,6 @@ function handleKaraokeVideoEnd(io, socket) {
         );
       }
 
-      // Limpiar el challenge activo
-      game.activeChallenge = null;
-      await game.save();
       const clearChallengeTimer = require('./gameHandlers').clearChallengeTimer;
       if (typeof clearChallengeTimer === 'function') clearChallengeTimer(roomCode);
 

@@ -26,6 +26,7 @@ async function broadcastRoomInfo(io, roomCode) {
       io.to(roomCode).emit('room-info', {
         playerCount: totalPlayers, // Incluir jugadores digitales Y manuales
         gameState: room.gameState,
+        config: { challengeEffectsMuted: room.config?.challengeEffectsMuted === true },
         manualPlayers: room.manualPlayers || []
       });
     }

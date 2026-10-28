@@ -309,7 +309,7 @@ async function triggerChallenge(io, roomCode, options = {}) {
     points: Number.isInteger(challenge.points) ? challenge.points : null,
     startTime: new Date(),
     duration: nextType === GAME_CONSTANTS.CHALLENGE_TYPES.KARAOKE
-      ? 300
+      ? Math.min(600, Math.max(30, Number(room.config?.karaokeDuration) || 60))
       : (Number.isInteger(challenge.duration) ? challenge.duration : GAME_CONSTANTS.CHALLENGE_DURATION),
     responses: [],
     pointsAwarded: false

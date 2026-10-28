@@ -123,6 +123,14 @@ const updateConfigSchema = z.object({
         .max(120, 'El tiempo máximo entre números es 120 segundos')
         .optional(),
 
+      karaokeDuration: z.number()
+        .int('La duración del karaoke debe ser un número entero')
+        .min(30, 'La duración mínima del karaoke es 30 segundos')
+        .max(600, 'La duración máxima del karaoke es 600 segundos')
+        .optional(),
+
+      challengeEffectsMuted: z.boolean().optional(),
+
       challengeFrequency: z.number()
         .int('La frecuencia debe ser un número entero')
         .min(1, 'La frecuencia mínima de challenges es 1')

@@ -37,6 +37,8 @@ const roomSchema = new mongoose.Schema({
   },
   config: {
     timeBetweenNumbers: { type: Number, default: 30 },
+    karaokeDuration: { type: Number, min: 30, max: 600, default: 60 },
+    challengeEffectsMuted: { type: Boolean, default: false },
     challengeFrequency: { type: Number, default: 3 },
     enabledChallengeTypes: {
       trivia: { type: Boolean, default: true },
