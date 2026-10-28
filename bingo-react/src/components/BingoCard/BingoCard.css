@@ -138,3 +138,45 @@
 .bingo-cell.marked {
   animation: markCell 0.3s ease;
 }
+
+
+/* U3 reusable Premium Festivo card treatment. */
+.pf-bingo-card {
+  box-sizing: border-box;
+  width: min(100%, 560px);
+  border: 1px solid var(--pf-border);
+  border-radius: var(--pf-radius-md);
+  background: var(--pf-surface);
+  box-shadow: var(--pf-shadow-panel);
+  color: var(--pf-text);
+}
+.pf-bingo-card .bingo-header, .pf-bingo-card .bingo-row { gap: clamp(4px, 1.4vw, var(--pf-space-2)); }
+.pf-bingo-card .bingo-letter {
+  min-height: var(--pf-touch-target);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--pf-space-2);
+  border: 1px solid var(--pf-border);
+  border-radius: var(--pf-radius-sm);
+  background: var(--pf-surface-raised);
+  color: var(--pf-accent-strong);
+  text-shadow: none;
+  font-size: clamp(1.1rem, 5vw, 2rem);
+}
+.pf-bingo-card .bingo-cell {
+  min-width: 0;
+  min-height: clamp(44px, 12vw, 76px);
+  border: 2px solid var(--pf-border);
+  border-radius: var(--pf-radius-sm);
+  background: #211b20;
+  color: var(--pf-text);
+  font-size: clamp(1rem, 4.5vw, 1.8rem);
+}
+.pf-bingo-card .bingo-cell.marked { border-color: var(--pf-success); background: linear-gradient(145deg, #27543d, #183127); color: #f4ffef; }
+.pf-bingo-card .bingo-cell.free { border-color: var(--pf-accent); background: var(--pf-surface-raised); color: var(--pf-accent-strong); }
+.pf-bingo-card .bingo-cell.clickable:focus-visible { outline: 3px solid var(--pf-focus); outline-offset: 3px; }
+@media (max-width: 390px) {
+  .pf-bingo-card { padding-inline: var(--pf-space-2); }
+  .pf-bingo-card .bingo-cell { min-height: 44px; border-width: 1px; }
+}

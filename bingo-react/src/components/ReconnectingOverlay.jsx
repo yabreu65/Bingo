@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Wifi, WifiOff, Loader2 } from 'lucide-react';
+import './ReconnectingOverlay.css';
 
 /**
  * Overlay que se muestra cuando Socket.io está reconectando
@@ -20,8 +21,8 @@ export default function ReconnectingOverlay({ isConnected, isReconnecting }) {
   if (!showOverlay || isConnected) return null;
 
   return (
-    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center">
-      <div className="bg-white rounded-2xl shadow-2xl p-8 max-w-sm mx-4 text-center">
+    <div className="reconnecting-overlay fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center" role="status" aria-live="assertive">
+      <div className="reconnecting-card bg-white rounded-2xl shadow-2xl p-8 max-w-sm mx-4 text-center">
         {/* Icono animado */}
         <div className="flex justify-center mb-6">
           <div className="relative">

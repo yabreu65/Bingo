@@ -16,7 +16,7 @@ const BingoCard = ({ card, compact = false, interactive = false, onCellClick, ma
   const letters = ['B', 'I', 'N', 'G', 'O']
 
   return (
-    <div className={`bingo-card ${compact ? 'bingo-card-compact' : ''}`}>
+    <div className={`bingo-card pf-bingo-card ${compact ? 'bingo-card-compact' : ''}`}>
       {/* Header con letras B-I-N-G-O */}
       <div className="bingo-header">
         {letters.map((letter) => (

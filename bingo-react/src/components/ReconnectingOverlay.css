@@ -1,0 +1,26 @@
+.reconnecting-overlay {
+  padding: max(var(--pf-space-4), env(safe-area-inset-top)) var(--pf-space-4) max(var(--pf-space-4), env(safe-area-inset-bottom));
+  background: rgba(9, 9, 13, .82);
+}
+.reconnecting-card {
+  box-sizing: border-box;
+  width: min(100%, 420px);
+  border: 1px solid var(--pf-border);
+  border-radius: var(--pf-radius-lg);
+  background: var(--pf-surface);
+  color: var(--pf-text);
+  box-shadow: var(--pf-shadow-panel);
+}
+.reconnecting-card h2 { color: var(--pf-text); }
+.reconnecting-card p { color: var(--pf-text-muted); }
+.reconnecting-card button {
+  min-height: var(--pf-touch-target);
+  border: 1px solid var(--pf-accent-strong);
+  border-radius: var(--pf-radius-sm);
+  background: var(--pf-accent);
+  color: #17100a;
+}
+.reconnecting-card button:focus-visible { outline: 3px solid var(--pf-focus); outline-offset: 3px; }
+@media (prefers-reduced-motion: reduce) {
+  .reconnecting-overlay *, .reconnecting-overlay *::before, .reconnecting-overlay *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
+}

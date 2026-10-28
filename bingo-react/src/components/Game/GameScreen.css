@@ -354,3 +354,43 @@
     font-size: 0.9em;
   }
 }
+
+
+/* U3 Premium Festivo skin for the legacy single-player game surface. */
+.game-screen {
+  box-sizing: border-box;
+  min-height: 100dvh;
+  width: min(100%, 1440px);
+  padding: max(var(--pf-space-4), env(safe-area-inset-top)) max(var(--pf-space-4), env(safe-area-inset-right)) var(--pf-space-6) max(var(--pf-space-4), env(safe-area-inset-left));
+  color: var(--pf-text);
+}
+.game-screen .game-header h1 { color: var(--pf-accent-strong); font-family: var(--pf-font-sans); font-size: clamp(1.4rem, 4vw, 2.5rem); text-shadow: none; }
+.game-screen .game-controls { justify-content: flex-start; }
+.game-screen .btn-control, .game-screen .btn-view-card { min-height: var(--pf-touch-target); border: 1px solid var(--pf-border); border-radius: var(--pf-radius-sm); box-shadow: none; }
+.game-screen .btn-control { background: var(--pf-surface); color: var(--pf-text); }
+.game-screen .btn-control:disabled { background: #332d31; color: var(--pf-text-muted); opacity: .7; }
+.game-screen .btn-control:focus-visible, .game-screen .btn-view-card:focus-visible { outline: 3px solid var(--pf-focus); outline-offset: 3px; }
+.game-screen .game-main { gap: var(--pf-space-4); }
+.game-screen .current-number-section, .game-screen .current-song-section, .game-screen .history-section, .game-screen .players-panel { border: 1px solid var(--pf-border); background: var(--pf-surface); box-shadow: var(--pf-shadow-panel); }
+.game-screen .current-number-label, .game-screen .history-section h3, .game-screen .players-panel h3 { color: var(--pf-accent-strong); }
+.game-screen .current-number { color: var(--pf-accent-strong); text-shadow: none; font-size: clamp(4rem, 12vw, 8rem); }
+.game-screen .timer-label, .game-screen .progress-info, .game-screen .player-level { color: var(--pf-text-muted); }
+.game-screen .timer-display { color: var(--pf-accent); }
+.game-screen .progress-bar { background: #322b30; }
+.game-screen .progress-fill { background: var(--pf-accent); }
+.game-screen .current-song-section { background: var(--pf-surface-raised); }
+.game-screen .history-number { box-shadow: none; border: 1px solid var(--pf-border); }
+.game-screen .player-game-item { background: rgba(214,168,92,.08); }
+.game-screen .player-name, .game-screen .card-stats p { color: var(--pf-text); }
+.game-screen .player-rank, .game-screen .player-points { color: var(--pf-accent-strong); }
+@media (max-width: 600px) {
+  .game-screen { padding-inline: var(--pf-space-2); }
+  .game-screen .game-controls { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .game-screen .btn-control { min-width: 0; padding-inline: var(--pf-space-2); }
+  .game-screen .current-number-section { padding: var(--pf-space-4); }
+  .game-screen .current-number { margin-block: var(--pf-space-3); }
+  .game-screen .history-number { width: 44px; height: 44px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .game-screen *, .game-screen *::before, .game-screen *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
+}

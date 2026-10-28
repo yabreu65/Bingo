@@ -429,3 +429,126 @@
     font-size: 1.1em;
   }
 }
+
+
+/* U3 — Premium Festivo player surface. Legacy selectors remain stable for E2E contracts. */
+.pf-player-surface {
+  box-sizing: border-box;
+  min-height: 100dvh;
+  width: 100%;
+  overflow-x: hidden;
+  padding: max(var(--pf-space-4), env(safe-area-inset-top))
+    max(var(--pf-space-4), env(safe-area-inset-right))
+    max(var(--pf-space-5), env(safe-area-inset-bottom))
+    max(var(--pf-space-4), env(safe-area-inset-left));
+  gap: var(--pf-space-4);
+  background: radial-gradient(circle at 50% -10%, rgba(214,168,92,.2), transparent 38%), var(--pf-bg);
+  color: var(--pf-text);
+}
+.pf-player-surface > * { margin-bottom: 0; }
+.pf-player-surface .player-header,
+.pf-player-surface .player-bingo-card,
+.pf-player-surface .called-numbers-section,
+.pf-player-surface .waiting-message-player,
+.pf-player-surface .no-card-message {
+  box-sizing: border-box;
+  max-width: 720px;
+  border: 1px solid var(--pf-border);
+  border-radius: var(--pf-radius-md);
+  background: var(--pf-surface);
+  color: var(--pf-text);
+  box-shadow: var(--pf-shadow-panel);
+}
+.pf-player-surface .player-header { padding: var(--pf-space-4) var(--pf-space-5); align-items: center; }
+.pf-player-surface .player-info-header h2,
+.pf-player-surface .called-numbers-section h3,
+.pf-player-surface .waiting-message-player p,
+.pf-player-surface .no-card-message h2 { color: var(--pf-text); }
+.pf-player-surface .player-info-header p,
+.pf-player-surface .waiting-message-player p,
+.pf-player-surface .no-card-message p { color: var(--pf-text-muted); }
+.pf-player-surface .status-badge {
+  min-height: var(--pf-touch-target);
+  display: inline-flex;
+  align-items: center;
+  padding: var(--pf-space-2) var(--pf-space-3);
+  border: 1px solid var(--pf-border);
+  border-radius: 999px;
+  background: var(--pf-surface-raised);
+  color: var(--pf-accent-strong);
+  font-size: var(--pf-text-sm);
+}
+.pf-player-surface .current-number-player {
+  box-sizing: border-box;
+  max-width: 720px;
+  padding: var(--pf-space-4);
+  border: 1px solid var(--pf-border);
+  border-radius: var(--pf-radius-lg);
+  background: linear-gradient(145deg, var(--pf-surface-raised), #191017);
+  box-shadow: var(--pf-shadow-panel);
+}
+.pf-player-surface .number-label { color: var(--pf-text-muted); font-size: var(--pf-text-sm); text-transform: uppercase; letter-spacing: .16em; }
+.pf-player-surface .number-value { color: var(--pf-accent-strong); font-size: clamp(4rem, 18vw, 7rem); line-height: .95; }
+.pf-player-surface .event-banner {
+  box-sizing: border-box; max-width: 720px; border: 1px solid var(--pf-border);
+  border-radius: var(--pf-radius-md); background: var(--pf-surface-raised);
+}
+.pf-player-surface .player-bingo-card { padding: clamp(var(--pf-space-3), 4vw, var(--pf-space-5)); }
+.pf-player-surface .bingo-card-header,
+.pf-player-surface .bingo-card-grid { gap: clamp(4px, 1.3vw, var(--pf-space-2)); }
+.pf-player-surface .bingo-card-header span { color: var(--pf-accent-strong); font-size: clamp(1.25rem, 6vw, 2.5rem); }
+.pf-player-surface .bingo-card-cell {
+  min-width: 0; min-height: clamp(44px, 12vw, 76px); aspect-ratio: 1;
+  border: 2px solid var(--pf-border); border-radius: var(--pf-radius-sm);
+  background: #211b20; color: var(--pf-text);
+  font-size: clamp(1rem, 5vw, 2rem);
+  transition: transform var(--pf-duration-fast) var(--pf-ease-standard), border-color var(--pf-duration-fast) var(--pf-ease-standard), background var(--pf-duration-fast) var(--pf-ease-standard);
+}
+.pf-player-surface .bingo-card-cell.available { border-color: var(--pf-accent); box-shadow: 0 0 0 2px rgba(214,168,92,.14); }
+.pf-player-surface .bingo-card-cell.marked { border-color: var(--pf-success); background: linear-gradient(145deg, #27543d, #183127); color: #f4ffef; }
+.pf-player-surface .bingo-card-cell.free { border-color: var(--pf-accent); background: var(--pf-surface-raised); color: var(--pf-accent-strong); }
+.pf-player-surface .bingo-card-cell:focus-visible,
+.pf-player-surface .bingo-claim-btn:focus-visible { outline: 3px solid var(--pf-focus); outline-offset: 3px; }
+.pf-player-surface .called-numbers-section { padding: var(--pf-space-4); }
+.pf-player-surface .called-number { width: var(--pf-touch-target); height: var(--pf-touch-target); background: var(--pf-surface-raised); border: 1px solid var(--pf-border); color: var(--pf-accent-strong); }
+.pf-player-surface .bingo-claim-btn {
+  min-height: 52px; max-width: 720px; padding: var(--pf-space-3) var(--pf-space-5);
+  border: 1px solid var(--pf-accent-strong); border-radius: var(--pf-radius-sm);
+  background: var(--pf-accent); color: #17100a; font-size: clamp(1.1rem, 4vw, 1.6rem);
+  box-shadow: 0 12px 32px rgba(214,168,92,.24);
+}
+.pf-player-surface .bingo-claim-btn:hover { background: var(--pf-accent-strong); transform: translateY(-2px); }
+.pf-player-surface .spinner { border-color: rgba(214,168,92,.2); border-top-color: var(--pf-accent); }
+@media (max-width: 390px) {
+  .pf-player-surface { padding-inline: var(--pf-space-2); }
+  .pf-player-surface .player-header { padding-inline: var(--pf-space-3); }
+  .pf-player-surface .player-info-header h2 { font-size: 1.15rem; }
+  .pf-player-surface .player-bingo-card { padding-inline: var(--pf-space-2); }
+  .pf-player-surface .bingo-card-cell { min-height: 44px; border-width: 1px; }
+  .pf-player-surface .mark-overlay { font-size: 1.8em; }
+}
+@media (min-width: 769px) {
+  .pf-player-surface { padding-block: var(--pf-space-6); }
+  .pf-player-surface .player-bingo-card { padding: var(--pf-space-5); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .pf-player-surface *, .pf-player-surface *::before, .pf-player-surface *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
+}
+
+@media (max-width: 600px) {
+  .pf-player-surface .music-player {
+    width: min(calc(100vw - 16px), 350px);
+    max-height: min(58dvh, 520px);
+    right: 8px;
+    bottom: 80px;
+    padding: var(--pf-space-3);
+    overflow-y: auto;
+    border: 1px solid var(--pf-border);
+    background: var(--pf-surface);
+  }
+  .pf-player-surface .music-player .current-song { padding: var(--pf-space-2); }
+  .pf-player-surface .music-player .control-btn,
+  .pf-player-surface .music-player .volume-btn,
+  .pf-player-surface .music-player .action-btn,
+  .pf-player-surface .music-player .close-btn { min-width: var(--pf-touch-target); min-height: var(--pf-touch-target); }
+}

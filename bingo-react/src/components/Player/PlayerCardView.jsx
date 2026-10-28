@@ -359,7 +359,7 @@ const PlayerCardView = ({ roomData }) => {
 
   if (!roomData.bingoCard?.matrix) {
     return (
-      <div className="player-card-view">
+      <div className="player-card-view pf-player-surface">
         <div className="no-card-message">
           <h2>⏳ Esperando...</h2>
           <p>Aún no has seleccionado un cartón</p>
@@ -378,7 +378,7 @@ const PlayerCardView = ({ roomData }) => {
   };
 
   return (
-    <div className="player-card-view">
+    <div className="player-card-view pf-player-surface">
       {/* Header */}
       <div className="player-header">
         <div className="player-info-header">
@@ -397,7 +397,7 @@ const PlayerCardView = ({ roomData }) => {
 
       {/* Current Number Display */}
       {gameState === 'playing' && (
-        <div className="current-number-player">
+        <div className="current-number-player" aria-live="polite">
           <div className="number-label">Número actual:</div>
           <div className="number-value">{currentNumber || '--'}</div>
         </div>
@@ -439,6 +439,15 @@ const PlayerCardView = ({ roomData }) => {
                     data-row={row}
                     data-col={col}
                     data-value={value}
+                    role="button"
+                    tabIndex={value === 'BINGO' ? -1 : 0}
+                    aria-label={`${value === 'BINGO' ? 'Casilla libre' : `Número ${value}`}${marked ? ', marcada' : ''}`}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter' || event.key === ' ') {
+                        event.preventDefault();
+                        handleCellClick(row, col, value);
+                      }
+                    }}
                     className={`bingo-card-cell ${marked ? 'marked' : ''} ${
                       wasCalled && !marked ? 'available' : ''
                     }`}
