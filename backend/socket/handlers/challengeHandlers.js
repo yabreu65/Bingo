@@ -355,8 +355,7 @@ function handleKaraokeVideoEnd(io, socket) {
         return socket.emit('error', { message: 'No hay un karaoke activo' });
       }
 
-      if (data?.challengeId !== undefined &&
-          (typeof data.challengeId !== 'string' || data.challengeId !== activeChallenge.id)) {
+      if (typeof data?.challengeId !== 'string' || data.challengeId !== activeChallenge.id) {
         return socket.emit('error', { message: 'El karaoke ya no está activo' });
       }
 

@@ -274,10 +274,6 @@ async function triggerChallenge(io, roomCode, options = {}) {
 
   logger.info(`[${roomCode}] Challenge selected from pool - Remaining: trivia=${updatedPools.trivia.length}, dance=${updatedPools.dance.length}, karaoke=${updatedPools.karaoke.length}`);
 
-  // Crear datos del reto
-  const challengeData = createChallengeData(nextType, chosenPlayer, challenge);
-  console.log('🎯 Challenge data being sent:', JSON.stringify(challengeData, null, 2));
-
   // Guardar en el juego
   const challengeId = randomUUID();
   const privateData = nextType === GAME_CONSTANTS.CHALLENGE_TYPES.TRIVIA
@@ -314,6 +310,13 @@ async function triggerChallenge(io, roomCode, options = {}) {
     responses: [],
     pointsAwarded: false
   };
+  // Clients must echo the persisted challenge identity when a media element
+  // ends; this prevents a delayed event from a previous karaoke from closing
+  // a newer challenge.
+  const challengeData = createChallengeData(nextType, chosenPlayer, challenge);
+  challengeData.challengeId = challengeId;
+  challengeData.duration = game.activeChallenge.duration;
+  console.log('🎯 Challenge data being sent:', JSON.stringify(challengeData, null, 2));
   game.numbersSinceChallenge = 0;
 
   // Agregar jugador a usedPlayers

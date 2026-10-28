@@ -513,7 +513,7 @@ describe('challenge and voting socket identity', () => {
     };
     const game = {
       activeChallenge: {
-        type: 'trivia', player: 'manual-1', startTime: new Date(),
+        id: 'karaoke-current', type: 'trivia', player: 'manual-1', startTime: new Date(),
         data: { question: 'Question?', options: ['A', 'B', 'C'], correct: 2 }
       },
       save: jest.fn().mockResolvedValue(undefined)
@@ -530,7 +530,7 @@ describe('challenge and voting socket identity', () => {
     expect(emit).toHaveBeenCalledWith('trivia-answered', expect.objectContaining({ playerId: 'manual-1' }));
 
     game.activeChallenge.type = 'karaoke';
-    await handleKaraokeVideoEnd(io, tvSocket)({ roomCode: 'ROOMA1' });
+    await handleKaraokeVideoEnd(io, tvSocket)({ roomCode: 'ROOMA1', challengeId: 'karaoke-current' });
     expect(emit).toHaveBeenCalledWith('challenge-completed', {
       success: true,
       result: { points: 75 }
@@ -542,5 +542,27 @@ describe('challenge and voting socket identity', () => {
     );
     expect(room.save).toHaveBeenCalledTimes(1);
     expect(gameHandlers.immediateNextNumber).toHaveBeenCalledWith(io, 'ROOMA1');
+  });
+
+  test('rejects a delayed karaoke end event from an earlier challenge', async () => {
+    const room = {
+      _id: 'room-a', code: 'ROOMA1', currentGame: 'game-a', config: {},
+      save: jest.fn().mockResolvedValue(undefined)
+    };
+    const game = {
+      activeChallenge: { id: 'karaoke-new', type: 'karaoke', player: 'player-a', points: 75 },
+      save: jest.fn().mockResolvedValue(undefined)
+    };
+    Room.findOne.mockResolvedValue(room);
+    Game.findById.mockResolvedValue(game);
+    const tvSocket = makeSocket({ playerId: 'tv-display', tvAuthorized: true });
+    const { io } = makeIO();
+
+    await handleKaraokeVideoEnd(io, tvSocket)({ roomCode: 'ROOMA1', challengeId: 'karaoke-old' });
+
+    expect(tvSocket.emit).toHaveBeenCalledWith('error', { message: 'El karaoke ya no está activo' });
+    expect(game.activeChallenge).toEqual(expect.objectContaining({ id: 'karaoke-new' }));
+    expect(game.save).not.toHaveBeenCalled();
+    expect(Player.findOneAndUpdate).not.toHaveBeenCalled();
   });
 });

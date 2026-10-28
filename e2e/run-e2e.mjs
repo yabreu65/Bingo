@@ -15,12 +15,14 @@ const ciMediaFixtureName = 'media-audit-fixtures';
 const ciMediaFixtureSource = join(root, 'e2e', 'fixtures', 'media');
 const ciMediaFixturePublicDir = join(frontendDir, 'public', 'music', ciMediaFixtureName);
 const ciMediaAliasSource = join(ciMediaFixtureSource, 'ci-video.mp4');
+const ciKaraokeAliasSource = join(ciMediaFixtureSource, 'ci-karaoke.mp4');
 
 const requireFromE2E = createRequire(import.meta.url);
 const requireFromBackend = createRequire(join(backendDir, 'server.js'));
 const requireFromFrontend = createRequire(join(frontendDir, 'package.json'));
 const { chromium } = requireFromE2E('playwright');
 const { MongoMemoryServer } = requireFromBackend('mongodb-memory-server');
+const { CHALLENGE_POOLS } = requireFromBackend(join(backendDir, 'constants/index.js'));
 const { io: socketIO } = requireFromFrontend('socket.io-client');
 const mongoose = requireFromBackend('mongoose');
 const Room = requireFromBackend(join(backendDir, 'models/Room.js'));
@@ -291,6 +293,13 @@ async function main() {
       if (existsSync(target)) continue;
       mkdirSync(join(target, '..'), { recursive: true });
       cpSync(ciMediaAliasSource, target);
+      ciMediaAliases.push(target);
+    }
+    for (const karaoke of CHALLENGE_POOLS.karaoke || []) {
+      const target = join(frontendDir, 'public', 'music', 'karaoke', karaoke.localFile);
+      if (existsSync(target)) continue;
+      mkdirSync(join(target, '..'), { recursive: true });
+      cpSync(ciKaraokeAliasSource, target);
       ciMediaAliases.push(target);
     }
   }
@@ -754,11 +763,30 @@ async function main() {
     await launchChallenge('karaoke');
     await waitForChallengePage([['player-a', playerAPage], ['player-b', playerBPage], ['tv', tvPage]], 'karaoke');
     const karaokeGame = await gameForRoom();
+    const karaokeChallengeId = karaokeGame.activeChallenge.id;
+    assert.ok(karaokeChallengeId, 'Karaoke challenge identity must be persisted');
     assert.equal(karaokeGame.activeChallenge.duration, 60, 'Karaoke default duration must be 60 seconds');
+    const karaokePlayerId = karaokeGame.activeChallenge.player.toString();
+    const karaokePlayerPage = karaokePlayerId === playerASession.playerId.toString() ? playerAPage : playerBPage;
+    await karaokePlayerPage.locator('.challenge-type-karaoke').waitFor({ state: 'visible', timeout: 10000 });
     const karaokeVideo = tvPage.locator('.challenge-overlay video');
     await karaokeVideo.waitFor({ state: 'visible', timeout: 10000 });
+    await tvPage.waitForFunction(
+      () => document.querySelector('.challenge-overlay video')?.readyState >= 2 && document.querySelector('.challenge-overlay video')?.duration > 0,
+      null,
+      { timeout: 10000 }
+    );
+    assert.ok((await karaokeVideo.getAttribute('src'))?.includes('/music/karaoke/'), 'Karaoke must load its local media route');
+    const karaokePlayerBefore = await Player.findById(karaokePlayerId);
     await karaokeVideo.evaluate(video => video.dispatchEvent(new Event('ended')));
     await waitForMongoDocument(gameForRoom, (game) => !game?.activeChallenge, 'karaoke completion');
+    const karaokePlayerAfter = await Player.findById(karaokePlayerId);
+    assert.equal(
+      karaokePlayerAfter.stats.challengesCompleted,
+      karaokePlayerBefore.stats.challengesCompleted + 1,
+      'Karaoke must award completion exactly once'
+    );
+    assert.equal((await Room.findOne({ code: roomCode })).gameState, 'playing', 'Bingo did not resume after karaoke');
     console.log('  riddle correct/incorrect TV feedback, friendly music failure, group responses and 60s karaoke recovery passed');
 
     console.log('  disconnecting and reconnecting player A after visual marks');

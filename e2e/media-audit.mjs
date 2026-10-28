@@ -164,7 +164,8 @@ function externalChallengeReferences() {
 function fixtureReferences() {
   return [
     { catalog: 'CI media fixture', title: 'CI tone', artist: 'Synthetic fixture', path: `music/${ciFixturePublicName}/ci-tone.mp3` },
-    { catalog: 'CI media fixture', title: 'CI video', artist: 'Synthetic fixture', path: `music/${ciFixturePublicName}/ci-video.mp4` }
+    { catalog: 'CI media fixture', title: 'CI video', artist: 'Synthetic fixture', path: `music/${ciFixturePublicName}/ci-video.mp4` },
+    { catalog: 'CI media fixture', title: 'CI karaoke', artist: 'Synthetic fixture', path: `music/${ciFixturePublicName}/ci-karaoke.mp4` }
   ];
 }
 
