@@ -14,8 +14,8 @@ const storageKey = 'bingo_session';
 const ciMediaFixtureName = 'media-audit-fixtures';
 const ciMediaFixtureSource = join(root, 'e2e', 'fixtures', 'media');
 const ciMediaFixturePublicDir = join(frontendDir, 'public', 'music', ciMediaFixtureName);
-const ciMediaAliasSource = join(ciMediaFixtureSource, 'ci-video.mp4');
 const ciKaraokeAliasSource = join(ciMediaFixtureSource, 'ci-karaoke.mp4');
+const ciMediaAliasSource = ciKaraokeAliasSource;
 
 const requireFromE2E = createRequire(import.meta.url);
 const requireFromBackend = createRequire(join(backendDir, 'server.js'));

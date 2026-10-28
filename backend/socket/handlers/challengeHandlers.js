@@ -50,7 +50,7 @@ async function findActiveChallengeActor(socket, data) {
   return { ...actor, game, activeChallenge };
 }
 
-async function finishChallenge(io, actor, { result, publicResult = result, pointsPlayerIds = [], broadcastResult = true }) {
+async function finishChallengeUnlocked(io, actor, { result, publicResult = result, pointsPlayerIds = [], broadcastResult = true }) {
   const { room, game, activeChallenge } = actor;
   const roomCode = room.code;
   const challengeId = activeChallenge.id;
@@ -101,10 +101,19 @@ async function finishChallenge(io, actor, { result, publicResult = result, point
   io.to(roomCode).emit('challenge-completed', { success: true, result: publicResult });
   io.to(roomCode).emit('game-state-changed', { state: 'playing' });
 
-  await gameHandlers.immediateNextNumber(io, roomCode);
+  const callNextNumber = gameHandlers.immediateNextNumberUnlocked || gameHandlers.immediateNextNumber;
+  await callNextNumber(io, roomCode);
   await gameHandlers.scheduleRoomInterval(io, roomCode);
   const { ensureWatchdog } = require('../utils/roomTimer');
   ensureWatchdog(roomCode, (rc) => gameHandlers.scheduleRoomInterval(io, rc), room.config);
+}
+
+async function finishChallenge(io, actor, options) {
+  const gameHandlers = require('./gameHandlers');
+  if (typeof gameHandlers.withRoomGameLock === 'function') {
+    return gameHandlers.withRoomGameLock(actor.room.code, () => finishChallengeUnlocked(io, actor, options));
+  }
+  return finishChallengeUnlocked(io, actor, options);
 }
 
 async function appendGroupResponse(actor, response) {

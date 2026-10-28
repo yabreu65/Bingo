@@ -276,7 +276,7 @@ async function main() {
           assert.ok(participants.length > 0, `${type} challenge selected no connected participant`);
           if (RUN_RESTART && type === 'group') await restartBackend();
           if (type === 'karaoke') {
-            tvSocket.emit('karaoke-video-end', { roomCode });
+            tvSocket.emit('karaoke-video-end', { roomCode, challengeId: challenge.id });
           } else {
             await Promise.all(participants.map(client => {
               client.socket.emit('challenge-complete', { roomCode, playerId: client.id, challengeId: challenge.id, type });
@@ -310,6 +310,14 @@ async function main() {
         `number ${number}`
       );
     }
+    const consistencyGame = await Game.findOne({ room: persistedRoom._id }).lean();
+    assert.equal(metrics.events.duplicates, 0, 'duplicate number events detected');
+    assert.equal(new Set(consistencyGame.calledNumbers).size, consistencyGame.calledNumbers.length, 'duplicate called numbers persisted');
+    assert.equal(
+      consistencyGame.availableNumbers.some(number => consistencyGame.calledNumbers.includes(number)),
+      false,
+      'a called number remained available'
+    );
     await waitForCondition(
       () => Player.findById(players[0].id).lean(),
       current => (current?.bingoCard?.markedCells || []).length >= 24,

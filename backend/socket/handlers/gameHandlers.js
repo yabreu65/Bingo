@@ -35,6 +35,16 @@ const {
 const { updateRoomActivity } = require('../../utils/roomActivity');
 
 const challengeTimers = new Map();
+const roomGameLocks = new Map();
+
+function withRoomGameLock(roomCode, operation) {
+  const previous = roomGameLocks.get(roomCode) || Promise.resolve();
+  const current = previous.catch(() => undefined).then(operation);
+  roomGameLocks.set(roomCode, current);
+  return current.finally(() => {
+    if (roomGameLocks.get(roomCode) === current) roomGameLocks.delete(roomCode);
+  });
+}
 
 function clearChallengeTimer(roomCode) {
   const timer = challengeTimers.get(roomCode);
@@ -113,7 +123,7 @@ async function recoverPersistedRooms(io) {
 /**
  * Llama el siguiente número inmediatamente sin esperar el intervalo
  */
-async function immediateNextNumber(io, roomCode) {
+async function immediateNextNumberUnlocked(io, roomCode) {
   const room = await Room.findOne({ code: roomCode });
   if (!room?.currentGame) {
     logger.warn(`[${roomCode}] Cannot call an immediate number without an active game`);
@@ -158,6 +168,10 @@ async function immediateNextNumber(io, roomCode) {
   });
 
   logger.logGameEvent(roomCode, `Immediate number called: ${nextNum}`);
+}
+
+async function immediateNextNumber(io, roomCode) {
+  return withRoomGameLock(roomCode, () => immediateNextNumberUnlocked(io, roomCode));
 }
 
 /**
@@ -424,7 +438,7 @@ async function scheduleRoomInterval(io, roomCode) {
   const manualCount = (room.manualPlayers || []).length;
   logger.info(`[${roomCode}] Interval set to ${intervalMs / 1000} seconds. Players: ${connectedDigital} digital + ${manualCount} manual`);
 
-  createRoomInterval(roomCode, intervalMs, async (rc) => {
+  createRoomInterval(roomCode, intervalMs, async (rc) => withRoomGameLock(rc, async () => {
     logger.info(`[${rc}] ⏰ Interval triggered`);
 
     try {
@@ -517,7 +531,7 @@ async function scheduleRoomInterval(io, roomCode) {
       // NO limpiar el intervalo aquí, dejar que el watchdog lo maneje
       // El intervalo continuará intentando en el próximo tick
     }
-  });
+  }));
 
   logger.info(`[${roomCode}] ✅ Interval scheduled successfully`);
 }
@@ -940,5 +954,7 @@ module.exports = {
   handleResetGame,
   handleStartCountdown,
   handleLaunchEvent,
-  clearChallengeTimer
+  clearChallengeTimer,
+  withRoomGameLock,
+  immediateNextNumberUnlocked
 };
