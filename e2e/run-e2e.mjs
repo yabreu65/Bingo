@@ -628,10 +628,23 @@ async function main() {
       const answer = game.activeChallenge.data.answers[0];
       await page.getByLabel('Respuesta de la adivinanza').fill(answer);
       await page.getByRole('button', { name: /Enviar respuesta/ }).click();
+      await tvPage.getByRole('status').getByText('RESULTADO DE LA ADIVINANZA').waitFor({ state: 'visible', timeout: 10000 });
+      await tvPage.getByText('✅ ¡CORRECTO!').waitFor({ state: 'visible', timeout: 10000 });
     });
+    await launchChallengeAndComplete('riddle', async (page) => {
+      await page.getByLabel('Respuesta de la adivinanza').fill('respuesta deliberadamente incorrecta');
+      await page.getByRole('button', { name: /Enviar respuesta/ }).click();
+      await tvPage.getByRole('status').getByText('RESULTADO DE LA ADIVINANZA').waitFor({ state: 'visible', timeout: 10000 });
+      await tvPage.getByText('❌ INCORRECTO').waitFor({ state: 'visible', timeout: 10000 });
+      assert.doesNotMatch(await tvPage.locator('body').innerText(), /Failed to fetch/);
+    });
+    const musicFailureRoute = async route => route.abort();
+    await Promise.all(challengePages.map(([, page]) => page.route('**/api/deezer/track/**', musicFailureRoute)));
     await launchChallengeAndComplete('dance', async (page) => {
+      await page.getByText(/La música no está disponible ahora|La música tardó demasiado/).waitFor({ state: 'visible', timeout: 10000 });
       await page.locator('.challenge-modal .btn-close-challenge').click();
     });
+    await Promise.all(challengePages.map(([, page]) => page.unroute('**/api/deezer/track/**', musicFailureRoute)));
     await launchChallengeAndComplete('sing', async (page) => {
       await page.locator('.challenge-modal .btn-close-challenge').click();
     });
@@ -704,9 +717,13 @@ async function main() {
     assert.equal(timeoutRoom.gameState, 'playing', 'Bingo did not resume after group timeout');
     await launchChallenge('karaoke');
     await waitForChallengePage([['player-a', playerAPage], ['player-b', playerBPage], ['tv', tvPage]], 'karaoke');
-    tvControlSocket.emit('karaoke-video-end', { roomCode });
+    const karaokeGame = await gameForRoom();
+    assert.equal(karaokeGame.activeChallenge.duration, 60, 'Karaoke default duration must be 60 seconds');
+    const karaokeVideo = tvPage.locator('.challenge-overlay video');
+    await karaokeVideo.waitFor({ state: 'visible', timeout: 10000 });
+    await karaokeVideo.evaluate(video => video.dispatchEvent(new Event('ended')));
     await waitForMongoDocument(gameForRoom, (game) => !game?.activeChallenge, 'karaoke completion');
-    console.log('  group responses completed interactively in both browsers, points persisted once, and timeout recovery also passed');
+    console.log('  riddle correct/incorrect TV feedback, friendly music failure, group responses and 60s karaoke recovery passed');
 
     console.log('  disconnecting and reconnecting player A after visual marks');
     const savedPlayerASession = await playerAPage.evaluate((key) => JSON.parse(localStorage.getItem(key)), storageKey);
