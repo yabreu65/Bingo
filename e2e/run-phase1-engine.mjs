@@ -255,11 +255,20 @@ async function markCell(page, session, row, col) {
   );
   await cell.waitFor({ state: 'visible', timeout: 10000 });
   await cell.click({ force: true });
-  await waitForMongoDocument(
-    () => Player.findById(session.playerId),
-    (player) => hasMarkedCell(player, row, col),
-    `mark ${row},${col}`
-  );
+  try {
+    await waitForMongoDocument(
+      () => Player.findById(session.playerId),
+      (player) => hasMarkedCell(player, row, col),
+      `mark ${row},${col}`
+    );
+  } catch (error) {
+    const diagnostic = await page.locator('body').innerText().catch(() => 'unavailable');
+    const cellState = await cell.evaluate((element) => ({
+      className: element.className,
+      value: element.dataset.value
+    })).catch(() => null);
+    throw new Error(`${error.message}; cell=${JSON.stringify(cellState)}; body=${diagnostic.slice(-800)}`);
+  }
 }
 
 async function createRoomScenario(browser, gameMode, label) {
@@ -443,6 +452,11 @@ async function runStateAndStatsScenario(browser) {
     const stateCell = [0, 0];
     const stateValue = getCardCell(playerCard.bingoCard.matrix, stateCell[0], stateCell[1]);
     await callNumber(hostSocket, hostSession.roomCode, hostSession.hostCapability, stateValue);
+    await waitForMongoDocument(
+      () => Game.findById(startedRoom.currentGame),
+      (game) => game.calledNumbers.includes(stateValue),
+      `state number ${stateValue} persisted before pause`
+    );
     hostSocket.disconnect();
     hostSocket = null;
     await hostPage.reload();
@@ -515,6 +529,12 @@ async function runStateAndStatsScenario(browser) {
 
     await playerAPage.reload();
     await waitForBody(playerAPage, /Números cantados \([1-9][0-9]*\)/, 10000);
+    const stateCellSelector = `[data-testid="bingo-card-cell"][data-row="${stateCell[0]}"][data-col="${stateCell[1]}"]`;
+    await playerAPage.waitForFunction(
+      (selector) => document.querySelector(selector)?.classList.contains('available'),
+      stateCellSelector,
+      { timeout: 10000 }
+    );
     await markCell(playerAPage, playerASession, stateCell[0], stateCell[1]);
     const markedStats = await Player.findById(playerASession.playerId);
     assert.equal(markedStats.stats.numbersMarked, 2);
