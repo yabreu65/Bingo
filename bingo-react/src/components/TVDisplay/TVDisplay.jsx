@@ -544,7 +544,7 @@ const TVDisplay = ({ roomCode, tvCapability }) => {
   };
 
   return (
-    <div className="tv-display-grid">
+    <div className="tv-display-grid pf-tv-stage">
       {/* Elementos de audio ocultos para sonidos de trivia */}
       <audio ref={applauseAudioRef} src="/sounds/aplauso.mp3" preload="auto" />
       <audio ref={donkeyAudioRef} src="/sounds/burro.mp3" preload="auto" />
