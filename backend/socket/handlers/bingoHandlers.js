@@ -7,6 +7,7 @@ const { getCalledMarkedCells, validateBingoClaim } = require('../utils/bingoVali
 const { GAME_CONSTANTS } = require('../../constants');
 const { clearAllRoomTimers } = require('../utils/roomTimer');
 const { isRoomHost, emitPermissionError } = require('../../middleware/socketAuthMiddleware');
+const { revokeTemporaryTvSockets } = require('../../utils/tvAuthorization');
 
 const canControlRoom = (socket, room, data) => isRoomHost(socket, room, data?.hostCapability);
 const canControlTiebreak = async (socket, room, data) => {
@@ -94,6 +95,7 @@ async function finishGameWithWinner(io, room, game, player, bingoType) {
 
   room.gameState = 'finished';
   await room.save();
+  revokeTemporaryTvSockets(io, room.code);
 
   clearAllRoomTimers(room.code);
 
@@ -811,6 +813,7 @@ function handleVerifyBingoManual(io, socket) {
 
       room.gameState = 'finished';
       await room.save();
+      revokeTemporaryTvSockets(io, room.code);
 
       clearAllRoomTimers(room.code);
 

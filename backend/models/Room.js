@@ -26,6 +26,21 @@ const roomSchema = new mongoose.Schema({
     type: String,
     select: false
   },
+  tvAuthorization: {
+    linkTokenHash: {
+      type: String,
+      select: false
+    },
+    linkExpiresAt: Date,
+    linkClaimedAt: Date,
+    sessionTokenHash: {
+      type: String,
+      select: false
+    },
+    sessionExpiresAt: Date,
+    sessionLastSeenAt: Date,
+    revokedAt: Date
+  },
   players: [{
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Player'

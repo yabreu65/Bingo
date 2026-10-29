@@ -16,6 +16,14 @@ const {
 } = require('../utils/playerCapability');
 const { stripGuestCapabilityHashes, stripTriviaAnswers, stripPrivatePlayerData } = require('../utils/publicData');
 const { createTvCapability, createTvCapabilityHash } = require('../utils/tvCapability');
+const {
+  createTvAuthorizationToken,
+  isTvAuthorizationToken,
+  hashTvAuthorizationToken,
+  getTvAuthorizationLinkTtlMs,
+  getTvAuthorizationSessionTtlMs,
+  revokeTemporaryTvSockets
+} = require('../utils/tvAuthorization');
 const { matchesPlayerCapability } = require('../utils/playerCapability');
 const {
   createRoomSchema,
@@ -23,13 +31,18 @@ const {
   getRoomSchema,
   selectCardSchema,
   updateConfigSchema,
-  reconnectSchema
+  reconnectSchema,
+  createTvAuthorizationSchema,
+  claimTvAuthorizationSchema,
+  renewTvAuthorizationSchema,
+  revokeTvAuthorizationSchema
 } = require('../schemas/roomSchemas');
 const {
   createRoomLimiter,
   joinRoomLimiter,
   generalApiLimiter,
   selectCardLimiter,
+  tvAuthorizationLimiter,
   speedLimiter
 } = require('../config/rateLimiters');
 const { normalizeNewRoomConfig } = require('../utils/roomConfiguration');
@@ -132,6 +145,187 @@ router.post('/join', joinRoomLimiter, speedLimiter, validateRequest(joinRoomSche
   } catch (error) {
     logger.error('Error joining room:', error);
     res.status(500).json({ error: 'Error interno del servidor' });
+  }
+});
+
+const findRoomForHostCapability = async (code) => Room.findOne({
+  code: code.toUpperCase(),
+  isActive: true
+}).select('+hostCapabilityHash');
+
+const authorizeRoomHost = async (req, res) => {
+  const room = await findRoomForHostCapability(req.params.code);
+  if (!room) {
+    res.status(404).json({ error: 'Sala no encontrada' });
+    return null;
+  }
+  const authorized = await isRoomHost(req, room, req.get('x-room-host-capability'));
+  if (!authorized) {
+    res.status(403).json({ error: 'No tienes permisos para autorizar la TV' });
+    return null;
+  }
+  return room;
+};
+
+// Generate a one-time TV link. MongoDB stores only the room-bound hash.
+router.post('/:code/tv-authorization', tvAuthorizationLimiter, validateRequest(createTvAuthorizationSchema), async (req, res) => {
+  try {
+    const room = await authorizeRoomHost(req, res);
+    if (!room) return;
+
+    const now = new Date();
+    const tvToken = createTvAuthorizationToken();
+    const linkExpiresAt = new Date(now.getTime() + getTvAuthorizationLinkTtlMs());
+    room.tvAuthorization = {
+      linkTokenHash: hashTvAuthorizationToken(tvToken, room._id),
+      linkExpiresAt,
+      linkClaimedAt: undefined,
+      sessionTokenHash: undefined,
+      sessionExpiresAt: undefined,
+      sessionLastSeenAt: undefined,
+      revokedAt: undefined
+    };
+    await room.save();
+
+    revokeTemporaryTvSockets(req.app.get('io'), room.code);
+    res.json({
+      success: true,
+      roomCode: room.code,
+      tvToken,
+      expiresAt: linkExpiresAt.toISOString()
+    });
+  } catch (error) {
+    logger.error('Error generating TV authorization:', error);
+    res.status(500).json({ error: 'No se pudo generar la autorización temporal de TV' });
+  }
+});
+
+// Consume the one-time link and issue a separate short-lived TV session.
+router.post('/:code/tv-authorization/claim', tvAuthorizationLimiter, validateRequest(claimTvAuthorizationSchema), async (req, res) => {
+  try {
+    const roomCode = req.params.code.toUpperCase();
+    const { token } = req.body;
+    const room = await Room.findOne({ code: roomCode, isActive: true })
+      .select('+tvAuthorization.linkTokenHash +tvAuthorization.sessionTokenHash');
+    if (!room || !isTvAuthorizationToken(token)) {
+      return res.status(400).json({ error: 'Enlace de TV inválido o expirado' });
+    }
+
+    const now = new Date();
+    const sessionToken = createTvAuthorizationToken();
+    const sessionExpiresAt = new Date(now.getTime() + getTvAuthorizationSessionTtlMs());
+    const claimedRoom = await Room.findOneAndUpdate(
+      {
+        _id: room._id,
+        isActive: true,
+        'tvAuthorization.linkTokenHash': hashTvAuthorizationToken(token, room._id),
+        'tvAuthorization.linkExpiresAt': { $gt: now },
+        'tvAuthorization.linkClaimedAt': null,
+        'tvAuthorization.revokedAt': null
+      },
+      {
+        $set: {
+          'tvAuthorization.linkClaimedAt': now,
+          'tvAuthorization.sessionTokenHash': hashTvAuthorizationToken(sessionToken, room._id),
+          'tvAuthorization.sessionExpiresAt': sessionExpiresAt,
+          'tvAuthorization.sessionLastSeenAt': now
+        }
+      },
+      { new: true, runValidators: true }
+    );
+    if (!claimedRoom) {
+      return res.status(409).json({ error: 'Enlace de TV inválido, expirado o ya utilizado' });
+    }
+
+    req.app.get('io')?.to(roomCode).emit('tv-authorization-status', {
+      roomCode,
+      connected: false,
+      claimed: true,
+      expiresAt: sessionExpiresAt.toISOString()
+    });
+    return res.json({
+      success: true,
+      roomCode,
+      tvSessionToken: sessionToken,
+      expiresAt: sessionExpiresAt.toISOString()
+    });
+  } catch (error) {
+    logger.error('Error claiming TV authorization:', error);
+    return res.status(500).json({ error: 'No se pudo reclamar el enlace de TV' });
+  }
+});
+
+router.post('/:code/tv-authorization/renew', tvAuthorizationLimiter, validateRequest(renewTvAuthorizationSchema), async (req, res) => {
+  try {
+    const roomCode = req.params.code.toUpperCase();
+    const sessionToken = req.get('x-tv-session-token');
+    if (!isTvAuthorizationToken(sessionToken)) {
+      return res.status(401).json({ error: 'Sesión de TV inválida' });
+    }
+
+    const now = new Date();
+    const sessionExpiresAt = new Date(now.getTime() + getTvAuthorizationSessionTtlMs());
+    const roomForSession = await Room.findOne({ code: roomCode, isActive: true })
+      .select('+tvAuthorization.sessionTokenHash');
+    if (!roomForSession) return res.status(401).json({ error: 'Sesión de TV inválida' });
+    const room = await Room.findOneAndUpdate(
+      {
+        _id: roomForSession._id,
+        isActive: true,
+        'tvAuthorization.sessionTokenHash': hashTvAuthorizationToken(sessionToken, roomForSession._id),
+        'tvAuthorization.sessionExpiresAt': { $gt: now },
+        'tvAuthorization.revokedAt': null
+      },
+      {
+        $set: {
+          'tvAuthorization.sessionExpiresAt': sessionExpiresAt,
+          'tvAuthorization.sessionLastSeenAt': now
+        }
+      },
+      { new: true }
+    );
+    if (!room) return res.status(401).json({ error: 'Sesión de TV expirada o revocada' });
+
+    req.app.get('io')?.to(roomCode).emit('tv-authorization-status', {
+      roomCode,
+      connected: true,
+      expiresAt: sessionExpiresAt.toISOString()
+    });
+
+    return res.json({ success: true, roomCode, expiresAt: sessionExpiresAt.toISOString() });
+  } catch (error) {
+    logger.error('Error renewing TV authorization:', error);
+    return res.status(500).json({ error: 'No se pudo renovar la sesión de TV' });
+  }
+});
+
+router.post('/:code/tv-authorization/revoke', tvAuthorizationLimiter, validateRequest(revokeTvAuthorizationSchema), async (req, res) => {
+  try {
+    const room = await authorizeRoomHost(req, res);
+    if (!room) return;
+
+    const now = new Date();
+    room.tvAuthorization = {
+      ...(room.tvAuthorization?.toObject?.() || room.tvAuthorization || {}),
+      linkTokenHash: undefined,
+      linkExpiresAt: undefined,
+      linkClaimedAt: undefined,
+      sessionTokenHash: undefined,
+      sessionExpiresAt: undefined,
+      sessionLastSeenAt: undefined,
+      revokedAt: now
+    };
+    await room.save();
+    revokeTemporaryTvSockets(req.app.get('io'), room.code);
+    req.app.get('io')?.to(room.code).emit('tv-authorization-status', {
+      roomCode: room.code,
+      connected: false,
+      revokedAt: now.toISOString()
+    });
+    return res.json({ success: true, roomCode: room.code, revokedAt: now.toISOString() });
+  } catch (error) {
+    logger.error('Error revoking TV authorization:', error);
+    return res.status(500).json({ error: 'No se pudo revocar la autorización de TV' });
   }
 });
 

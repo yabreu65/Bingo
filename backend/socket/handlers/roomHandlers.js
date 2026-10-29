@@ -6,7 +6,31 @@ const { isRoomHost, emitPermissionError } = require('../../middleware/socketAuth
 const { createPlayerCapabilityHash, isPlayerCapability } = require('../../utils/playerCapability');
 const { stripGuestCapabilityHashes, stripPrivatePlayerData } = require('../../utils/publicData');
 const { matchesTvCapability } = require('../../utils/tvCapability');
+const {
+  isTvAuthorizationToken,
+  hashTvAuthorizationToken,
+  claimTemporaryTvSocket,
+  releaseTemporaryTvSocket,
+  revokeTemporaryTvSockets
+} = require('../../utils/tvAuthorization');
 const { clearAllRoomTimers } = require('../utils/roomTimer');
+
+async function matchesTvSession(room, sessionToken) {
+  if (!room?._id || !isTvAuthorizationToken(sessionToken)) return false;
+  const now = new Date();
+  const updatedRoom = await Room.findOneAndUpdate(
+    {
+      _id: room._id,
+      isActive: true,
+      'tvAuthorization.sessionTokenHash': hashTvAuthorizationToken(sessionToken, room._id),
+      'tvAuthorization.sessionExpiresAt': { $gt: now },
+      'tvAuthorization.revokedAt': null
+    },
+    { $set: { 'tvAuthorization.sessionLastSeenAt': now } },
+    { new: true }
+  );
+  return !!updatedRoom;
+}
 
 /**
  * Emite información de la sala a todos los conectados
@@ -60,13 +84,23 @@ function handleJoinRoom(io, socket) {
       }
 
       if (playerId === 'tv-display') {
-        if (!matchesTvCapability(data?.tvCapability, room.tvCapabilityHash, room._id)) {
-          if (callback) callback({ success: false, error: 'Credencial de TV inválida' });
+        const usesTemporarySession = typeof data?.tvSessionToken === 'string';
+        const authorized = usesTemporarySession
+          ? await matchesTvSession(room, data.tvSessionToken)
+          : matchesTvCapability(data?.tvCapability, room.tvCapabilityHash, room._id);
+        if (!authorized) {
+          if (callback) callback({ success: false, error: 'Credencial de TV inválida o expirada' });
+          return;
+        }
+        if (usesTemporarySession && !(await claimTemporaryTvSocket(room.code, socket))) {
+          if (callback) callback({ success: false, error: 'Ya hay una TV autorizada activa en esta sala' });
           return;
         }
         socket.tvAuthorized = true;
+        socket.tvAuthorizationType = usesTemporarySession ? 'temporary' : 'legacy';
       } else {
         socket.tvAuthorized = false;
+        socket.tvAuthorizationType = undefined;
         const player = await Player.findById(playerId);
         const playerRoomId = player?.room?._id || player?.room;
         const isListedInRoom = room.players.some((roomPlayer) => {
@@ -150,6 +184,14 @@ function handleJoinRoom(io, socket) {
 
       await broadcastRoomInfo(io, room.code);
 
+      if (playerId === 'tv-display' && socket.tvAuthorizationType === 'temporary') {
+        io.to(room.code).emit('tv-authorization-status', {
+          roomCode: room.code,
+          connected: true,
+          expiresAt: room.tvAuthorization?.sessionExpiresAt || null
+        });
+      }
+
       logger.logRoomEvent(room.code, playerId === 'tv-display' ? 'TV Display joined' : 'Player joined', {
         playerId,
         socketId: socket.id
@@ -204,6 +246,10 @@ function handleLeaveRoom(io, socket) {
       socket.roomCode = undefined;
       socket.playerId = undefined;
       socket.tvAuthorized = false;
+      if (playerId === 'tv-display' && socket.tvAuthorizationType === 'temporary') {
+        releaseTemporaryTvSocket(roomCode, socket);
+      }
+      socket.tvAuthorizationType = undefined;
 
       const updatedRoom = await Room.findOne({ code: roomCode }).populate('players');
       io.to(roomCode).emit('player-left', {
@@ -268,6 +314,7 @@ function handleCloseRoom(io, socket) {
 
         // Limpiar timers
         clearAllRoomTimers(roomCode);
+        revokeTemporaryTvSockets(io, roomCode);
 
         // Eliminar sala
         await Room.findByIdAndDelete(room._id);
@@ -376,7 +423,13 @@ function handleKickPlayer(io, socket) {
 function handleDisconnect(io, socket) {
   return async () => {
     try {
-      if (!socket.playerId || socket.playerId === 'tv-display' || !socket.roomCode) return;
+      if (socket.playerId === 'tv-display') {
+        if (socket.tvAuthorizationType === 'temporary') {
+          releaseTemporaryTvSocket(socket.roomCode, socket);
+        }
+        return;
+      }
+      if (!socket.playerId || !socket.roomCode) return;
 
       const room = await Room.findOne({ code: socket.roomCode }).populate('players');
       const player = await Player.findById(socket.playerId);

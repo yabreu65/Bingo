@@ -73,6 +73,7 @@ const corsOptions = {
 const io = socketIo(server, {
   cors: corsOptions
 });
+app.set('io', io);
 
 // Socket.io authentication middleware
 io.use(socketAuthMiddleware);

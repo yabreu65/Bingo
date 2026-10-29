@@ -78,6 +78,17 @@ const selectCardLimiter = rateLimit({
   }
 });
 
+const tvAuthorizationLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: isProduction ? 30 : 1000,
+  standardHeaders: true,
+  legacyHeaders: false,
+  handler: (req, res) => {
+    const retryInSeconds = Math.ceil((req.rateLimit.resetTime - Date.now()) / 1000);
+    res.status(429).json(rateLimitErrorResponse(retryInSeconds));
+  }
+});
+
 /**
  * Whitelist de IPs confiables (localhost, testing)
  * En producción, agregar IPs de servidores confiables aquí
@@ -98,6 +109,7 @@ module.exports = {
   generalApiLimiter,
   speedLimiter,
   selectCardLimiter,
+  tvAuthorizationLimiter,
   skipTrustedIPs,
   trustedIPs
 };

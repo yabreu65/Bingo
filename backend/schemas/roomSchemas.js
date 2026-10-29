@@ -189,11 +189,41 @@ const reconnectSchema = z.object({
   })
 });
 
+const tvAuthorizationParams = z.object({
+  code: z.string()
+    .length(6, 'El código de sala debe tener exactamente 6 caracteres')
+    .regex(/^[A-Z0-9]+$/, 'El código de sala debe tener exactamente 6 caracteres')
+});
+
+const tvAuthorizationToken = z.string()
+  .regex(/^[A-Za-z0-9_-]{43}$/, 'Token de TV inválido');
+
+const createTvAuthorizationSchema = z.object({
+  params: tvAuthorizationParams
+});
+
+const claimTvAuthorizationSchema = z.object({
+  params: tvAuthorizationParams,
+  body: z.object({ token: tvAuthorizationToken })
+});
+
+const renewTvAuthorizationSchema = z.object({
+  params: tvAuthorizationParams
+});
+
+const revokeTvAuthorizationSchema = z.object({
+  params: tvAuthorizationParams
+});
+
 module.exports = {
   createRoomSchema,
   joinRoomSchema,
   getRoomSchema,
   selectCardSchema,
   updateConfigSchema,
-  reconnectSchema
+  reconnectSchema,
+  createTvAuthorizationSchema,
+  claimTvAuthorizationSchema,
+  renewTvAuthorizationSchema,
+  revokeTvAuthorizationSchema
 };
