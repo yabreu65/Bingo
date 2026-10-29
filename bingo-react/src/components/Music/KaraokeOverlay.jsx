@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useRef } from 'react';
 
-export default function KaraokeOverlay({ localFile, maxDuration = 60, onVideoEnd, onUnavailable }) {
+export default function KaraokeOverlay({ localFile, videoUrl, maxDuration = 60, onVideoEnd, onUnavailable }) {
   const completionSentRef = useRef(false);
   const videoRef = useRef(null);
 
-  const videoPath = `/music/karaoke/${localFile}`;
+  const videoPath = videoUrl || `/music/karaoke/${encodeURIComponent(localFile)}`;
 
   const handleVideoEnd = useCallback(() => {
     if (completionSentRef.current) return;

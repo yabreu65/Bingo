@@ -42,6 +42,7 @@ const createRoomSchema = z.object({
       eventMode: z.enum(['LOCAL', 'REMOTE_PRESENTIAL', 'DISTRIBUTED']).optional(),
       multimediaPolicy: z.object({
         primarySurface: z.enum(['tv', 'players', 'both']).optional(),
+        tvMediaSource: z.enum(['SERVER', 'LOCAL_TV']).optional(),
         playerPlayback: z.enum(['disabled', 'optional', 'required']).optional(),
         allowExternalSources: z.boolean().optional()
       }).optional(),
@@ -159,6 +160,7 @@ const updateConfigSchema = z.object({
       eventMode: z.enum(['LOCAL', 'REMOTE_PRESENTIAL', 'DISTRIBUTED']).optional(),
       multimediaPolicy: z.object({
         primarySurface: z.enum(['tv', 'players', 'both']).optional(),
+        tvMediaSource: z.enum(['SERVER', 'LOCAL_TV']).optional(),
         playerPlayback: z.enum(['disabled', 'optional', 'required']).optional(),
         allowExternalSources: z.boolean().optional()
       }).optional(),

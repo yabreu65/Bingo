@@ -8,21 +8,25 @@ export const EVENT_MODES = Object.freeze({
 const DEFAULT_POLICIES = Object.freeze({
   LOCAL: Object.freeze({
     primarySurface: 'tv',
+    tvMediaSource: 'SERVER',
     playerPlayback: 'optional',
     allowExternalSources: false
   }),
   REMOTE_PRESENTIAL: Object.freeze({
     primarySurface: 'tv',
+    tvMediaSource: 'SERVER',
     playerPlayback: 'optional',
     allowExternalSources: false
   }),
   DISTRIBUTED: Object.freeze({
     primarySurface: 'both',
+    tvMediaSource: 'SERVER',
     playerPlayback: 'optional',
     allowExternalSources: false
   }),
   LEGACY: Object.freeze({
     primarySurface: 'both',
+    tvMediaSource: 'SERVER',
     playerPlayback: 'optional',
     allowExternalSources: true
   })
@@ -35,10 +39,16 @@ export const resolveMultimediaPolicy = (config = {}) => {
   const explicitPolicy = config?.multimediaPolicy;
   const defaults = DEFAULT_POLICIES[mode] || DEFAULT_POLICIES.LEGACY;
 
+  const tvMediaSource = mode === EVENT_MODES.REMOTE_PRESENTIAL &&
+    explicitPolicy?.tvMediaSource === 'LOCAL_TV'
+    ? 'LOCAL_TV'
+    : defaults.tvMediaSource;
+
   return {
     mode,
     legacy: mode === EVENT_MODES.LEGACY && !explicitPolicy,
     primarySurface: explicitPolicy?.primarySurface || defaults.primarySurface,
+    tvMediaSource,
     playerPlayback: explicitPolicy?.playerPlayback || defaults.playerPlayback,
     allowExternalSources: typeof explicitPolicy?.allowExternalSources === 'boolean'
       ? explicitPolicy.allowExternalSources

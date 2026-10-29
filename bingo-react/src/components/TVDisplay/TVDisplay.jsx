@@ -9,6 +9,7 @@ import { Radio, Tv, Users, Crown } from 'lucide-react';
 import DeezerPlayer from '../Music/DeezerPlayer';
 import KaraokeOverlay from '../Music/KaraokeOverlay';
 import { resolveMultimediaPolicy, shouldRenderTvMedia, shouldUseExternalSources } from '../../utils/multimediaPolicy';
+import { resolveTvMediaUrl } from '../../utils/localTvMedia';
  
 import { getShareableUrl } from '../../utils/networkUtils';
 import './TVDisplay.css';
@@ -66,6 +67,10 @@ const TVDisplay = ({ roomCode, tvCapability, tvSessionToken, tvAuthorizationErro
   );
   const canRenderTvMedia = shouldRenderTvMedia(multimediaPolicy);
   const canUseExternalSources = shouldUseExternalSources(multimediaPolicy);
+  const tvMediaUrl = useCallback(
+    (relativePath) => resolveTvMediaUrl(relativePath, multimediaPolicy || { mode: 'LEGACY' }),
+    [multimediaPolicy]
+  );
 
   const handleKaraokeVideoEnd = useCallback(() => {
     socket?.emit('karaoke-video-end', {
@@ -569,8 +574,8 @@ const TVDisplay = ({ roomCode, tvCapability, tvSessionToken, tvAuthorizationErro
         </div>
       )}
       {/* Elementos de audio ocultos para sonidos de trivia */}
-      {canRenderTvMedia && <audio ref={applauseAudioRef} src="/sounds/aplauso.mp3" preload="auto" />}
-      {canRenderTvMedia && <audio ref={donkeyAudioRef} src="/sounds/burro.mp3" preload="auto" />}
+      {canRenderTvMedia && <audio ref={applauseAudioRef} src={tvMediaUrl('sounds/aplauso.mp3')} preload="auto" />}
+      {canRenderTvMedia && <audio ref={donkeyAudioRef} src={tvMediaUrl('sounds/burro.mp3')} preload="auto" />}
 
       {/* OVERLAYS */}
       <AnimatePresence>
@@ -730,6 +735,7 @@ const TVDisplay = ({ roomCode, tvCapability, tvSessionToken, tvAuthorizationErro
                 {activeChallenge.localFile && canRenderTvMedia && (
                   <KaraokeOverlay
                     localFile={activeChallenge.localFile}
+                    videoUrl={tvMediaUrl(`music/karaoke/${activeChallenge.localFile}`)}
                       maxDuration={activeChallenge.duration}
                       onVideoEnd={handleKaraokeVideoEnd}
                       onUnavailable={(message) => console.warn(message)}
@@ -895,7 +901,7 @@ const TVDisplay = ({ roomCode, tvCapability, tvSessionToken, tvAuthorizationErro
                   autoPlay
                 >
                   <source
-                    src={`/music/${tieBreakPerformer.songData.localFile}`}
+                    src={tvMediaUrl(`music/${tieBreakPerformer.songData.localFile}`)}
                     type="video/mp4"
                   />
                 </video>
@@ -1063,7 +1069,7 @@ const TVDisplay = ({ roomCode, tvCapability, tvSessionToken, tvAuthorizationErro
             onError={() => setMusicStatus('unavailable')}
           >
             {currentSong?.localFile && (
-              <source src={`/music/${encodeURIComponent(currentSong.localFile)}`} type="video/mp4" />
+              <source src={tvMediaUrl(`music/${currentSong.localFile}`)} type="video/mp4" />
             )}
             Tu navegador no soporta el elemento de video.
           </video> : (
@@ -1126,8 +1132,8 @@ const TVDisplay = ({ roomCode, tvCapability, tvSessionToken, tvAuthorizationErro
       </section>
 
       {/* Elementos de audio para sonidos de trivia */}
-      {canRenderTvMedia && <audio ref={applauseAudioRef} src="/sounds/aplauso.mp3" preload="auto" />}
-      {canRenderTvMedia && <audio ref={donkeyAudioRef} src="/sounds/burro.mp3" preload="auto" />}
+      {canRenderTvMedia && <audio ref={applauseAudioRef} src={tvMediaUrl('sounds/aplauso.mp3')} preload="auto" />}
+      {canRenderTvMedia && <audio ref={donkeyAudioRef} src={tvMediaUrl('sounds/burro.mp3')} preload="auto" />}
     </div>
   );
 };

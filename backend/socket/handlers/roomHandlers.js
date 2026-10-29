@@ -50,7 +50,20 @@ async function broadcastRoomInfo(io, roomCode) {
       io.to(roomCode).emit('room-info', {
         playerCount: totalPlayers, // Incluir jugadores digitales Y manuales
         gameState: room.gameState,
-        config: { challengeEffectsMuted: room.config?.challengeEffectsMuted === true },
+        // Only non-sensitive presentation settings are broadcast. Capability
+        // hashes and temporary TV secrets never belong in room-info.
+        config: {
+          challengeEffectsMuted: room.config?.challengeEffectsMuted === true,
+          eventMode: room.config?.eventMode,
+          multimediaPolicy: room.config?.multimediaPolicy
+            ? {
+              primarySurface: room.config.multimediaPolicy.primarySurface,
+              tvMediaSource: room.config.multimediaPolicy.tvMediaSource || 'SERVER',
+              playerPlayback: room.config.multimediaPolicy.playerPlayback,
+              allowExternalSources: room.config.multimediaPolicy.allowExternalSources === true
+            }
+            : undefined
+        },
         manualPlayers: room.manualPlayers || []
       });
     }

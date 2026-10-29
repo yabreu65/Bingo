@@ -29,6 +29,7 @@ describe('multimedia policy resolution', () => {
     const policy = resolveMultimediaPolicy({ eventMode });
 
     expect(policy.primarySurface).toBe('tv');
+    expect(policy.tvMediaSource).toBe('SERVER');
     expect(policy.playerPlayback).toBe('optional');
     expect(shouldRenderTvMedia(policy)).toBe(true);
     expect(shouldRenderPlayerMedia(policy)).toBe(true);
@@ -82,5 +83,17 @@ describe('multimedia policy resolution', () => {
     expect(policy.primarySurface).toBe('both');
     expect(policy.playerPlayback).toBe('disabled');
     expect(policy.allowExternalSources).toBe(false);
+  });
+
+  it('enables local TV media only for remote presential events', () => {
+    expect(resolveMultimediaPolicy({
+      eventMode: 'REMOTE_PRESENTIAL',
+      multimediaPolicy: { tvMediaSource: 'LOCAL_TV' }
+    }).tvMediaSource).toBe('LOCAL_TV');
+
+    expect(resolveMultimediaPolicy({
+      eventMode: 'DISTRIBUTED',
+      multimediaPolicy: { tvMediaSource: 'LOCAL_TV' }
+    }).tvMediaSource).toBe('SERVER');
   });
 });

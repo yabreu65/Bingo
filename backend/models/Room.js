@@ -83,6 +83,11 @@ const roomSchema = new mongoose.Schema({
         type: String,
         enum: ['tv', 'players', 'both']
       },
+      tvMediaSource: {
+        type: String,
+        enum: ['SERVER', 'LOCAL_TV'],
+        default: 'SERVER'
+      },
       playerPlayback: {
         type: String,
         enum: ['disabled', 'optional', 'required']

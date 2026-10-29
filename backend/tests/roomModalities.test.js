@@ -41,6 +41,7 @@ describe('event modality configuration', () => {
       eventMode,
       multimediaPolicy: {
         primarySurface,
+        tvMediaSource: 'SERVER',
         playerPlayback: 'optional',
         allowExternalSources: false
       }
@@ -64,6 +65,7 @@ describe('event modality configuration', () => {
       eventMode: 'LOCAL',
       multimediaPolicy: {
         primarySurface: 'tv',
+        tvMediaSource: 'SERVER',
         playerPlayback: 'optional',
         allowExternalSources: false
       }
@@ -79,5 +81,35 @@ describe('event modality configuration', () => {
       });
 
     expect(response.status).toBe(400);
+  });
+
+  test('allows LOCAL_TV only for REMOTE_PRESENTIAL and keeps other modes on SERVER', () => {
+    expect(resolveMultimediaPolicy({
+      eventMode: 'REMOTE_PRESENTIAL',
+      multimediaPolicy: { tvMediaSource: 'LOCAL_TV' }
+    })).toMatchObject({
+      tvMediaSource: 'LOCAL_TV',
+      primarySurface: 'tv'
+    });
+
+    expect(resolveMultimediaPolicy({
+      eventMode: 'LOCAL',
+      multimediaPolicy: { tvMediaSource: 'LOCAL_TV' }
+    }).tvMediaSource).toBe('SERVER');
+  });
+
+  test('normalizes a partial explicit policy over its mode defaults', () => {
+    expect(normalizeNewRoomConfig({
+      eventMode: 'REMOTE_PRESENTIAL',
+      multimediaPolicy: { tvMediaSource: 'LOCAL_TV' }
+    })).toMatchObject({
+      eventMode: 'REMOTE_PRESENTIAL',
+      multimediaPolicy: {
+        primarySurface: 'tv',
+        tvMediaSource: 'LOCAL_TV',
+        playerPlayback: 'optional',
+        allowExternalSources: false
+      }
+    });
   });
 });

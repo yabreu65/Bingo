@@ -475,14 +475,21 @@ router.patch('/:code/config', generalApiLimiter, optionalAuth, validateRequest(u
         ...(req.body.config.enabledChallengeTypes || {})
       }
     };
+    if (currentConfig.multimediaPolicy || req.body.config.multimediaPolicy) {
+      nextConfig.multimediaPolicy = {
+        ...(currentConfig.multimediaPolicy || {}),
+        ...(req.body.config.multimediaPolicy || {})
+      };
+    }
     // Only new/explicitly migrated configurations are normalized. A legacy
     // room remains untouched when an unrelated setting is updated.
     if (req.body.config.eventMode && !currentConfig.eventMode) {
       const normalized = normalizeNewRoomConfig(nextConfig);
       nextConfig.eventMode = normalized.eventMode;
-      if (!req.body.config.multimediaPolicy) {
-        nextConfig.multimediaPolicy = normalized.multimediaPolicy;
-      }
+      nextConfig.multimediaPolicy = {
+        ...(normalized.multimediaPolicy || {}),
+        ...(req.body.config.multimediaPolicy || {})
+      };
     }
     room.config = nextConfig;
     await room.save();

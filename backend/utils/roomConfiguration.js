@@ -14,16 +14,19 @@ const SELECTABLE_EVENT_MODES = Object.freeze([
 const DEFAULT_MULTIMEDIA_POLICIES = Object.freeze({
   LOCAL: Object.freeze({
     primarySurface: 'tv',
+    tvMediaSource: 'SERVER',
     playerPlayback: 'optional',
     allowExternalSources: false
   }),
   REMOTE_PRESENTIAL: Object.freeze({
     primarySurface: 'tv',
+    tvMediaSource: 'SERVER',
     playerPlayback: 'optional',
     allowExternalSources: false
   }),
   DISTRIBUTED: Object.freeze({
     primarySurface: 'both',
+    tvMediaSource: 'SERVER',
     playerPlayback: 'optional',
     allowExternalSources: false
   })
@@ -31,6 +34,7 @@ const DEFAULT_MULTIMEDIA_POLICIES = Object.freeze({
 
 const clonePolicy = (policy) => ({
   primarySurface: policy.primarySurface,
+  tvMediaSource: policy.tvMediaSource,
   playerPlayback: policy.playerPlayback,
   allowExternalSources: policy.allowExternalSources
 });
@@ -41,11 +45,12 @@ const resolveEventMode = (config = {}) => {
 };
 
 const resolveMultimediaPolicy = (config = {}) => {
-  if (config?.multimediaPolicy) return { ...config.multimediaPolicy };
   const mode = resolveEventMode(config);
-  return DEFAULT_MULTIMEDIA_POLICIES[mode]
-    ? clonePolicy(DEFAULT_MULTIMEDIA_POLICIES[mode])
-    : null;
+  const defaults = DEFAULT_MULTIMEDIA_POLICIES[mode];
+  if (!defaults && !config?.multimediaPolicy) return null;
+  const policy = { ...(defaults ? clonePolicy(defaults) : {}), ...(config.multimediaPolicy || {}) };
+  if (mode !== EVENT_MODES.REMOTE_PRESENTIAL) policy.tvMediaSource = 'SERVER';
+  return policy;
 };
 
 const normalizeNewRoomConfig = (config = {}) => {
@@ -55,8 +60,12 @@ const normalizeNewRoomConfig = (config = {}) => {
     : EVENT_MODES.LOCAL;
 
   normalized.eventMode = eventMode;
-  if (!config.multimediaPolicy) {
-    normalized.multimediaPolicy = clonePolicy(DEFAULT_MULTIMEDIA_POLICIES[eventMode]);
+  normalized.multimediaPolicy = {
+    ...clonePolicy(DEFAULT_MULTIMEDIA_POLICIES[eventMode]),
+    ...(config.multimediaPolicy || {})
+  };
+  if (eventMode !== EVENT_MODES.REMOTE_PRESENTIAL) {
+    normalized.multimediaPolicy.tvMediaSource = 'SERVER';
   }
 
   return normalized;
