@@ -1,0 +1,79 @@
+services:
+  mongo:
+    image: mongo:7.0
+    restart: "no"
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_ROOT_USERNAME:?MONGO_ROOT_USERNAME is required}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD:?MONGO_ROOT_PASSWORD is required}
+    volumes:
+      - bingo_m59_mongo_data:/data/db
+    healthcheck:
+      test: ["CMD-SHELL", "mongosh --quiet --username \"$$MONGO_INITDB_ROOT_USERNAME\" --password \"$$MONGO_INITDB_ROOT_PASSWORD\" --authenticationDatabase admin --eval \"db.adminCommand({ ping: 1 }).ok\" | grep 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    networks:
+      - rehearsal_private
+
+  backend:
+    build:
+      context: ../../backend
+    restart: "no"
+    environment:
+      NODE_ENV: production
+      PORT: 5001
+      MONGODB_URI: mongodb://${MONGO_ROOT_USERNAME}:${MONGO_ROOT_PASSWORD}@mongo:27017/bingo_rehearsal?authSource=admin
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
+      FRONTEND_URL: ${FRONTEND_URL:?FRONTEND_URL is required}
+      BINGO_ACCESS_MODE: ${BINGO_ACCESS_MODE:-local}
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-}
+      LAN_ORIGINS: ${LAN_ORIGINS:-}
+      TRUST_PROXY_HOPS: ${TRUST_PROXY_HOPS:-0}
+      SPOTIFY_CLIENT_ID: ""
+      SPOTIFY_CLIENT_SECRET: ""
+      SPOTIFY_REDIRECT_URI: http://localhost:5001/api/spotify/callback
+      YOUTUBE_API_KEY: ""
+      ANTHROPIC_API_KEY: ""
+    volumes:
+      - bingo_m59_uploads:/app/uploads
+      - bingo_m59_logs:/app/logs
+    expose:
+      - "5001"
+    depends_on:
+      mongo:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:5001/api/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+    networks:
+      - rehearsal_private
+
+  frontend:
+    build:
+      context: ../../bingo-react
+      args:
+        VITE_BACKEND_URL: ${VITE_BACKEND_URL:-same-origin}
+        VITE_SHAREABLE_ORIGIN: ${VITE_SHAREABLE_ORIGIN:-}
+    restart: "no"
+    ports:
+      - "127.0.0.1:${FRONTEND_PORT:-8080}:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - rehearsal_private
+
+volumes:
+  bingo_m59_mongo_data:
+    name: bingo_m59_mongo_data
+  bingo_m59_uploads:
+    name: bingo_m59_uploads
+  bingo_m59_logs:
+    name: bingo_m59_logs
+
+networks:
+  rehearsal_private:
+    name: bingo_m59_private
