@@ -9,7 +9,8 @@ import { Radio, Tv, Users, Crown } from 'lucide-react';
 import DeezerPlayer from '../Music/DeezerPlayer';
 import KaraokeOverlay from '../Music/KaraokeOverlay';
 import { resolveMultimediaPolicy, shouldRenderTvMedia, shouldUseExternalSources } from '../../utils/multimediaPolicy';
-import { resolveTvMediaUrl } from '../../utils/localTvMedia';
+import { isLocalTvMediaPolicy, resolveTvMediaUrl } from '../../utils/localTvMedia';
+import { attemptMediaPlayback, checkLocalTvReadiness } from '../../utils/localTvDiagnostics';
  
 import { getShareableUrl } from '../../utils/networkUtils';
 import './TVDisplay.css';
@@ -44,6 +45,7 @@ const TVDisplay = ({ roomCode, tvCapability, tvSessionToken, tvAuthorizationErro
   const [effectsMuted, setEffectsMuted] = useState(() => localStorage.getItem('bingo-tv-effects-muted') === 'true');
   const [tvConnectionError, setTvConnectionError] = useState(null);
   const [musicStatus, setMusicStatus] = useState('loading');
+  const [localMediaDiagnostics, setLocalMediaDiagnostics] = useState(null);
   const [activeVoting, setActiveVoting] = useState(null);
 
   // Estados para tie-break
@@ -67,10 +69,57 @@ const TVDisplay = ({ roomCode, tvCapability, tvSessionToken, tvAuthorizationErro
   );
   const canRenderTvMedia = shouldRenderTvMedia(multimediaPolicy);
   const canUseExternalSources = shouldUseExternalSources(multimediaPolicy);
+  const localTvEnabled = isLocalTvMediaPolicy(multimediaPolicy);
   const tvMediaUrl = useCallback(
     (relativePath) => resolveTvMediaUrl(relativePath, multimediaPolicy || { mode: 'LEGACY' }),
     [multimediaPolicy]
   );
+
+  const emitTvMediaStatus = useCallback((status, diagnostics = {}) => {
+    if (!localTvEnabled || !socket?.connected) return;
+    socket.emit('tv-media-status', {
+      roomCode,
+      status,
+      permission: diagnostics.permission,
+      service: diagnostics.service,
+      autoplay: diagnostics.autoplay
+    });
+  }, [localTvEnabled, roomCode, socket]);
+
+  const reportLocalMediaPlayback = useCallback((status) => {
+    if (!localTvEnabled) return;
+    setLocalMediaDiagnostics((current) => ({ ...(current || {}), media: status }));
+    emitTvMediaStatus(status);
+  }, [emitTvMediaStatus, localTvEnabled]);
+
+  useEffect(() => {
+    if (!localTvEnabled) {
+      return undefined;
+    }
+
+    let active = true;
+    emitTvMediaStatus('checking');
+    checkLocalTvReadiness()
+      .then((diagnostics) => {
+        if (!active) return;
+        setLocalMediaDiagnostics({ ...diagnostics, status: diagnostics.allowed ? 'available' : 'blocked' });
+        emitTvMediaStatus(
+          diagnostics.permission === 'denied' ? 'permission-denied' :
+            diagnostics.service === 'blocked-or-offline' ? 'unavailable' : 'available',
+          diagnostics
+        );
+      })
+      .catch(() => {
+        if (!active) return;
+        const diagnostics = { status: 'blocked', service: 'blocked-or-offline', permission: 'unknown' };
+        setLocalMediaDiagnostics(diagnostics);
+        emitTvMediaStatus('unavailable', diagnostics);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [emitTvMediaStatus, localTvEnabled]);
 
   const handleKaraokeVideoEnd = useCallback(() => {
     socket?.emit('karaoke-video-end', {
@@ -476,14 +525,20 @@ const TVDisplay = ({ roomCode, tvCapability, tvSessionToken, tvAuthorizationErro
           // Solo auto-reproducir si el juego está activo Y NO hay un challenge
           if (gameState === 'playing' && !isChallengeActiveRef.current) {
             console.log('📺 Auto-playing new song from second 20');
-            videoElement.play()
-              .then(() => {
+            attemptMediaPlayback(videoElement).then((result) => {
+              if (result === 'playing') {
+                setMusicStatus('playing');
+                reportLocalMediaPlayback('playing');
                 console.log('✅ New song playing successfully');
-              })
-              .catch(err => {
-                console.warn('⚠️ Auto-play prevented for new song:', err);
+              } else if (result === 'autoplay-blocked') {
+                setMusicStatus('autoplay-blocked');
+                reportLocalMediaPlayback(result);
                 console.log('💡 Tip: Click on the video to start playback');
-              });
+              } else {
+                setMusicStatus('unavailable');
+                reportLocalMediaPlayback(result);
+              }
+            });
           } else if (isChallengeActiveRef.current) {
             console.log('🚫 Not auto-playing new song - challenge is active');
           } else {
@@ -498,7 +553,7 @@ const TVDisplay = ({ roomCode, tvCapability, tvSessionToken, tvAuthorizationErro
         videoElement.removeEventListener('loadedmetadata', handleLoadedMetadata);
       };
     }
-  }, [currentSong, gameState, activeChallenge, playlist.length]);
+  }, [currentSong, gameState, activeChallenge, playlist.length, reportLocalMediaPlayback]);
 
   // Sincronizar video con el estado del juego Y cuando termina un challenge
   useEffect(() => {
@@ -519,13 +574,18 @@ const TVDisplay = ({ roomCode, tvCapability, tvSessionToken, tvAuthorizationErro
         setTimeout(() => {
           if (videoPlayerRef.current && !isChallengeActiveRef.current) {
             console.log('🎬 Calling video.play() from gameState effect...');
-            videoPlayerRef.current.play()
-              .then(() => {
-                console.log('✅ Video playing after game state change');
-              })
-              .catch(err => {
-                console.warn('⚠️ Auto-play prevented:', err);
-              });
+            attemptMediaPlayback(videoPlayerRef.current).then((result) => {
+              if (result === 'playing') {
+                setMusicStatus('playing');
+                reportLocalMediaPlayback('playing');
+              } else if (result === 'autoplay-blocked') {
+                setMusicStatus('autoplay-blocked');
+                reportLocalMediaPlayback(result);
+              } else {
+                setMusicStatus('unavailable');
+                reportLocalMediaPlayback(result);
+              }
+            });
           }
         }, 300);
       } else {
@@ -534,7 +594,7 @@ const TVDisplay = ({ roomCode, tvCapability, tvSessionToken, tvAuthorizationErro
     } else {
       console.log('⏭️ Not playing - gameState:', gameState, 'activeChallenge:', !!activeChallenge);
     }
-  }, [gameState, activeChallenge]);
+  }, [gameState, activeChallenge, reportLocalMediaPlayback]);
 
   const getBingoLetter = (num) => {
     if (num <= 15) return 'B';
@@ -571,6 +631,21 @@ const TVDisplay = ({ roomCode, tvCapability, tvSessionToken, tvAuthorizationErro
       {(tvAuthorizationError || tvConnectionError) && (
         <div className="tv-authorization-error" role="alert">
           {tvAuthorizationError || tvConnectionError}
+        </div>
+      )}
+      {localTvEnabled && (
+        <div className="tv-media-status" data-testid="local-tv-media-status" role="status">
+          {localMediaDiagnostics?.permission === 'denied'
+            ? 'Medios locales: permiso de red local denegado. Permitilo en el navegador para reproducir desde esta laptop.'
+            : localMediaDiagnostics?.media === 'playing'
+              ? 'Medios locales: reproducción activa en esta TV.'
+              : localMediaDiagnostics?.media === 'autoplay-blocked'
+                ? 'Medios locales: reproducción automática bloqueada. Presioná Reproducir música.'
+                : localMediaDiagnostics?.media === 'unavailable'
+                  ? 'Medios locales: el archivo no está disponible. El bingo puede continuar sin música.'
+                : localMediaDiagnostics?.service === 'blocked-or-offline'
+                  ? 'Medios locales: no se pudo contactar el servicio local. El bingo puede continuar sin música.'
+                  : 'Medios locales: verificando servicio y permisos del navegador…'}
         </div>
       )}
       {/* Elementos de audio ocultos para sonidos de trivia */}
@@ -738,6 +813,7 @@ const TVDisplay = ({ roomCode, tvCapability, tvSessionToken, tvAuthorizationErro
                     videoUrl={tvMediaUrl(`music/karaoke/${activeChallenge.localFile}`)}
                       maxDuration={activeChallenge.duration}
                       onVideoEnd={handleKaraokeVideoEnd}
+                      onPlaybackStatus={reportLocalMediaPlayback}
                       onUnavailable={(message) => console.warn(message)}
                   />
                 )}
@@ -1065,8 +1141,14 @@ const TVDisplay = ({ roomCode, tvCapability, tvSessionToken, tvAuthorizationErro
             playsInline
             onLoadStart={() => setMusicStatus(currentSong?.localFile ? 'loading' : 'unavailable')}
             onCanPlay={() => setMusicStatus('ready')}
-            onPlaying={() => setMusicStatus('playing')}
-            onError={() => setMusicStatus('unavailable')}
+            onPlaying={() => {
+              setMusicStatus('playing');
+              reportLocalMediaPlayback('playing');
+            }}
+            onError={() => {
+              setMusicStatus('unavailable');
+              reportLocalMediaPlayback('unavailable');
+            }}
           >
             {currentSong?.localFile && (
               <source src={tvMediaUrl(`music/${currentSong.localFile}`)} type="video/mp4" />
@@ -1078,8 +1160,12 @@ const TVDisplay = ({ roomCode, tvCapability, tvSessionToken, tvAuthorizationErro
           {musicStatus === 'unavailable' && (
             <p role="alert">La pista local no está disponible. El bingo puede continuar sin música.</p>
           )}
-          {musicStatus === 'ready' && (
-            <button type="button" onClick={() => videoPlayerRef.current?.play().then(() => setMusicStatus('playing')).catch(() => setMusicStatus('unavailable'))}>
+          {musicStatus === 'autoplay-blocked' && (
+            <button type="button" onClick={async () => {
+              const result = await attemptMediaPlayback(videoPlayerRef.current);
+              setMusicStatus(result === 'playing' ? 'playing' : result);
+              reportLocalMediaPlayback(result);
+            }}>
               Reproducir música
             </button>
           )}

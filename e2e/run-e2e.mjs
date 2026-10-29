@@ -625,6 +625,9 @@ async function main() {
     assert.ok(tvPlayback.readyState >= 2 && !tvPlayback.paused && tvPlayback.duration > 0,
       `TV media did not start: ${JSON.stringify(tvPlayback)}`);
     if (localTvMode) {
+      await tvPage.locator('[data-testid="local-tv-media-status"]')
+        .filter({ hasText: /reproducción activa/ })
+        .waitFor({ state: 'visible', timeout: 10000 });
       assert.deepEqual(centralTvMediaRequests, [], 'LOCAL_TV requested media from the central server');
     }
     const tvInitialText = await tvPage.locator('body').innerText();
@@ -863,8 +866,19 @@ async function main() {
       'Interactive group completion did not persist every participant response'
     );
     assert.ok(Date.now() - interactiveGroupStartedAt < 30000, 'Group completion used the timeout path');
+    const completedGroupPlayers = await waitForMongoDocument(
+      () => Promise.all([playerASession, playerBSession].map((session) => Player.findById(session.playerId))),
+      (players) => players.every((player) => {
+        if (!player) return false;
+        const before = groupBeforeStats.get(player._id.toString());
+        return player.stats.points === before.points + calculatedGroupPoints &&
+          player.stats.challengesCompleted === before.challengesCompleted + 1;
+      }),
+      'interactive group points persistence',
+      10000
+    );
     for (const session of [playerASession, playerBSession]) {
-      const player = await Player.findById(session.playerId);
+      const player = completedGroupPlayers.find((candidate) => candidate?._id.toString() === session.playerId.toString());
       const before = groupBeforeStats.get(session.playerId.toString());
       const persistedAccreditations = (player.stats.points - before.points) / calculatedGroupPoints;
       console.log(`  group participant ${session.playerId}: before=${before.points}, challengeId=${interactiveGroupId}, configured=${configuredGroupPoints}, calculated=${calculatedGroupPoints}, responses=${groupEvent.data.responses.length}, persistedAccreditations=${persistedAccreditations}, after=${player.stats.points}, completionEvents=${groupCompletionEvents.length}`);

@@ -432,6 +432,7 @@ export default function OrganizerDashboard({ roomData }) {
   const [validatingPlayer, setValidatingPlayer] = useState(null);
   const [showAdminCenter, setShowAdminCenter] = useState(false);
   const [tvAuthorization, setTvAuthorization] = useState(null);
+  const [tvMediaStatus, setTvMediaStatus] = useState(null);
 
   // Conectar al socket room cuando el componente se monta
   useEffect(() => {
@@ -541,6 +542,10 @@ export default function OrganizerDashboard({ roomData }) {
         return { ...previous, connected: false, revokedAt: data.revokedAt };
       });
     };
+    const handleTvMediaStatus = (data) => {
+      if (data?.roomCode?.toUpperCase() !== roomState.code.toUpperCase()) return;
+      setTvMediaStatus(data);
+    };
 
     socket.on('room-updated', handleRoomUpdate);
     socket.on('number-called', handleNumberCalled);
@@ -555,6 +560,7 @@ export default function OrganizerDashboard({ roomData }) {
     socket.on('votingResults', handleVotingResults);
     socket.on('bingo-verified', handleBingoVerified);
     socket.on('tv-authorization-status', handleTvAuthorizationStatus);
+    socket.on('tv-media-status', handleTvMediaStatus);
 
     return () => {
       socket.off('room-updated', handleRoomUpdate);
@@ -570,6 +576,7 @@ export default function OrganizerDashboard({ roomData }) {
       socket.off('votingResults', handleVotingResults);
       socket.off('bingo-verified', handleBingoVerified);
       socket.off('tv-authorization-status', handleTvAuthorizationStatus);
+      socket.off('tv-media-status', handleTvMediaStatus);
     };
   }, [socket, roomState.code, roomState.config?.timeBetweenNumbers, roomState.players]);
 
@@ -1276,6 +1283,15 @@ export default function OrganizerDashboard({ roomData }) {
                     <p className="text-sm text-slate-300" role="status">
                       Estado: {tvAuthorization.connected ? 'TV conectada' : tvAuthorization.consumed ? 'Enlace consumido' : 'Esperando conexión'}
                     </p>
+                    {tvMediaStatus && (
+                      <p className="text-sm text-slate-300" data-testid="organizer-tv-media-status" role="status">
+                        Medios TV: {tvMediaStatus.status === 'playing' ? 'reproducción local activa' :
+                          tvMediaStatus.status === 'permission-denied' ? 'permiso de red local denegado' :
+                            tvMediaStatus.status === 'autoplay-blocked' ? 'autoplay bloqueado; requiere interacción' :
+                              tvMediaStatus.status === 'unavailable' ? 'servicio o archivo no disponible' :
+                                tvMediaStatus.status === 'available' ? 'servicio local disponible' : 'verificando'}
+                      </p>
+                    )}
                     {tvAuthorization.expiresAt && (
                       <p className="text-xs text-slate-400">
                         Expira: {new Date(tvAuthorization.expiresAt).toLocaleTimeString()}

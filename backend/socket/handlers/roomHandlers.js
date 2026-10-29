@@ -282,6 +282,27 @@ function handleLeaveRoom(io, socket) {
   };
 }
 
+function handleTvMediaStatus(io, socket) {
+  return (data = {}) => {
+    const allowedStatuses = new Set([
+      'checking', 'available', 'playing', 'autoplay-blocked',
+      'permission-denied', 'unavailable', 'unsupported'
+    ]);
+    const roomCode = typeof data.roomCode === 'string' ? data.roomCode.toUpperCase() : '';
+    if (socket.playerId !== 'tv-display' || socket.tvAuthorized !== true ||
+        !socket.roomCode || roomCode !== socket.roomCode.toUpperCase() ||
+        !allowedStatuses.has(data.status)) return;
+
+    io.to(roomCode).emit('tv-media-status', {
+      roomCode,
+      status: data.status,
+      permission: typeof data.permission === 'string' ? data.permission : undefined,
+      service: typeof data.service === 'string' ? data.service : undefined,
+      autoplay: typeof data.autoplay === 'string' ? data.autoplay : undefined
+    });
+  };
+}
+
 /**
  * Handler para cerrar una sala (solo host)
  */
@@ -485,6 +506,7 @@ function handleDisconnect(io, socket) {
  */
 function registerRoomHandlers(io, socket) {
   socket.on('join-room', handleJoinRoom(io, socket));
+  socket.on('tv-media-status', handleTvMediaStatus(io, socket));
   socket.on('leave-room', handleLeaveRoom(io, socket));
   socket.on('close-room', handleCloseRoom(io, socket));
   socket.on('delete-all-rooms', handleDeleteAllRooms(io, socket));
@@ -497,6 +519,7 @@ module.exports = {
   broadcastRoomInfo,
   // Exports individuales para testing
   handleJoinRoom,
+  handleTvMediaStatus,
   handleLeaveRoom,
   handleCloseRoom,
   handleDeleteAllRooms,
