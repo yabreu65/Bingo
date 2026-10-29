@@ -27,7 +27,8 @@ test('serves an allowlisted synthetic media file with range support', async () =
     join(root, 'tools/local-tv-media-server.mjs'),
     '--root', mediaRoot,
     '--manifest', manifest,
-    '--port', String(port)
+    '--port', String(port),
+    '--allow-origin', 'https://event.example'
   ], { stdio: ['ignore', 'pipe', 'pipe'] });
 
   try {
@@ -44,6 +45,10 @@ test('serves an allowlisted synthetic media file with range support', async () =
     assert.equal(health?.status, 200);
     const manifestData = JSON.parse(await readFile(manifest, 'utf8'));
     const id = manifestData.entries[0].id;
+    const healthWithCors = await fetch(`http://127.0.0.1:${port}/health`, {
+      headers: { Origin: 'https://event.example' }
+    });
+    assert.equal(healthWithCors.headers.get('access-control-allow-origin'), 'https://event.example');
     const full = await fetch(`http://127.0.0.1:${port}/media/${id}`);
     assert.equal(full.status, 200);
     assert.equal(full.headers.get('content-type'), 'video/mp4');

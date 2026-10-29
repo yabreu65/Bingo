@@ -64,11 +64,15 @@ const rangeFor = (header, size) => {
   return { start, end: Math.min(end, size - 1) };
 };
 
+const corsHeaders = allowedOrigin
+  ? { 'Access-Control-Allow-Origin': allowedOrigin, Vary: 'Origin' }
+  : {};
+
 const server = createServer(async (request, response) => {
   try {
     const url = new URL(request.url || '/', 'http://127.0.0.1');
     if (url.pathname === '/health') {
-      send(response, 200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }, '{"ok":true}');
+      send(response, 200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', ...corsHeaders }, '{"ok":true}');
       return;
     }
     if (request.method !== 'GET' && request.method !== 'HEAD') {
@@ -93,7 +97,7 @@ const server = createServer(async (request, response) => {
       'Accept-Ranges': 'bytes',
       'Cache-Control': 'private, no-store',
       'Content-Type': entry.mime,
-      ...(allowedOrigin ? { 'Access-Control-Allow-Origin': allowedOrigin, Vary: 'Origin' } : {})
+      ...corsHeaders
     };
     if (range?.invalid) {
       send(response, 416, { ...baseHeaders, 'Content-Range': `bytes */${metadata.size}` }, '');
