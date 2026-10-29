@@ -32,6 +32,7 @@ const {
   selectCardLimiter,
   speedLimiter
 } = require('../config/rateLimiters');
+const { normalizeNewRoomConfig } = require('../utils/roomConfiguration');
 
 // Crear sala
 router.post('/create', createRoomLimiter, speedLimiter, validateRequest(createRoomSchema), async (req, res) => {
@@ -51,7 +52,7 @@ router.post('/create', createRoomLimiter, speedLimiter, validateRequest(createRo
       name: req.body.roomName || `Sala ${code}`,
       host: hostPlayer._id,
       players: [hostPlayer._id],
-      config: req.body.config || {}
+      config: normalizeNewRoomConfig(req.body.config || {})
     });
     room.hostCapabilityHash = createHostCapabilityHash(hostCapability, room._id);
     room.tvCapabilityHash = createTvCapabilityHash(tvCapability, room._id);
@@ -272,7 +273,7 @@ router.patch('/:code/config', generalApiLimiter, optionalAuth, validateRequest(u
     const currentConfig = typeof room.config?.toObject === 'function'
       ? room.config.toObject()
       : { ...(room.config || {}) };
-    room.config = {
+    const nextConfig = {
       ...currentConfig,
       ...req.body.config,
       enabledChallengeTypes: {
@@ -280,6 +281,16 @@ router.patch('/:code/config', generalApiLimiter, optionalAuth, validateRequest(u
         ...(req.body.config.enabledChallengeTypes || {})
       }
     };
+    // Only new/explicitly migrated configurations are normalized. A legacy
+    // room remains untouched when an unrelated setting is updated.
+    if (req.body.config.eventMode && !currentConfig.eventMode) {
+      const normalized = normalizeNewRoomConfig(nextConfig);
+      nextConfig.eventMode = normalized.eventMode;
+      if (!req.body.config.multimediaPolicy) {
+        nextConfig.multimediaPolicy = normalized.multimediaPolicy;
+      }
+    }
+    room.config = nextConfig;
     await room.save();
     room.hostCapabilityHash = undefined;
     res.json({ success: true, room });

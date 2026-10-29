@@ -39,6 +39,12 @@ const createRoomSchema = z.object({
       resultVisibility: z.enum(['public', 'organizer']).optional(),
       activePlaylist: objectIdSchema.nullable().optional(),
       managedContentEnabled: z.boolean().optional(),
+      eventMode: z.enum(['LOCAL', 'REMOTE_PRESENTIAL', 'DISTRIBUTED']).optional(),
+      multimediaPolicy: z.object({
+        primarySurface: z.enum(['tv', 'players', 'both']).optional(),
+        playerPlayback: z.enum(['disabled', 'optional', 'required']).optional(),
+        allowExternalSources: z.boolean().optional()
+      }).optional(),
       enabledChallengeTypes: z.object({
         trivia: z.boolean().optional(),
         riddle: z.boolean().optional(),
@@ -150,6 +156,12 @@ const updateConfigSchema = z.object({
       resultVisibility: z.enum(['public', 'organizer']).optional(),
       activePlaylist: objectIdSchema.nullable().optional(),
       managedContentEnabled: z.boolean().optional(),
+      eventMode: z.enum(['LOCAL', 'REMOTE_PRESENTIAL', 'DISTRIBUTED']).optional(),
+      multimediaPolicy: z.object({
+        primarySurface: z.enum(['tv', 'players', 'both']).optional(),
+        playerPlayback: z.enum(['disabled', 'optional', 'required']).optional(),
+        allowExternalSources: z.boolean().optional()
+      }).optional(),
       enabledChallengeTypes: z.object({
         trivia: z.boolean().optional(),
         riddle: z.boolean().optional(),

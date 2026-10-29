@@ -58,7 +58,22 @@ const roomSchema = new mongoose.Schema({
     eventName: { type: String, trim: true, maxlength: 160, default: '' },
     resultVisibility: { type: String, enum: ['public', 'organizer'], default: 'public' },
     activePlaylist: { type: mongoose.Schema.Types.ObjectId, ref: 'Playlist', default: null },
-    managedContentEnabled: { type: Boolean, default: false }
+    managedContentEnabled: { type: Boolean, default: false },
+    eventMode: {
+      type: String,
+      enum: ['LEGACY', 'LOCAL', 'REMOTE_PRESENTIAL', 'DISTRIBUTED']
+    },
+    multimediaPolicy: {
+      primarySurface: {
+        type: String,
+        enum: ['tv', 'players', 'both']
+      },
+      playerPlayback: {
+        type: String,
+        enum: ['disabled', 'optional', 'required']
+      },
+      allowExternalSources: Boolean
+    }
   },
   currentGame: {
     type: mongoose.Schema.Types.ObjectId,
