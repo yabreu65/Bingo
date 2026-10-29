@@ -1,5 +1,6 @@
 const logger = require('../config/logger');
 const { AppError } = require('../utils/errors');
+const { sanitizeRequestUrl, sanitizeBody } = require('./requestLogger');
 
 /**
  * Middleware centralizado de manejo de errores
@@ -9,10 +10,10 @@ const errorHandler = (err, req, res, next) => {
   // Log del error
   logger.logError(err, {
     method: req.method,
-    url: req.originalUrl,
+    url: sanitizeRequestUrl(req.originalUrl),
     ip: req.ip,
     userId: req.user?.userId,
-    body: req.body
+    body: sanitizeBody(req.body)
   });
 
   // Si es un error operacional conocido (AppError)
@@ -111,7 +112,7 @@ const notFoundHandler = (req, res, next) => {
     success: false,
     error: {
       code: 'NOT_FOUND',
-      message: `Ruta ${req.method} ${req.originalUrl} no encontrada`
+    message: `Ruta ${req.method} ${sanitizeRequestUrl(req.originalUrl)} no encontrada`
     }
   });
 };

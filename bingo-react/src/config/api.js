@@ -10,8 +10,12 @@
  */
 export const getBackendUrl = () => {
   // Si hay una variable de entorno específica, usarla
-  if (import.meta.env.VITE_BACKEND_URL) {
-    return import.meta.env.VITE_BACKEND_URL;
+  const configuredUrl = import.meta.env.VITE_BACKEND_URL;
+  if (configuredUrl === 'same-origin' || configuredUrl === '/') {
+    return window.location.origin;
+  }
+  if (configuredUrl) {
+    return configuredUrl.replace(/\/$/, '');
   }
 
   // Detectar automáticamente basándose en el hostname

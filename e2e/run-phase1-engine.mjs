@@ -254,6 +254,16 @@ async function markCell(page, session, row, col) {
     `[data-testid="bingo-card-cell"][data-row="${row}"][data-col="${col}"]`
   );
   await cell.waitFor({ state: 'visible', timeout: 10000 });
+  // The organizer socket can call a number before the player browser receives
+  // the corresponding Socket.IO update. Only click once the visual card marks
+  // the called value as available; this keeps the E2E aligned with a real user.
+  await page.waitForFunction(
+    ({ row: targetRow, col: targetCol }) => document.querySelector(
+      `[data-testid="bingo-card-cell"][data-row="${targetRow}"][data-col="${targetCol}"]`
+    )?.classList.contains('available'),
+    { row, col },
+    { timeout: 10000 }
+  );
   await cell.click({ force: true });
   try {
     await waitForMongoDocument(

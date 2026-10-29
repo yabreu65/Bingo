@@ -1,7 +1,7 @@
 FROM node:22-alpine AS build
 
 WORKDIR /app
-ARG VITE_BACKEND_URL=http://localhost:5001
+ARG VITE_BACKEND_URL=same-origin
 ENV VITE_BACKEND_URL=$VITE_BACKEND_URL
 
 COPY package*.json ./

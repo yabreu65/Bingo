@@ -1,5 +1,18 @@
 const logger = require('../config/logger');
 
+const sanitizeRequestUrl = (requestUrl) => {
+  if (typeof requestUrl !== 'string') return requestUrl;
+  try {
+    const url = new URL(requestUrl, 'http://request.invalid');
+    ['token', 'tvToken', 'tvSessionToken', 'hostCapability', 'playerCapability', 'authorization'].forEach((key) => {
+      if (url.searchParams.has(key)) url.searchParams.set(key, '***REDACTED***');
+    });
+    return `${url.pathname}${url.search}`;
+  } catch {
+    return requestUrl.replace(/(token|tvToken|tvSessionToken|hostCapability|playerCapability|authorization)=[^&\s]+/gi, '$1=***REDACTED***');
+  }
+};
+
 /**
  * Middleware para logging de requests HTTP
  * Registra todas las peticiones con detalles importantes
@@ -14,6 +27,7 @@ const requestLogger = (req, res, next) => {
   res.end = function(...args) {
     const duration = Date.now() - startTime;
     const statusCode = res.statusCode;
+    const sanitizedUrl = sanitizeRequestUrl(req.originalUrl);
 
     // Determinar nivel de log basado en status code
     let logLevel = 'info';
@@ -24,9 +38,9 @@ const requestLogger = (req, res, next) => {
     }
 
     // Log del request
-    logger[logLevel](`${req.method} ${req.originalUrl}`, {
+    logger[logLevel](`${req.method} ${sanitizedUrl}`, {
       method: req.method,
-      url: req.originalUrl,
+      url: sanitizedUrl,
       status: statusCode,
       duration: `${duration}ms`,
       ip: req.ip || req.connection.remoteAddress,
@@ -51,7 +65,10 @@ function sanitizeBody(body) {
   if (!body) return undefined;
 
   const sanitized = { ...body };
-  const sensitiveFields = ['password', 'token', 'refreshToken', 'secret'];
+  const sensitiveFields = [
+    'password', 'token', 'refreshToken', 'secret', 'tvToken', 'tvSessionToken',
+    'hostCapability', 'playerCapability', 'authorization'
+  ];
 
   sensitiveFields.forEach(field => {
     if (sanitized[field]) {
@@ -63,3 +80,5 @@ function sanitizeBody(body) {
 }
 
 module.exports = requestLogger;
+module.exports.sanitizeBody = sanitizeBody;
+module.exports.sanitizeRequestUrl = sanitizeRequestUrl;

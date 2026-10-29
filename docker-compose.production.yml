@@ -4,8 +4,8 @@ services:
       context: ./backend
     env_file:
       - ./backend/.env.production
-    ports:
-      - "5001:5001"
+    expose:
+      - "5001"
     volumes:
       - bingo_uploads:/app/uploads
       - bingo_logs:/app/logs
@@ -21,7 +21,7 @@ services:
     build:
       context: ./bingo-react
       args:
-        VITE_BACKEND_URL: ${VITE_BACKEND_URL:-http://localhost:5001}
+        VITE_BACKEND_URL: ${VITE_BACKEND_URL:-same-origin}
     ports:
       - "8080:80"
     depends_on:
