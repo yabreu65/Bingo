@@ -3,9 +3,10 @@ import toast from 'react-hot-toast';
 import LocalMediaPlayer from './LocalMediaPlayer';
 import { useSocket } from '../../context/useSocket';
 import { MUSIC_PLAYLISTS } from '../../config/musicPlaylists';
+import { requiresPlayerConsent } from '../../utils/multimediaPolicy';
 import './MusicPlayer.css';
 
-const SyncedMusicPlayer = ({ roomCode, isHost, hostCapability, playlist: suppliedPlaylist = [], currentIndex: externalIndex = 0, onSongChange }) => {
+const SyncedMusicPlayer = ({ roomCode, isHost, hostCapability, playlist: suppliedPlaylist = [], currentIndex: externalIndex = 0, onSongChange, mediaPolicy }) => {
   const { socket } = useSocket();
   const [currentIndex, setCurrentIndex] = useState(externalIndex);
   const [playing, setPlaying] = useState(false);
@@ -16,6 +17,7 @@ const SyncedMusicPlayer = ({ roomCode, isHost, hostCapability, playlist: supplie
   const playerRef = useRef(null);
   const syncTimeoutRef = useRef(null);
   const [allowPlay, setAllowPlay] = useState(false);
+  const [playbackConsent, setPlaybackConsent] = useState(!requiresPlayerConsent(mediaPolicy, isHost));
   const playlist = useMemo(() => {
     const source = suppliedPlaylist.length ? suppliedPlaylist : MUSIC_PLAYLISTS;
     return source.map((song, index) => ({ ...song, id: song.id ?? index + 1 }));
@@ -39,11 +41,9 @@ const SyncedMusicPlayer = ({ roomCode, isHost, hostCapability, playlist: supplie
         setCurrentIndex(songIndex);
       }
 
-      if (allowPlay) {
-        setPlaying(isPlaying);
-      } else {
-        setPlaying(false);
-      }
+      // Keep the authoritative playing state even before optional playback is
+      // consented to. LocalMediaPlayer remains paused until the user opts in.
+      if (allowPlay) setPlaying(isPlaying);
 
       // Sincronizar tiempo del video
       if (playerRef.current && currentTime !== undefined) {
@@ -62,7 +62,11 @@ const SyncedMusicPlayer = ({ roomCode, isHost, hostCapability, playlist: supplie
       socket.off('music-sync', handleMusicSync);
       socket.off('music-volume-sync', handleVolumeSync);
     };
-  }, [socket, playlist, currentIndex, allowPlay]);
+  }, [socket, playlist, currentIndex, allowPlay, playbackConsent]);
+
+  useEffect(() => {
+    setPlaybackConsent(!requiresPlayerConsent(mediaPolicy, isHost));
+  }, [mediaPolicy, isHost]);
 
   // Habilitar reproducción al llegar a 0 del countdown
   useEffect(() => {
@@ -283,11 +287,16 @@ const SyncedMusicPlayer = ({ roomCode, isHost, hostCapability, playlist: supplie
           <LocalMediaPlayer
             ref={playerRef}
             song={currentSong}
-            playing={playing}
+            playing={playing && playbackConsent}
             volume={volume}
             muted={muted}
             onEnded={handleEnded}
           />
+          {requiresPlayerConsent(mediaPolicy, isHost) && !playbackConsent && (
+            <button type="button" className="action-btn" onClick={() => setPlaybackConsent(true)}>
+              Activar reproducción en este dispositivo
+            </button>
+          )}
 
           {/* Controles */}
           <div className="player-controls">

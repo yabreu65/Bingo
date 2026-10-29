@@ -1,5 +1,5 @@
 "use client";
-import { useCallback, useState, useEffect, useRef } from 'react';
+import { useCallback, useState, useEffect, useRef, useMemo } from 'react';
 // eslint-disable-next-line no-unused-vars
 import { AnimatePresence, motion } from 'framer-motion';
 import { useSocket } from '../../context/useSocket';
@@ -8,6 +8,7 @@ import { QRCodeSVG } from 'qrcode.react';
 import { Radio, Tv, Users, Crown } from 'lucide-react';
 import DeezerPlayer from '../Music/DeezerPlayer';
 import KaraokeOverlay from '../Music/KaraokeOverlay';
+import { resolveMultimediaPolicy, shouldRenderTvMedia, shouldUseExternalSources } from '../../utils/multimediaPolicy';
  
 import { getShareableUrl } from '../../utils/networkUtils';
 import './TVDisplay.css';
@@ -58,6 +59,12 @@ const TVDisplay = ({ roomCode, tvCapability }) => {
   const applauseAudioRef = useRef(null); // Ref para sonido de aplauso
   const donkeyAudioRef = useRef(null); // Ref para sonido de burro
   const currentSong = playlist[currentSongIndex];
+  const multimediaPolicy = useMemo(
+    () => roomInfo ? resolveMultimediaPolicy(roomInfo.config) : null,
+    [roomInfo]
+  );
+  const canRenderTvMedia = shouldRenderTvMedia(multimediaPolicy);
+  const canUseExternalSources = shouldUseExternalSources(multimediaPolicy);
 
   const handleKaraokeVideoEnd = useCallback(() => {
     socket?.emit('karaoke-video-end', {
@@ -546,8 +553,8 @@ const TVDisplay = ({ roomCode, tvCapability }) => {
   return (
     <div className="tv-display-grid pf-tv-stage">
       {/* Elementos de audio ocultos para sonidos de trivia */}
-      <audio ref={applauseAudioRef} src="/sounds/aplauso.mp3" preload="auto" />
-      <audio ref={donkeyAudioRef} src="/sounds/burro.mp3" preload="auto" />
+      {canRenderTvMedia && <audio ref={applauseAudioRef} src="/sounds/aplauso.mp3" preload="auto" />}
+      {canRenderTvMedia && <audio ref={donkeyAudioRef} src="/sounds/burro.mp3" preload="auto" />}
 
       {/* OVERLAYS */}
       <AnimatePresence>
@@ -695,7 +702,7 @@ const TVDisplay = ({ roomCode, tvCapability }) => {
                   <p className="challenge-text">{activeChallenge.type === 'riddle' ? activeChallenge.data?.prompt : activeChallenge.text}</p>
                 )}
 
-                {activeChallenge.deezerId && (
+                {activeChallenge.deezerId && canUseExternalSources && (
                   <div className="challenge-music-player" style={{ marginTop: '20px', maxWidth: '500px', margin: '20px auto' }}>
                     <DeezerPlayer
                       trackId={activeChallenge.deezerId}
@@ -704,7 +711,7 @@ const TVDisplay = ({ roomCode, tvCapability }) => {
                     />
                   </div>
                 )}
-                {activeChallenge.localFile && (
+                {activeChallenge.localFile && canRenderTvMedia && (
                   <KaraokeOverlay
                     localFile={activeChallenge.localFile}
                       maxDuration={activeChallenge.duration}
@@ -857,7 +864,7 @@ const TVDisplay = ({ roomCode, tvCapability }) => {
               </button>
             )}
 
-            {tieBreakStatus === 'playing' && tieBreakPerformer?.songData && (
+            {tieBreakStatus === 'playing' && tieBreakPerformer?.songData && canRenderTvMedia && (
               <div style={{
                 width: '80%',
                 maxWidth: '1200px',
@@ -1025,7 +1032,7 @@ const TVDisplay = ({ roomCode, tvCapability }) => {
 
       <section className="grid-video">
         <div className="video-wrapper">
-          <video
+          {canRenderTvMedia ? <video
             ref={videoPlayerRef}
             onPause={handleVideoPause}
             onPlay={handleVideoPlay}
@@ -1043,7 +1050,9 @@ const TVDisplay = ({ roomCode, tvCapability }) => {
               <source src={`/music/${encodeURIComponent(currentSong.localFile)}`} type="video/mp4" />
             )}
             Tu navegador no soporta el elemento de video.
-          </video>
+          </video> : (
+            <p role="status">La reproducción multimedia está deshabilitada para esta TV.</p>
+          )}
           {musicStatus === 'unavailable' && (
             <p role="alert">La pista local no está disponible. El bingo puede continuar sin música.</p>
           )}
@@ -1101,8 +1110,8 @@ const TVDisplay = ({ roomCode, tvCapability }) => {
       </section>
 
       {/* Elementos de audio para sonidos de trivia */}
-      <audio ref={applauseAudioRef} src="/sounds/aplauso.mp3" preload="auto" />
-      <audio ref={donkeyAudioRef} src="/sounds/burro.mp3" preload="auto" />
+      {canRenderTvMedia && <audio ref={applauseAudioRef} src="/sounds/aplauso.mp3" preload="auto" />}
+      {canRenderTvMedia && <audio ref={donkeyAudioRef} src="/sounds/burro.mp3" preload="auto" />}
     </div>
   );
 };

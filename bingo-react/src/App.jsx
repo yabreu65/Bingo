@@ -159,18 +159,17 @@ function App() {
           }
         }
 
-        // Si NO tiene cartón, necesitamos obtener los datos de la sala para CardSelection
+        // Siempre refrescar la sala para recibir cambios de modalidad y política
+        // multimedia también cuando la sesión ya conserva un cartón.
         let roomInfo = null;
-        if (!hasCard && !session.isHost) {
-          try {
-            const roomResponse = await fetch(`${API_URL}/api/rooms/${session.roomCode}`);
-            if (roomResponse.ok) {
-              const roomDataFromAPI = await roomResponse.json();
-              roomInfo = roomDataFromAPI.room;
-            }
-          } catch (err) {
-            console.error('Error fetching room data:', err);
+        try {
+          const roomResponse = await fetch(`${API_URL}/api/rooms/${session.roomCode}`);
+          if (roomResponse.ok) {
+            const roomDataFromAPI = await roomResponse.json();
+            roomInfo = roomDataFromAPI.room;
           }
+        } catch (err) {
+          console.error('Error fetching room data:', err);
         }
 
         // Cargar la sesión directamente desde localStorage

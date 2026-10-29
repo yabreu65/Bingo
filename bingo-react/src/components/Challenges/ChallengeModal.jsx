@@ -4,6 +4,7 @@ import DeezerPlayer from '../Music/DeezerPlayer';
 import { getRandomSongForChallenge } from '../../data/deezerSongs';
 import { getKaraokeSongById } from '../../data/karaokeList';
 import RecordingChallenge from '../Recording/RecordingChallenge';
+import { resolveMultimediaPolicy, shouldRenderPlayerMedia, shouldUseExternalSources } from '../../utils/multimediaPolicy';
 import './ChallengeModal.css';
 
 const ChallengeModal = ({
@@ -14,7 +15,8 @@ const ChallengeModal = ({
   externalPlayerId = null,
   externalPlayerName = null,
   externalPlayerCapability = null,
-  externalTriviaResult = null
+  externalTriviaResult = null,
+  roomConfig = null
 }) => {
   const contextData = useGame();
 
@@ -25,6 +27,9 @@ const ChallengeModal = ({
   const playerId = externalPlayerId || contextData.playerId;
   const playerName = externalPlayerName || contextData.playerName;
   const playerCapability = externalPlayerCapability || contextData.playerCapability;
+  const multimediaPolicy = resolveMultimediaPolicy(roomConfig || contextData.room?.config);
+  const canRenderLocalMedia = shouldRenderPlayerMedia(multimediaPolicy);
+  const canUseExternalSources = shouldUseExternalSources(multimediaPolicy);
   const [selectedAnswer, setSelectedAnswer] = useState(null);
   const [textAnswer, setTextAnswer] = useState('');
   const [showResult, setShowResult] = useState(false);
@@ -342,7 +347,7 @@ const ChallengeModal = ({
             <div className="challenge-description">{data}</div>
 
             {/* Reproductor de Deezer */}
-            {deezerSong && (
+            {deezerSong && canUseExternalSources && (
               <div className="challenge-music-player">
                 <DeezerPlayer
                   trackId={deezerSong.id}
@@ -351,6 +356,9 @@ const ChallengeModal = ({
                   className="mb-4"
                 />
               </div>
+            )}
+            {deezerSong && !canUseExternalSources && (
+              <p className="challenge-music-unavailable" role="status">La música no está disponible ahora en esta modalidad.</p>
             )}
 
             <div className="challenge-timer">
@@ -399,7 +407,7 @@ const ChallengeModal = ({
             <div className="challenge-description">{data}</div>
 
             {/* Reproductor de Deezer */}
-            {deezerSong && (
+            {deezerSong && canUseExternalSources && (
               <div className="challenge-music-player">
                 <DeezerPlayer
                   trackId={deezerSong.id}
@@ -408,6 +416,9 @@ const ChallengeModal = ({
                   className="mb-4"
                 />
               </div>
+            )}
+            {deezerSong && !canUseExternalSources && (
+              <p className="challenge-music-unavailable" role="status">La música no está disponible ahora en esta modalidad.</p>
             )}
 
             <div className="challenge-timer">
@@ -426,7 +437,7 @@ const ChallengeModal = ({
             <div className="challenge-description">{data}</div>
 
             {/* Reproductor de Deezer */}
-            {deezerSong && (
+            {deezerSong && canUseExternalSources && (
               <div className="challenge-music-player">
                 <DeezerPlayer
                   trackId={deezerSong.id}
@@ -435,6 +446,9 @@ const ChallengeModal = ({
                   className="mb-4"
                 />
               </div>
+            )}
+            {deezerSong && !canUseExternalSources && (
+              <p className="challenge-music-unavailable" role="status">La música no está disponible ahora en esta modalidad.</p>
             )}
 
             <div className="challenge-timer">
@@ -459,7 +473,7 @@ const ChallengeModal = ({
             )}
 
             {/* Reproductor de video local */}
-            {karaokeSong?.localFile && (
+            {karaokeSong?.localFile && canRenderLocalMedia && (
               <div className="karaoke-video-player">
                 <video
                   src={`/music/karaoke/${karaokeSong.localFile}`}
@@ -480,6 +494,12 @@ const ChallengeModal = ({
               <div className="karaoke-no-video">
                 <p>📹 Video local no disponible</p>
                 <p className="text-sm">Podés continuar el reto sin reproducción.</p>
+              </div>
+            )}
+            {karaokeSong?.localFile && !canRenderLocalMedia && (
+              <div className="karaoke-no-video" role="status">
+                <p>La reproducción está centralizada en la TV para esta sala.</p>
+                <p className="text-sm">Podés continuar el reto desde este dispositivo.</p>
               </div>
             )}
 

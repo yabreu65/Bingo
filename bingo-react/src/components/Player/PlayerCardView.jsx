@@ -6,6 +6,7 @@ import TiebreakVotingModal from '../Voting/TiebreakVotingModal';
 import VotingModal from '../Voting/VotingModal';
 import SyncedMusicPlayer from '../Music/SyncedMusicPlayer';
 import { CARD_MATRIX_VERSION, getCardCell } from '../../utils/bingoCardGenerator';
+import { resolveMultimediaPolicy, shouldRenderPlayerMedia } from '../../utils/multimediaPolicy';
 import './PlayerCardView.css';
 
 const STORAGE_KEY = 'bingo_session';
@@ -36,6 +37,10 @@ const PlayerCardView = ({ roomData }) => {
       localFile: track.resourceId
     }));
   }, [roomData.room?.config?.activePlaylist]);
+  const multimediaPolicy = useMemo(
+    () => resolveMultimediaPolicy(roomData.room?.config),
+    [roomData.room?.config]
+  );
 
   // Estados para votación de tie-break
   const [tiebreakVoting, setTiebreakVoting] = useState(null); // { candidates, votingDuration, message }
@@ -490,11 +495,14 @@ const PlayerCardView = ({ roomData }) => {
         </div>
       )}
 
-      <SyncedMusicPlayer
-        roomCode={roomData.roomCode}
-        isHost={false}
-        playlist={managedPlaylist}
-      />
+      {shouldRenderPlayerMedia(multimediaPolicy) && (
+        <SyncedMusicPlayer
+          roomCode={roomData.roomCode}
+          isHost={false}
+          playlist={managedPlaylist}
+          mediaPolicy={multimediaPolicy}
+        />
+      )}
 
       {/* Tie-break Voting Modal */}
       {tiebreakVoting && (
@@ -569,6 +577,7 @@ const PlayerCardView = ({ roomData }) => {
           externalPlayerId={roomData.playerId}
           externalPlayerName={roomData.playerName}
           externalPlayerCapability={roomData.playerCapability}
+          roomConfig={roomData.room?.config}
           externalTriviaResult={triviaResult}
         />
       )}

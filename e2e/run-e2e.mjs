@@ -471,6 +471,33 @@ async function main() {
 
     const playerASession = await joinPlayer(playerAPage, 'Jugador A', 1);
     const playerBSession = await joinPlayer(playerBPage, 'Jugador B', 2);
+    const disabledPlayerMediaRequests = [];
+    const captureDisabledPlayerMedia = (request) => {
+      if (/\/music\//.test(request.url())) disabledPlayerMediaRequests.push(request.url());
+    };
+    playerAPage.on('request', captureDisabledPlayerMedia);
+    await configureRoom(hostPage, roomCode, hostSession.hostCapability, {
+      multimediaPolicy: {
+        primarySurface: 'tv',
+        playerPlayback: 'disabled',
+        allowExternalSources: false
+      }
+    });
+    await playerAPage.reload();
+    await waitForBody(playerAPage, /Números cantados|Mi Cartón|Esperando/);
+    assert.equal(await playerAPage.locator('.music-toggle-btn').count(), 0, 'Disabled player playback mounted a music control');
+    assert.deepEqual(disabledPlayerMediaRequests, [], 'Disabled player playback requested local media: ' + disabledPlayerMediaRequests.join(', '));
+    console.log('  disabled player playback mounted no media element and made no /music/ requests');
+    await configureRoom(hostPage, roomCode, hostSession.hostCapability, {
+      multimediaPolicy: {
+        primarySurface: 'tv',
+        playerPlayback: 'optional',
+        allowExternalSources: false
+      }
+    });
+    await playerAPage.reload();
+    await waitForBody(playerAPage, /Números cantados|Mi Cartón|Esperando/);
+    playerAPage.off('request', captureDisabledPlayerMedia);
     await playerAPage.locator('.music-toggle-btn').click({ force: true });
     await waitForBody(playerAPage, /Pista visual uno|Pista visual dos/);
     console.log('  player consumed the active room playlist through the visual music player');
