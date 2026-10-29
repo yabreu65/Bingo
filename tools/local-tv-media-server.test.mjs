@@ -49,6 +49,16 @@ test('serves an allowlisted synthetic media file with range support', async () =
       headers: { Origin: 'https://event.example' }
     });
     assert.equal(healthWithCors.headers.get('access-control-allow-origin'), 'https://event.example');
+    const privateNetworkPreflight = await fetch(`http://127.0.0.1:${port}/media/${id}`, {
+      method: 'OPTIONS',
+      headers: {
+        Origin: 'https://event.example',
+        'Access-Control-Request-Method': 'GET',
+        'Access-Control-Request-Private-Network': 'true'
+      }
+    });
+    assert.equal(privateNetworkPreflight.status, 204);
+    assert.equal(privateNetworkPreflight.headers.get('access-control-allow-private-network'), 'true');
     const full = await fetch(`http://127.0.0.1:${port}/media/${id}`);
     assert.equal(full.status, 200);
     assert.equal(full.headers.get('content-type'), 'video/mp4');

@@ -65,12 +65,26 @@ const rangeFor = (header, size) => {
 };
 
 const corsHeaders = allowedOrigin
-  ? { 'Access-Control-Allow-Origin': allowedOrigin, Vary: 'Origin' }
+  ? {
+    'Access-Control-Allow-Origin': allowedOrigin,
+    'Access-Control-Allow-Methods': 'GET, HEAD, OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type, Range',
+    'Access-Control-Allow-Private-Network': 'true',
+    Vary: 'Origin'
+  }
   : {};
 
 const server = createServer(async (request, response) => {
   try {
     const url = new URL(request.url || '/', 'http://127.0.0.1');
+    if (request.method === 'OPTIONS') {
+      if (!allowedOrigin || request.headers.origin !== allowedOrigin) {
+        send(response, 403, { 'Cache-Control': 'no-store' }, 'Forbidden');
+        return;
+      }
+      send(response, 204, corsHeaders, '');
+      return;
+    }
     if (url.pathname === '/health') {
       send(response, 200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', ...corsHeaders }, '{"ok":true}');
       return;
