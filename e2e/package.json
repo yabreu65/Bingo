@@ -9,6 +9,7 @@
     "test:media": "npm run test:media:local",
     "test:media:local": "MEDIA_AUDIT_MODE=local node media-audit.mjs",
     "test:media:ci": "MEDIA_AUDIT_MODE=ci node media-audit.mjs",
+    "test:local-tv": "MEDIA_AUDIT_MODE=ci LOCAL_TV_MEDIA_E2E=1 node run-e2e.mjs",
     "test:phase4": "node phase4-load.mjs"
   },
   "dependencies": {

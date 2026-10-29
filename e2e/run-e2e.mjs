@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
+import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 
 const root = resolve(fileURLToPath(new URL('..', import.meta.url)));
@@ -16,6 +17,7 @@ const ciMediaFixtureSource = join(root, 'e2e', 'fixtures', 'media');
 const ciMediaFixturePublicDir = join(frontendDir, 'public', 'music', ciMediaFixtureName);
 const ciKaraokeAliasSource = join(ciMediaFixtureSource, 'ci-karaoke.mp4');
 const ciMediaAliasSource = ciKaraokeAliasSource;
+const localTvMediaOrigin = 'http://127.0.0.1:8787';
 
 const requireFromE2E = createRequire(import.meta.url);
 const requireFromBackend = createRequire(join(backendDir, 'server.js'));
@@ -285,6 +287,8 @@ async function main() {
   const mongoUri = mongo.getUri('bingo-e2e');
   await mongoose.connect(mongoUri);
   const ciMediaAliases = [];
+  let localTvMediaRoot;
+  const localTvMode = process.env.LOCAL_TV_MEDIA_E2E === '1';
   if (process.env.MEDIA_AUDIT_MODE === 'ci') {
     cpSync(ciMediaFixtureSource, ciMediaFixturePublicDir, { recursive: true });
     const playlistSource = readFileSync(join(frontendDir, 'src/config/musicPlaylists.js'), 'utf8');
@@ -304,6 +308,37 @@ async function main() {
       ciMediaAliases.push(target);
     }
   }
+  if (localTvMode) {
+    localTvMediaRoot = mkdtempSync(join(tmpdir(), 'bingo-local-tv-'));
+    const playlistSource = readFileSync(join(frontendDir, 'src/config/musicPlaylists.js'), 'utf8');
+    const localFiles = [...playlistSource.matchAll(/"localFile":\s*"([^"]+)"/g)].map(match => match[1]);
+    for (const localFile of localFiles) {
+      const target = join(localTvMediaRoot, 'music', localFile);
+      mkdirSync(join(target, '..'), { recursive: true });
+      cpSync(ciKaraokeAliasSource, target);
+    }
+    mkdirSync(join(localTvMediaRoot, 'sounds'), { recursive: true });
+    cpSync(join(ciMediaFixtureSource, 'ci-tone.mp3'), join(localTvMediaRoot, 'sounds', 'aplauso.mp3'));
+    cpSync(join(ciMediaFixtureSource, 'ci-tone.mp3'), join(localTvMediaRoot, 'sounds', 'burro.mp3'));
+    for (const karaoke of CHALLENGE_POOLS.karaoke || []) {
+      const target = join(localTvMediaRoot, 'music', 'karaoke', karaoke.localFile);
+      mkdirSync(join(target, '..'), { recursive: true });
+      cpSync(ciKaraokeAliasSource, target);
+    }
+    const localManifest = join(localTvMediaRoot, 'tv-media-manifest.json');
+    execFileSync(process.execPath, [
+      join(root, 'tools/generate-local-tv-manifest.mjs'),
+      '--root', localTvMediaRoot,
+      '--out', localManifest
+    ], { cwd: root, stdio: 'inherit' });
+    startProcess('local-tv-media', process.execPath, [
+      join(root, 'tools/local-tv-media-server.mjs'),
+      '--root', localTvMediaRoot,
+      '--manifest', localManifest,
+      '--port', '8787'
+    ], root, {});
+    await waitForHttp(localTvMediaOrigin + '/health');
+  }
 
   startProcess('backend', process.execPath, ['server.js'], backendDir, {
     NODE_ENV: 'test',
@@ -320,7 +355,8 @@ async function main() {
   startProcess('frontend', 'npm', ['run', 'dev', '--', '--host', '127.0.0.1', '--port', '5174'], frontendDir, {
     BROWSER: 'none',
     VITE_BACKEND_URL: backendURL,
-    VITE_NETWORK_IP: '127.0.0.1'
+    VITE_NETWORK_IP: '127.0.0.1',
+    ...(localTvMode ? { VITE_LOCAL_TV_MEDIA_ORIGIN: localTvMediaOrigin } : {})
   });
 
   let browser;
@@ -357,7 +393,18 @@ async function main() {
       typeof value.hostCapability === 'string' && value.hostCapability.length === 43
     );
     const roomCode = hostSession.roomCode;
-    await configureRoom(hostPage, roomCode, hostSession.hostCapability, { challengeFrequency: 10 });
+    await configureRoom(hostPage, roomCode, hostSession.hostCapability, {
+      challengeFrequency: 10,
+      ...(localTvMode ? {
+        eventMode: 'REMOTE_PRESENTIAL',
+        multimediaPolicy: {
+          primarySurface: 'tv',
+          tvMediaSource: 'LOCAL_TV',
+          playerPlayback: 'disabled',
+          allowExternalSources: false
+        }
+      } : {})
+    });
     console.log('  room ' + roomCode + ' created with isolated config');
 
     console.log('E2E 1b/10: organizer creates managed content through the browser');
@@ -410,10 +457,14 @@ async function main() {
     await playlistArticle.getByRole('button', { name: 'Asignar' }).click();
     await waitForBody(hostPage, /Playlist asignada/);
     await hostPage.getByRole('button', { name: 'Sala', exact: true }).click();
+    if (localTvMode) {
+      await hostPage.getByLabel('Modalidad del evento').selectOption('REMOTE_PRESENTIAL');
+      await hostPage.getByLabel('Fuente multimedia de la TV').selectOption('LOCAL_TV');
+    }
     await hostPage.getByLabel('Intervalo (s)').fill('7');
     await hostPage.getByLabel('Frecuencia de retos').fill('2');
     await hostPage.getByLabel('Máximo de jugadores').fill('12');
-    await hostPage.getByLabel('Modalidad').selectOption('line');
+    await hostPage.locator('.admin-card--narrow select').nth(2).selectOption('line');
     await hostPage.getByRole('checkbox', { name: 'Desempate habilitado' }).check();
     await hostPage.getByLabel('Playlist activa').selectOption({ label: 'Playlist E2E local' });
     await hostPage.getByRole('button', { name: /Guardar/ }).click();
@@ -426,9 +477,13 @@ async function main() {
     assert.equal(configuredRoom.config.tieBreakEnabled, true);
     assert.equal(configuredRoom.config.activePlaylist.name, 'Playlist E2E local');
     assert.equal(configuredRoom.config.activePlaylist.tracks.length, 2);
+    if (localTvMode) {
+      assert.equal(configuredRoom.config.eventMode, 'REMOTE_PRESENTIAL');
+      assert.equal(configuredRoom.config.multimediaPolicy.tvMediaSource, 'LOCAL_TV');
+    }
     await hostPage.getByLabel('Frecuencia de retos').fill('10');
     await hostPage.getByLabel('Intervalo (s)').fill('7');
-    await hostPage.getByLabel('Modalidad').selectOption('full');
+    await hostPage.locator('.admin-card--narrow select').nth(2).selectOption('full');
     await hostPage.getByLabel('Máximo de jugadores').fill('50');
     await hostPage.getByRole('button', { name: /Guardar/ }).click();
     await waitForBody(hostPage, /Configuración guardada/);
@@ -540,11 +595,23 @@ async function main() {
     const popupPromise = hostPage.waitForEvent('popup', { timeout: 10000 });
     await hostPage.getByRole('button', { name: /Abrir TV/ }).click();
     const tvPage = await popupPromise;
+    const centralTvMediaRequests = [];
+    if (localTvMode) {
+      tvPage.on('request', request => {
+        if (request.url().startsWith(baseURL) && /\/music\//.test(request.url())) {
+          centralTvMediaRequests.push(request.url());
+        }
+      });
+    }
     await tvPage.waitForLoadState('domcontentloaded');
     await waitForBody(tvPage, /Bingo Bailable|Bingo Navideño/);
     await waitForBody(tvPage, new RegExp(roomCode));
     const musicSource = await tvPage.locator('.video-wrapper video source').getAttribute('src');
-    assert.ok(musicSource && musicSource.includes('/music/'), 'TV music source missing: ' + musicSource);
+    if (localTvMode) {
+      assert.match(musicSource || '', new RegExp(`${localTvMediaOrigin}/media/m_[0-9a-f]+`), 'TV did not resolve media to the loopback service: ' + musicSource);
+    } else {
+      assert.ok(musicSource && musicSource.includes('/music/'), 'TV music source missing: ' + musicSource);
+    }
     await tvPage.waitForFunction(() => {
       const video = document.querySelector('.video-wrapper video');
       return Boolean(video?.currentSrc) && video.readyState >= 2;
@@ -557,6 +624,9 @@ async function main() {
     });
     assert.ok(tvPlayback.readyState >= 2 && !tvPlayback.paused && tvPlayback.duration > 0,
       `TV media did not start: ${JSON.stringify(tvPlayback)}`);
+    if (localTvMode) {
+      assert.deepEqual(centralTvMediaRequests, [], 'LOCAL_TV requested media from the central server');
+    }
     const tvInitialText = await tvPage.locator('body').innerText();
     assert.match(tvInitialText, /Bingo Bailable/);
     await waitForBody(tvPage, /En Espera|En Juego|CANTADOS|Únete al Bingo/);
@@ -832,7 +902,12 @@ async function main() {
       null,
       { timeout: 10000 }
     );
-    assert.ok((await karaokeVideo.getAttribute('src'))?.includes('/music/karaoke/'), 'Karaoke must load its local media route');
+    const karaokeSource = await karaokeVideo.getAttribute('src');
+    if (localTvMode) {
+      assert.match(karaokeSource || '', new RegExp(`${localTvMediaOrigin}/media/m_[0-9a-f]+`), 'Karaoke did not resolve to loopback media');
+    } else {
+      assert.ok(karaokeSource?.includes('/music/karaoke/'), 'Karaoke must load its local media route');
+    }
     const karaokePlayerBefore = await Player.findById(karaokePlayerId);
     await karaokeVideo.evaluate(video => video.dispatchEvent(new Event('ended')));
     await waitForMongoDocument(gameForRoom, (game) => !game?.activeChallenge, 'karaoke completion');
@@ -1204,6 +1279,7 @@ async function main() {
     if (browser) await browser.close().catch(() => {});
     await Promise.all(processes.reverse().map(({ child }) => stopProcess(child)));
     await mongo.stop();
+    if (localTvMediaRoot) rmSync(localTvMediaRoot, { recursive: true, force: true });
     for (const target of ciMediaAliases) rmSync(target, { force: true });
     if (process.env.MEDIA_AUDIT_MODE === 'ci') rmSync(ciMediaFixturePublicDir, { recursive: true, force: true });
   }
