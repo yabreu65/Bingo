@@ -1,10 +1,21 @@
 const TV_CAPABILITY_PATTERN = /^[A-Za-z0-9_-]{43}$/;
+const TV_AUTHORIZATION_TOKEN_PATTERN = TV_CAPABILITY_PATTERN;
 
 export const createTVDisplayURL = (baseUrl, roomCode) => {
   const url = new URL('/?', baseUrl);
   url.searchParams.set('tv', roomCode.toUpperCase());
   return url.toString();
 };
+
+export const createRemoteTVDisplayURL = (baseUrl, roomCode, tvToken) => {
+  const url = new URL('/?', baseUrl);
+  url.searchParams.set('tv', roomCode.toUpperCase());
+  url.searchParams.set('tvToken', tvToken);
+  return url.toString();
+};
+
+export const isTVAuthorizationToken = (token) =>
+  typeof token === 'string' && TV_AUTHORIZATION_TOKEN_PATTERN.test(token);
 
 export const listenForTVAuthorization = (windowRef, roomCode, onCapability) => {
   const opener = windowRef.opener;

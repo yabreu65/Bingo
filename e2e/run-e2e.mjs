@@ -1153,6 +1153,43 @@ async function main() {
     await waitForBody(playerBPage, /Finalizado/);
     console.log('  organizer, TV and both recovered player sessions remained synchronized');
 
+    console.log('E2E 11/11: temporary remote TV authorization and revocation');
+    await configureRoom(hostPage, roomCode, hostSession.hostCapability, { eventMode: 'REMOTE_PRESENTIAL' });
+    await hostPage.reload();
+    await waitForBody(hostPage, /TV remota/);
+    await hostPage.getByRole('button', { name: /Generar enlace TV/ }).click();
+    await waitForBody(hostPage, /Enlace temporal de TV generado/);
+    const remoteTvUrl = await hostPage.getByLabel('Enlace temporal de TV').inputValue();
+    assert.match(remoteTvUrl, /[?&]tvToken=[A-Za-z0-9_-]{43}/);
+    const remoteTvContext = await browser.newContext();
+    contexts.push(remoteTvContext);
+    const remoteTvPage = await remoteTvContext.newPage();
+    await remoteTvPage.goto(remoteTvUrl);
+    await waitForBody(remoteTvPage, /Bingo Bailable|Bingo Navideño/);
+    await remoteTvPage.waitForFunction(({ key }) => {
+      try {
+        const value = JSON.parse(sessionStorage.getItem(key) || 'null');
+        return Boolean(value?.token && value?.expiresAt);
+      } catch {
+        return false;
+      }
+    }, { key: `bingo-tv-session:${roomCode}` });
+    assert.equal(new URL(remoteTvPage.url()).searchParams.has('tvToken'), false, 'TV token remained in the URL after claim');
+    await waitForBody(remoteTvPage, new RegExp(roomCode));
+    await waitForBody(hostPage, /TV conectada/);
+    console.log('  remote TV claimed a one-time link, established a scoped session and removed the token from the URL');
+
+    const reusedTvContext = await browser.newContext();
+    contexts.push(reusedTvContext);
+    const reusedTvPage = await reusedTvContext.newPage();
+    await reusedTvPage.goto(remoteTvUrl);
+    await waitForBody(reusedTvPage, /Enlace temporal de TV|utilizado|expirado/);
+    await reusedTvPage.close();
+    await hostPage.getByRole('button', { name: /Revocar autorización/ }).click();
+    await waitForBody(hostPage, /Autorización de TV revocada/);
+    await waitForBody(remoteTvPage, /autorización temporal.*revocada/i);
+    console.log('  replay was rejected and organizer revocation disconnected the temporary TV');
+
     await tvPage.close();
     console.log('E2E PASS: complete organizer/player/TV flow and critical security/recovery scenarios');
   } finally {

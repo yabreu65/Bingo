@@ -1,11 +1,11 @@
-import { lazy, Suspense, useState, useEffect } from 'react';
+import { lazy, Suspense, useState, useEffect, useRef } from 'react';
 import { Toaster } from 'react-hot-toast';
 import toast from 'react-hot-toast';
 import { useGame } from './context/useGame';
 import { useSocket } from './context/useSocket';
 import Snowflakes from './components/UI/Snowflakes';
 import { API_URL } from './config/api';
-import { listenForTVAuthorization } from './utils/tvAuthorization';
+import { isTVAuthorizationToken, listenForTVAuthorization } from './utils/tvAuthorization';
 import './App.css';
 
 const STORAGE_KEY = 'bingo_session';
@@ -38,6 +38,9 @@ function App() {
   const [mode, setMode] = useState(null); // 'single' or 'multi'
   const [roomData, setRoomData] = useState(null);
   const [tvCapability, setTvCapability] = useState(null);
+  const [tvSessionToken, setTvSessionToken] = useState(null);
+  const [tvAuthorizationError, setTvAuthorizationError] = useState(null);
+  const tvAuthorizationRequests = useRef(new Set());
   const [cardSelected, setCardSelected] = useState(false);
   const [inWaitingRoom, setInWaitingRoom] = useState(false);
   const [isReconnecting, setIsReconnecting] = useState(true);
@@ -47,6 +50,7 @@ function App() {
   // Detectar parámetros de URL
   const urlParams = new URLSearchParams(window.location.search);
   const tvRoomCode = urlParams.get('tv');
+  const tvToken = urlParams.get('tvToken');
   const quickJoinRoomCode = urlParams.get('room');
 
   // Receive the scoped TV credential without putting it in the URL.
@@ -54,6 +58,83 @@ function App() {
     if (!tvRoomCode) return undefined;
     return listenForTVAuthorization(window, tvRoomCode, setTvCapability);
   }, [tvRoomCode]);
+
+  useEffect(() => {
+    if (!tvRoomCode || tvCapability) return undefined;
+
+    const normalizedRoomCode = tvRoomCode.toUpperCase();
+    const storageKey = `bingo-tv-session:${normalizedRoomCode}`;
+    const hasStoredSession = Boolean(sessionStorage.getItem(storageKey));
+    if (!isTVAuthorizationToken(tvToken) && !hasStoredSession) return undefined;
+    const requestKey = `${normalizedRoomCode}:${tvToken || 'stored-session'}`;
+    if (tvAuthorizationRequests.current.has(requestKey)) return undefined;
+    tvAuthorizationRequests.current.add(requestKey);
+    let renewalTimer;
+
+    const saveSession = (token, expiresAt) => {
+      setTvSessionToken(token);
+      sessionStorage.setItem(storageKey, JSON.stringify({ token, expiresAt }));
+    };
+
+    const scheduleRenewal = (token, expiresAt) => {
+      const delay = Math.max(new Date(expiresAt).getTime() - Date.now() - 30_000, 30_000);
+      renewalTimer = window.setTimeout(async () => {
+        try {
+          const response = await fetch(`${API_URL}/api/rooms/${normalizedRoomCode}/tv-authorization/renew`, {
+            method: 'POST',
+            headers: { 'x-tv-session-token': token }
+          });
+          const data = await response.json();
+          if (!response.ok || !data.tvSessionToken && !data.expiresAt) throw new Error(data.error || 'Sesión de TV no renovable');
+          saveSession(token, data.expiresAt);
+          scheduleRenewal(token, data.expiresAt);
+        } catch (error) {
+          setTvAuthorizationError(error.message || 'La sesión temporal de TV expiró');
+        }
+      }, delay);
+    };
+
+    const claimOrRestore = async () => {
+      try {
+        let token;
+        let expiresAt;
+        if (isTVAuthorizationToken(tvToken)) {
+          const response = await fetch(`${API_URL}/api/rooms/${normalizedRoomCode}/tv-authorization/claim`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ token: tvToken })
+          });
+          const data = await response.json();
+          if (!response.ok) throw new Error(data.error || 'El enlace temporal de TV no es válido');
+          token = data.tvSessionToken;
+          expiresAt = data.expiresAt;
+          window.history.replaceState({}, document.title, `/?tv=${encodeURIComponent(normalizedRoomCode)}`);
+        } else {
+          const stored = JSON.parse(sessionStorage.getItem(storageKey) || 'null');
+          token = stored?.token;
+          expiresAt = stored?.expiresAt;
+          if (!isTVAuthorizationToken(token)) throw new Error('Abrí un enlace temporal de TV válido para esta sala');
+          const response = await fetch(`${API_URL}/api/rooms/${normalizedRoomCode}/tv-authorization/renew`, {
+            method: 'POST',
+            headers: { 'x-tv-session-token': token }
+          });
+          const data = await response.json();
+          if (!response.ok) throw new Error(data.error || 'La sesión temporal de TV expiró o fue revocada');
+          expiresAt = data.expiresAt;
+        }
+        saveSession(token, expiresAt);
+        scheduleRenewal(token, expiresAt);
+      } catch (error) {
+        tvAuthorizationRequests.current.delete(requestKey);
+        setTvAuthorizationError(error.message || 'No se pudo autorizar esta TV');
+      }
+    };
+
+    claimOrRestore();
+    return () => {
+      window.clearTimeout(renewalTimer);
+    };
+  }, [tvRoomCode, tvToken, tvCapability]);
 
   // Listener global para cierre de sala
   useEffect(() => {
@@ -314,7 +395,12 @@ function App() {
       <div className="app">
         <Toaster position="top-right" toastOptions={{ duration: 3000 }} />
         <Suspense fallback={<LoadingScreen />}>
-          <TVDisplay roomCode={tvRoomCode.toUpperCase()} tvCapability={tvCapability} />
+          <TVDisplay
+            roomCode={tvRoomCode.toUpperCase()}
+            tvCapability={tvCapability}
+            tvSessionToken={tvSessionToken}
+            tvAuthorizationError={tvAuthorizationError}
+          />
         </Suspense>
       </div>
     );

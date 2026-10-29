@@ -25,7 +25,7 @@ const MotionBox = ({ children, ...props }) => (
   </motion.div>
 );
 
-const TVDisplay = ({ roomCode, tvCapability }) => {
+const TVDisplay = ({ roomCode, tvCapability, tvSessionToken, tvAuthorizationError }) => {
   const { socket } = useSocket();
   const [currentNumber, setCurrentNumber] = useState(null);
   const [calledNumbers, setCalledNumbers] = useState([]);
@@ -41,6 +41,7 @@ const TVDisplay = ({ roomCode, tvCapability }) => {
   const [manualPlayerResults, setManualPlayerResults] = useState({});
   const [riddleResult, setRiddleResult] = useState(null);
   const [effectsMuted, setEffectsMuted] = useState(() => localStorage.getItem('bingo-tv-effects-muted') === 'true');
+  const [tvConnectionError, setTvConnectionError] = useState(null);
   const [musicStatus, setMusicStatus] = useState('loading');
   const [activeVoting, setActiveVoting] = useState(null);
 
@@ -334,17 +335,26 @@ const TVDisplay = ({ roomCode, tvCapability }) => {
 
     // Join only after receiving the scoped capability through the opener handshake.
     const joinTVRoom = () => {
-      if (!tvCapability) return;
-      socket.emit('join-room', { roomCode, playerId: 'tv-display', tvCapability }, (response) => {
+      if (!tvCapability && !tvSessionToken) return;
+      const authorization = tvSessionToken
+        ? { tvSessionToken }
+        : { tvCapability };
+      socket.emit('join-room', { roomCode, playerId: 'tv-display', ...authorization }, (response) => {
         if (response?.success) {
+          setTvConnectionError(null);
           console.log('📺 TV Display joined room successfully:', response);
         } else {
+          setTvConnectionError(response?.error || 'La autorización de TV no es válida o expiró.');
           console.error('📺 TV Display failed to join room:', response?.error);
         }
       });
     };
+    const handleTvAuthorizationRevoked = () => {
+      setTvConnectionError('La autorización temporal de esta TV fue revocada. Generá un nuevo enlace desde el organizador.');
+    };
     joinTVRoom();
     socket.on('connect', joinTVRoom);
+    socket.on('tv-authorization-revoked', handleTvAuthorizationRevoked);
 
     socket.on('number-called', handleNumberCalled);
     socket.on('game-started', handleGameStarted);
@@ -380,6 +390,7 @@ const TVDisplay = ({ roomCode, tvCapability }) => {
 
     return () => {
       socket.off('connect', joinTVRoom);
+      socket.off('tv-authorization-revoked', handleTvAuthorizationRevoked);
       socket.off('number-called', handleNumberCalled);
       socket.off('game-started', handleGameStarted);
       socket.off('game-state-changed', handleGameStateChanged);
@@ -406,7 +417,7 @@ const TVDisplay = ({ roomCode, tvCapability }) => {
       socket.off('tiebreak-voting-progress', handleTiebreakVotingProgress);
       socket.off('tiebreak-results', handleTiebreakResults);
     };
-  }, [socket, roomCode, tvCapability, activeChallenge, gameState, playlist.length, effectsMuted]); // Solo re-ejecutar si cambia el contexto de la sala o el estado del juego
+  }, [socket, roomCode, tvCapability, tvSessionToken, activeChallenge, gameState, playlist.length, effectsMuted]); // Solo re-ejecutar si cambia el contexto de la sala o el estado del juego
 
   // Manejar cuando termina una canción
   const handleVideoEnded = () => {
@@ -552,6 +563,11 @@ const TVDisplay = ({ roomCode, tvCapability }) => {
 
   return (
     <div className="tv-display-grid pf-tv-stage">
+      {(tvAuthorizationError || tvConnectionError) && (
+        <div className="tv-authorization-error" role="alert">
+          {tvAuthorizationError || tvConnectionError}
+        </div>
+      )}
       {/* Elementos de audio ocultos para sonidos de trivia */}
       {canRenderTvMedia && <audio ref={applauseAudioRef} src="/sounds/aplauso.mp3" preload="auto" />}
       {canRenderTvMedia && <audio ref={donkeyAudioRef} src="/sounds/burro.mp3" preload="auto" />}

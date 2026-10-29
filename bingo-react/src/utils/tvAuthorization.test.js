@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
+  createRemoteTVDisplayURL,
   createTVDisplayURL,
+  isTVAuthorizationToken,
   listenForTVAuthorization,
   openTVDisplay
 } from './tvAuthorization';
@@ -13,6 +15,15 @@ describe('TV capability handoff', () => {
 
     expect(url).toBe('https://bingo.example/?tv=ABC123');
     expect(url).not.toContain(capability);
+  });
+
+  it('creates a temporary remote-TV URL with a scoped one-time token', () => {
+    const token = 'r'.repeat(43);
+    const url = createRemoteTVDisplayURL('https://bingo.example', 'abc123', token);
+
+    expect(url).toBe(`https://bingo.example/?tv=ABC123&tvToken=${token}`);
+    expect(isTVAuthorizationToken(token)).toBe(true);
+    expect(isTVAuthorizationToken('not-a-token')).toBe(false);
   });
 
   it('authorizes only a valid message from the same-origin opener for this room', () => {

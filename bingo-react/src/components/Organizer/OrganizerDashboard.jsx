@@ -10,7 +10,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Play, Pause, RefreshCw, Users, Link as LinkIcon, Tv, X, Search, Crown, Mic, Music, Gift, Target, Clock, Video, Eye, CheckCircle, XCircle, Settings } from 'lucide-react';
 import RecordingChallenge from '../Recording/RecordingChallenge';
 import { getShareableUrl } from '../../utils/networkUtils';
-import { createTVDisplayURL, openTVDisplay } from '../../utils/tvAuthorization';
+import { createRemoteTVDisplayURL, createTVDisplayURL, openTVDisplay } from '../../utils/tvAuthorization';
 import AdminCenter from './AdminCenter';
 import './OrganizerDashboard.css';
 import {
@@ -431,6 +431,7 @@ export default function OrganizerDashboard({ roomData }) {
   const [showBingoValidator, setShowBingoValidator] = useState(false);
   const [validatingPlayer, setValidatingPlayer] = useState(null);
   const [showAdminCenter, setShowAdminCenter] = useState(false);
+  const [tvAuthorization, setTvAuthorization] = useState(null);
 
   // Conectar al socket room cuando el componente se monta
   useEffect(() => {
@@ -527,6 +528,19 @@ export default function OrganizerDashboard({ roomData }) {
         const p = roomState.players.find(p => p._id === data.playerId);
         toast.success(`BINGO: ${p?.name || 'Jugador'}`);
     };
+    const handleTvAuthorizationStatus = (data) => {
+      if (data?.roomCode?.toUpperCase() !== roomState.code.toUpperCase()) return;
+      setTvAuthorization((previous) => {
+        if (!previous) return previous;
+        if (data.connected) {
+          return { ...previous, url: null, consumed: true, connected: true, expiresAt: data.expiresAt };
+        }
+        if (data.claimed) {
+          return { ...previous, url: null, consumed: true, connected: false, expiresAt: data.expiresAt };
+        }
+        return { ...previous, connected: false, revokedAt: data.revokedAt };
+      });
+    };
 
     socket.on('room-updated', handleRoomUpdate);
     socket.on('number-called', handleNumberCalled);
@@ -540,6 +554,7 @@ export default function OrganizerDashboard({ roomData }) {
     socket.on('votingStarted', handleVotingStarted);
     socket.on('votingResults', handleVotingResults);
     socket.on('bingo-verified', handleBingoVerified);
+    socket.on('tv-authorization-status', handleTvAuthorizationStatus);
 
     return () => {
       socket.off('room-updated', handleRoomUpdate);
@@ -554,8 +569,9 @@ export default function OrganizerDashboard({ roomData }) {
       socket.off('votingStarted', handleVotingStarted);
       socket.off('votingResults', handleVotingResults);
       socket.off('bingo-verified', handleBingoVerified);
+      socket.off('tv-authorization-status', handleTvAuthorizationStatus);
     };
-  }, [socket, roomState.config?.timeBetweenNumbers, roomState.players]);
+  }, [socket, roomState.code, roomState.config?.timeBetweenNumbers, roomState.players]);
 
   // Efecto para el temporizador visual
   useEffect(() => {
@@ -811,6 +827,43 @@ export default function OrganizerDashboard({ roomData }) {
   const copyToClipboard = (text, message) => {
     navigator.clipboard.writeText(text);
     toast.success(message, { icon: '📋' });
+  };
+
+  const isRemoteTvMode = ['REMOTE_PRESENTIAL', 'DISTRIBUTED'].includes(roomState.config?.eventMode);
+
+  const handleGenerateRemoteTV = async () => {
+    try {
+      const response = await fetch(`${API_URL}/api/rooms/${roomState.code}/tv-authorization`, {
+        method: 'POST',
+        headers: { 'x-room-host-capability': roomData.hostCapability }
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'No se pudo generar el enlace de TV');
+      setTvAuthorization({
+        url: createRemoteTVDisplayURL(shareableBaseUrl, roomState.code, data.tvToken),
+        expiresAt: data.expiresAt,
+        connected: false,
+        consumed: false
+      });
+      showSuccess('Enlace temporal de TV generado');
+    } catch (error) {
+      showError(error.message, 'No se pudo autorizar la TV');
+    }
+  };
+
+  const handleRevokeRemoteTV = async () => {
+    try {
+      const response = await fetch(`${API_URL}/api/rooms/${roomState.code}/tv-authorization/revoke`, {
+        method: 'POST',
+        headers: { 'x-room-host-capability': roomData.hostCapability }
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'No se pudo revocar la TV');
+      setTvAuthorization(null);
+      showSuccess('Autorización de TV revocada');
+    } catch (error) {
+      showError(error.message, 'No se pudo revocar la TV');
+    }
   };
 
   const handleOpenTV = () => {
@@ -1205,6 +1258,57 @@ export default function OrganizerDashboard({ roomData }) {
                 />
               </div>
             </DashboardSection>
+
+            {isRemoteTvMode && (
+              <DashboardSection title="📺 TV remota">
+                <p className="text-sm text-slate-400 mb-3">
+                  Generá un enlace temporal para una única pantalla. No compartas tus credenciales de organizador.
+                </p>
+                {!tvAuthorization ? (
+                  <ActionButton
+                    icon={<Tv size={18} />}
+                    label="Generar enlace TV"
+                    onClick={handleGenerateRemoteTV}
+                    variant="success"
+                  />
+                ) : (
+                  <div className="space-y-3">
+                    <p className="text-sm text-slate-300" role="status">
+                      Estado: {tvAuthorization.connected ? 'TV conectada' : tvAuthorization.consumed ? 'Enlace consumido' : 'Esperando conexión'}
+                    </p>
+                    {tvAuthorization.expiresAt && (
+                      <p className="text-xs text-slate-400">
+                        Expira: {new Date(tvAuthorization.expiresAt).toLocaleTimeString()}
+                      </p>
+                    )}
+                    {tvAuthorization.url && (
+                      <>
+                        <input
+                          readOnly
+                          value={tvAuthorization.url}
+                          aria-label="Enlace temporal de TV"
+                          className="w-full bg-slate-700/50 border border-slate-600 rounded-lg px-3 py-2 text-xs text-white"
+                        />
+                        <ActionButton
+                          icon={<LinkIcon size={16} />}
+                          label="Copiar enlace temporal"
+                          onClick={() => copyToClipboard(tvAuthorization.url, 'Enlace temporal copiado')}
+                          variant="primary"
+                          className="!py-2.5 !text-sm"
+                        />
+                      </>
+                    )}
+                    <ActionButton
+                      icon={<X size={16} />}
+                      label="Revocar autorización"
+                      onClick={handleRevokeRemoteTV}
+                      variant="danger"
+                      className="!py-2.5 !text-sm"
+                    />
+                  </div>
+                )}
+              </DashboardSection>
+            )}
 
             {/* Jugadores */}
             <DashboardSection title="👥 Jugadores" className="flex flex-col max-h-[600px]">
