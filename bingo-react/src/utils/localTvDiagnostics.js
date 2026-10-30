@@ -1,6 +1,9 @@
 import { LOCAL_TV_MEDIA_ORIGIN } from './localTvMedia';
 
-const LOOPBACK_PERMISSION_NAMES = ['loopback-network', 'local-network-access'];
+// Chromium exposes the granular permission for loopback requests. The former
+// `local-network-access` alias is intentionally not queried: older Chromium
+// versions could fail while parsing that legacy name.
+const LOOPBACK_PERMISSION_NAMES = ['loopback-network'];
 
 const isLoopbackOrigin = (value) => {
   try {
@@ -11,20 +14,28 @@ const isLoopbackOrigin = (value) => {
   }
 };
 
-export const readLoopbackPermission = async () => {
-  if (!globalThis.navigator?.permissions?.query) return 'unsupported';
+const publicOriginRequiresPermission = () => {
+  const currentOrigin = globalThis.location?.origin;
+  return globalThis.location?.protocol === 'https:' && !isLoopbackOrigin(currentOrigin);
+};
 
-  for (const name of LOOPBACK_PERMISSION_NAMES) {
-    try {
-      const permission = await globalThis.navigator.permissions.query({ name });
-      if (permission?.state === 'denied') return 'denied';
-      if (permission?.state === 'granted') return 'granted';
-      if (permission?.state === 'prompt') return 'prompt';
-    } catch {
-      // Permission names are not implemented consistently across browsers.
-    }
+export const isLoopbackBrowserOrigin = () => isLoopbackOrigin(globalThis.location?.origin);
+
+export const readLoopbackPermission = async () => {
+  if (!globalThis.navigator?.permissions?.query) return 'prompt';
+
+  try {
+    const permission = await globalThis.navigator.permissions.query({
+      name: LOOPBACK_PERMISSION_NAMES[0]
+    });
+    return ['denied', 'granted', 'prompt'].includes(permission?.state)
+      ? permission.state
+      : 'prompt';
+  } catch {
+    // Unknown permission names must remain actionable: the first probe will
+    // be attempted only from the explicit user action in the TV UI.
+    return 'prompt';
   }
-  return 'unsupported';
 };
 
 const readAutoplayPolicy = (mediaElement) => {
@@ -51,14 +62,22 @@ export const attemptMediaPlayback = async (mediaElement) => {
 
 const probeHealth = async (origin) => {
   const healthUrl = `${origin.replace(/\/$/, '')}/health`;
+  const requestOptions = {
+    cache: 'no-store',
+    mode: 'cors',
+    targetAddressSpace: 'loopback'
+  };
   try {
-    const response = await fetch(healthUrl, { cache: 'no-store', mode: 'cors' });
+    const response = await fetch(healthUrl, requestOptions);
     return response.ok ? 'available' : 'unavailable';
   } catch {
     // A loopback media element can work without readable CORS headers. A
     // no-cors probe still tells us whether the browser can reach the service.
     try {
-      const response = await fetch(healthUrl, { cache: 'no-store', mode: 'no-cors' });
+      const response = await fetch(healthUrl, {
+        ...requestOptions,
+        mode: 'no-cors'
+      });
       return response.type === 'opaque' ? 'reachable-opaque' : 'unavailable';
     } catch {
       return 'blocked-or-offline';
@@ -68,22 +87,35 @@ const probeHealth = async (origin) => {
 
 export const checkLocalTvReadiness = async ({
   origin = LOCAL_TV_MEDIA_ORIGIN,
-  mediaElement
+  mediaElement,
+  requestService = false
 } = {}) => {
   const permission = await readLoopbackPermission();
   const secureContext = globalThis.isSecureContext === true;
   const loopbackOrigin = isLoopbackOrigin(origin);
-  const service = await probeHealth(origin);
   const autoplay = readAutoplayPolicy(mediaElement);
+
+  if (!loopbackOrigin) {
+    return { origin, loopbackOrigin, secureContext, permission, service: 'invalid-origin', autoplay, allowed: false };
+  }
+  if (permission === 'denied') {
+    return { origin, loopbackOrigin, secureContext, permission, service: 'permission-denied', autoplay, allowed: false };
+  }
+  if (!requestService && permission !== 'granted' && publicOriginRequiresPermission()) {
+    return { origin, loopbackOrigin, secureContext, permission, service: 'permission-required', autoplay, allowed: false };
+  }
+
+  const service = await probeHealth(origin);
+  const permissionAfterProbe = await readLoopbackPermission();
 
   return {
     origin,
     loopbackOrigin,
     secureContext,
-    permission,
+    permission: permissionAfterProbe,
     service,
     autoplay,
-    allowed: loopbackOrigin && secureContext && permission !== 'denied' &&
+    allowed: loopbackOrigin && secureContext && permissionAfterProbe !== 'denied' &&
       ['available', 'reachable-opaque'].includes(service)
   };
 };

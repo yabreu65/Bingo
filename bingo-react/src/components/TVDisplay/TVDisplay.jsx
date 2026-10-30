@@ -10,7 +10,7 @@ import DeezerPlayer from '../Music/DeezerPlayer';
 import KaraokeOverlay from '../Music/KaraokeOverlay';
 import { resolveMultimediaPolicy, shouldRenderTvMedia, shouldUseExternalSources } from '../../utils/multimediaPolicy';
 import { isLocalTvMediaPolicy, resolveTvMediaUrl } from '../../utils/localTvMedia';
-import { attemptMediaPlayback, checkLocalTvReadiness } from '../../utils/localTvDiagnostics';
+import { attemptMediaPlayback, checkLocalTvReadiness, isLoopbackBrowserOrigin, readLoopbackPermission } from '../../utils/localTvDiagnostics';
  
 import { getShareableUrl } from '../../utils/networkUtils';
 import './TVDisplay.css';
@@ -46,6 +46,7 @@ const TVDisplay = ({ roomCode, tvCapability, tvSessionToken, tvAuthorizationErro
   const [tvConnectionError, setTvConnectionError] = useState(null);
   const [musicStatus, setMusicStatus] = useState('loading');
   const [localMediaDiagnostics, setLocalMediaDiagnostics] = useState(null);
+  const [localMediaRequestPending, setLocalMediaRequestPending] = useState(false);
   const [activeVoting, setActiveVoting] = useState(null);
 
   // Estados para tie-break
@@ -70,6 +71,9 @@ const TVDisplay = ({ roomCode, tvCapability, tvSessionToken, tvAuthorizationErro
   const canRenderTvMedia = shouldRenderTvMedia(multimediaPolicy);
   const canUseExternalSources = shouldUseExternalSources(multimediaPolicy);
   const localTvEnabled = isLocalTvMediaPolicy(multimediaPolicy);
+  const canLoadTvMedia = canRenderTvMedia && (
+    !localTvEnabled || localMediaDiagnostics?.allowed === true
+  );
   const tvMediaUrl = useCallback(
     (relativePath) => resolveTvMediaUrl(relativePath, multimediaPolicy || { mode: 'LEGACY' }),
     [multimediaPolicy]
@@ -92,34 +96,65 @@ const TVDisplay = ({ roomCode, tvCapability, tvSessionToken, tvAuthorizationErro
     emitTvMediaStatus(status);
   }, [emitTvMediaStatus, localTvEnabled]);
 
+  const updateLocalMediaReadiness = useCallback(async ({ requestService = false } = {}) => {
+    if (!localTvEnabled) return;
+
+    setLocalMediaRequestPending(requestService);
+    if (requestService) emitTvMediaStatus('checking');
+    try {
+      const diagnostics = await checkLocalTvReadiness({ requestService });
+      const status = diagnostics.allowed
+        ? 'available'
+        : diagnostics.permission === 'denied'
+          ? 'permission-denied'
+          : diagnostics.service === 'permission-required'
+            ? 'permission-required'
+            : diagnostics.service === 'blocked-or-offline'
+              ? 'unavailable'
+              : 'blocked';
+      const nextDiagnostics = { ...diagnostics, status };
+      setLocalMediaDiagnostics(nextDiagnostics);
+      emitTvMediaStatus(status === 'permission-denied' ? 'permission-denied' :
+        status === 'unavailable' ? 'unavailable' : status === 'permission-required' ? 'permission-required' : 'available',
+      diagnostics);
+    } catch {
+      const diagnostics = { status: 'unavailable', service: 'blocked-or-offline', permission: 'unknown', allowed: false };
+      setLocalMediaDiagnostics(diagnostics);
+      emitTvMediaStatus('unavailable', diagnostics);
+    } finally {
+      setLocalMediaRequestPending(false);
+    }
+  }, [emitTvMediaStatus, localTvEnabled]);
+
   useEffect(() => {
     if (!localTvEnabled) {
       return undefined;
     }
 
     let active = true;
-    emitTvMediaStatus('checking');
-    checkLocalTvReadiness()
-      .then((diagnostics) => {
-        if (!active) return;
-        setLocalMediaDiagnostics({ ...diagnostics, status: diagnostics.allowed ? 'available' : 'blocked' });
-        emitTvMediaStatus(
-          diagnostics.permission === 'denied' ? 'permission-denied' :
-            diagnostics.service === 'blocked-or-offline' ? 'unavailable' : 'available',
-          diagnostics
-        );
-      })
-      .catch(() => {
-        if (!active) return;
-        const diagnostics = { status: 'blocked', service: 'blocked-or-offline', permission: 'unknown' };
-        setLocalMediaDiagnostics(diagnostics);
-        emitTvMediaStatus('unavailable', diagnostics);
-      });
+    const initializeLocalMedia = async () => {
+      const permission = await readLoopbackPermission();
+      if (!active) return;
+      if (permission === 'granted' || isLoopbackBrowserOrigin()) {
+        await updateLocalMediaReadiness({ requestService: isLoopbackBrowserOrigin() });
+        return;
+      }
+
+      const status = permission === 'denied' ? 'permission-denied' : 'permission-required';
+      setLocalMediaDiagnostics({ permission, service: 'permission-required', status, allowed: false });
+      emitTvMediaStatus(status, { permission, service: 'permission-required' });
+    };
+    initializeLocalMedia().catch(() => {
+      if (!active) return;
+      const diagnostics = { status: 'unavailable', service: 'blocked-or-offline', permission: 'unknown', allowed: false };
+      setLocalMediaDiagnostics(diagnostics);
+      emitTvMediaStatus('unavailable', diagnostics);
+    });
 
     return () => {
       active = false;
     };
-  }, [emitTvMediaStatus, localTvEnabled]);
+  }, [emitTvMediaStatus, localTvEnabled, updateLocalMediaReadiness]);
 
   const handleKaraokeVideoEnd = useCallback(() => {
     socket?.emit('karaoke-video-end', {
@@ -553,7 +588,7 @@ const TVDisplay = ({ roomCode, tvCapability, tvSessionToken, tvAuthorizationErro
         videoElement.removeEventListener('loadedmetadata', handleLoadedMetadata);
       };
     }
-  }, [currentSong, gameState, activeChallenge, playlist.length, reportLocalMediaPlayback]);
+  }, [currentSong, gameState, activeChallenge, playlist.length, reportLocalMediaPlayback, canLoadTvMedia]);
 
   // Sincronizar video con el estado del juego Y cuando termina un challenge
   useEffect(() => {
@@ -637,6 +672,8 @@ const TVDisplay = ({ roomCode, tvCapability, tvSessionToken, tvAuthorizationErro
         <div className="tv-media-status" data-testid="local-tv-media-status" role="status">
           {localMediaDiagnostics?.permission === 'denied'
             ? 'Medios locales: permiso de red local denegado. Permitilo en el navegador para reproducir desde esta laptop.'
+            : localMediaDiagnostics?.status === 'permission-required'
+              ? 'Medios locales: habilitá el acceso de red local para esta TV antes de reproducir.'
             : localMediaDiagnostics?.media === 'playing'
               ? 'Medios locales: reproducción activa en esta TV.'
               : localMediaDiagnostics?.media === 'autoplay-blocked'
@@ -646,11 +683,30 @@ const TVDisplay = ({ roomCode, tvCapability, tvSessionToken, tvAuthorizationErro
                 : localMediaDiagnostics?.service === 'blocked-or-offline'
                   ? 'Medios locales: no se pudo contactar el servicio local. El bingo puede continuar sin música.'
                   : 'Medios locales: verificando servicio y permisos del navegador…'}
+          {localMediaDiagnostics?.status === 'permission-required' && (
+            <button
+              type="button"
+              data-testid="enable-local-tv-media"
+              disabled={localMediaRequestPending}
+              onClick={() => updateLocalMediaReadiness({ requestService: true })}
+            >
+              {localMediaRequestPending ? 'Comprobando acceso…' : 'Habilitar reproducción local'}
+            </button>
+          )}
+          {localMediaDiagnostics?.permission === 'denied' && (
+            <button
+              type="button"
+              data-testid="retry-local-tv-permission"
+              onClick={() => updateLocalMediaReadiness({ requestService: true })}
+            >
+              Reintentar después de cambiar el permiso
+            </button>
+          )}
         </div>
       )}
       {/* Elementos de audio ocultos para sonidos de trivia */}
-      {canRenderTvMedia && <audio ref={applauseAudioRef} src={tvMediaUrl('sounds/aplauso.mp3')} preload="auto" />}
-      {canRenderTvMedia && <audio ref={donkeyAudioRef} src={tvMediaUrl('sounds/burro.mp3')} preload="auto" />}
+      {canLoadTvMedia && <audio ref={applauseAudioRef} src={tvMediaUrl('sounds/aplauso.mp3')} preload="auto" />}
+      {canLoadTvMedia && <audio ref={donkeyAudioRef} src={tvMediaUrl('sounds/burro.mp3')} preload="auto" />}
 
       {/* OVERLAYS */}
       <AnimatePresence>
@@ -807,7 +863,7 @@ const TVDisplay = ({ roomCode, tvCapability, tvSessionToken, tvAuthorizationErro
                     />
                   </div>
                 )}
-                {activeChallenge.localFile && canRenderTvMedia && (
+                {activeChallenge.localFile && canLoadTvMedia && (
                   <KaraokeOverlay
                     localFile={activeChallenge.localFile}
                     videoUrl={tvMediaUrl(`music/karaoke/${activeChallenge.localFile}`)}
@@ -962,7 +1018,7 @@ const TVDisplay = ({ roomCode, tvCapability, tvSessionToken, tvAuthorizationErro
               </button>
             )}
 
-            {tieBreakStatus === 'playing' && tieBreakPerformer?.songData && canRenderTvMedia && (
+            {tieBreakStatus === 'playing' && tieBreakPerformer?.songData && canLoadTvMedia && (
               <div style={{
                 width: '80%',
                 maxWidth: '1200px',
@@ -1150,7 +1206,7 @@ const TVDisplay = ({ roomCode, tvCapability, tvSessionToken, tvAuthorizationErro
               reportLocalMediaPlayback('unavailable');
             }}
           >
-            {currentSong?.localFile && (
+            {currentSong?.localFile && canLoadTvMedia && (
               <source src={tvMediaUrl(`music/${currentSong.localFile}`)} type="video/mp4" />
             )}
             Tu navegador no soporta el elemento de video.
@@ -1218,8 +1274,8 @@ const TVDisplay = ({ roomCode, tvCapability, tvSessionToken, tvAuthorizationErro
       </section>
 
       {/* Elementos de audio para sonidos de trivia */}
-      {canRenderTvMedia && <audio ref={applauseAudioRef} src={tvMediaUrl('sounds/aplauso.mp3')} preload="auto" />}
-      {canRenderTvMedia && <audio ref={donkeyAudioRef} src={tvMediaUrl('sounds/burro.mp3')} preload="auto" />}
+      {canLoadTvMedia && <audio ref={applauseAudioRef} src={tvMediaUrl('sounds/aplauso.mp3')} preload="auto" />}
+      {canLoadTvMedia && <audio ref={donkeyAudioRef} src={tvMediaUrl('sounds/burro.mp3')} preload="auto" />}
     </div>
   );
 };
