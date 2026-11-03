@@ -1,0 +1,219 @@
+# Review-only private staging proposal. Intentionally not deployment-ready:
+# see docs/m6-private-staging-runbook.md (NO-GO until bootstrap and quota gates pass).
+services:
+  mongo:
+    platform: linux/amd64
+    image: mongo:7.0@sha256:e634fcaae4d0915b365fb88c076dd33c851ed61a611c7ee9816aba6d6b5159cd
+    pull_policy: never
+    labels:
+      com.bingo.owner: bingo-private-staging
+      com.bingo.role: mongo
+      com.bingo.validation: ${M6B_RUN_ID:-not-a-validation-run}
+    command: ["mongod", "--bind_ip_all", "--replSet", "bingo-rs", "--keyFile", "/run/secrets/mongo-keyfile", "--auth"]
+    restart: unless-stopped
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_ROOT_USERNAME:?Set via an approved secret mechanism}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD:?Set via an approved secret mechanism}
+    volumes:
+      - mongo-data:/data/db
+      - mongo-config-data:/data/configdb
+      - type: bind
+        source: ${MONGO_KEYFILE_PATH:-./secrets/mongo-keyfile}
+        target: /run/secrets/mongo-keyfile
+        read_only: true
+        bind:
+          create_host_path: false
+    networks:
+      - database
+    mem_limit: 2g
+    cpus: 1.5
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+    healthcheck:
+      # Replica-set initiation is a separate, gated bootstrap step. This must
+      # remain unhealthy until authentication and rs.status() both succeed.
+      test:
+        - CMD-SHELL
+        - >-
+          mongosh --quiet --eval 'if (db.getSiblingDB("admin").auth(process.env.MONGO_INITDB_ROOT_USERNAME, process.env.MONGO_INITDB_ROOT_PASSWORD).ok !== 1 || db.adminCommand({ping:1}).ok !== 1 || rs.status().ok !== 1) quit(1)'
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 30s
+
+  mongo-bootstrap:
+    platform: linux/amd64
+    image: mongo:7.0@sha256:e634fcaae4d0915b365fb88c076dd33c851ed61a611c7ee9816aba6d6b5159cd
+    pull_policy: never
+    labels:
+      com.bingo.owner: bingo-private-staging
+      com.bingo.role: mongo-bootstrap
+      com.bingo.validation: ${M6B_RUN_ID:-not-a-validation-run}
+    entrypoint: ["mongosh"]
+    command: ["--quiet", "--host", "mongo:27017", "--file", "/scripts/bootstrap.js"]
+    restart: "no"
+    environment:
+      MONGO_ROOT_USERNAME: ${MONGO_ROOT_USERNAME:?Set via an approved secret mechanism}
+      MONGO_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD:?Set via an approved secret mechanism}
+      MONGODB_URI: ${MONGODB_URI:?Set app-user replica-set URI via approved secret mechanism}
+    volumes:
+      - ./mongo-bootstrap.js:/scripts/bootstrap.js:ro
+    networks:
+      - database
+    depends_on:
+      mongo:
+        condition: service_started
+    mem_limit: 256m
+    cpus: 0.5
+    logging:
+      driver: json-file
+      options:
+        max-size: 5m
+        max-file: "2"
+
+  backend:
+    platform: linux/amd64
+    labels:
+      com.bingo.owner: bingo-private-staging
+      com.bingo.role: backend
+    build:
+      context: ../../backend
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: 5001
+      MONGODB_URI: ${MONGODB_URI:?Set app-user replica-set URI via approved secret mechanism}
+      JWT_SECRET: ${JWT_SECRET:?Set via approved secret mechanism}
+      FRONTEND_URL: ${FRONTEND_URL:?Set exact private HTTPS origin after approval}
+      BINGO_ACCESS_MODE: public
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:?Set exact private HTTPS origin after approval}
+      TRUST_PROXY_HOPS: ${TRUST_PROXY_HOPS:?Derive and verify actual trusted proxy chain}
+      SPOTIFY_CLIENT_ID: ""
+      SPOTIFY_CLIENT_SECRET: ""
+      SPOTIFY_REDIRECT_URI: http://localhost:5001/api/spotify/callback
+      YOUTUBE_API_KEY: ""
+      ANTHROPIC_API_KEY: ""
+    expose:
+      - "5001"
+    volumes:
+      - uploads:/app/uploads
+      - backend-logs:/app/logs
+    networks:
+      - database
+      - application
+    depends_on:
+      mongo:
+        condition: service_healthy
+      mongo-bootstrap:
+        condition: service_completed_successfully
+    mem_limit: 1g
+    cpus: 1.5
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:5001/api/ready').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 30s
+
+  frontend:
+    platform: linux/amd64
+    labels:
+      com.bingo.owner: bingo-private-staging
+      com.bingo.role: frontend
+    build:
+      context: ../../bingo-react
+      args:
+        VITE_BACKEND_URL: same-origin
+    restart: unless-stopped
+    expose:
+      - "80"
+    networks:
+      - application
+      - ingress
+    depends_on:
+      backend:
+        condition: service_healthy
+    mem_limit: 256m
+    cpus: 0.5
+    logging:
+      driver: json-file
+      options:
+        max-size: 5m
+        max-file: "3"
+
+  ingress:
+    platform: linux/amd64
+    labels:
+      com.bingo.owner: bingo-private-staging
+      com.bingo.role: ingress
+    image: traefik:v3.3@sha256:8884ac1939c29f829857dd35229aec4d070a9bd8551c56aee9b81e9df137512e
+    restart: unless-stopped
+    command:
+      - --providers.file.filename=/etc/traefik/dynamic.yml
+      - --providers.file.watch=true
+      - --entrypoints.web.address=:8080
+      - --api.dashboard=false
+      - --accesslog=false
+      - --log.level=INFO
+    ports:
+      - "127.0.0.1:18443:8080"
+    volumes:
+      - ./traefik-dynamic.yml:/etc/traefik/dynamic.yml:ro
+    networks:
+      - ingress
+    depends_on:
+      frontend:
+        condition: service_started
+    mem_limit: 256m
+    cpus: 0.5
+    logging:
+      driver: json-file
+      options:
+        max-size: 5m
+        max-file: "3"
+
+volumes:
+  mongo-data:
+    labels:
+      com.bingo.owner: bingo-private-staging
+      com.bingo.role: mongo-data
+      com.bingo.validation: ${M6B_RUN_ID:-not-a-validation-run}
+  mongo-config-data:
+    labels:
+      com.bingo.owner: bingo-private-staging
+      com.bingo.role: mongo-config-data
+      com.bingo.validation: ${M6B_RUN_ID:-not-a-validation-run}
+  uploads:
+    labels:
+      com.bingo.owner: bingo-private-staging
+      com.bingo.role: uploads
+  backend-logs:
+    labels:
+      com.bingo.owner: bingo-private-staging
+      com.bingo.role: backend-logs
+
+networks:
+  database:
+    internal: true
+    labels:
+      com.bingo.owner: bingo-private-staging
+      com.bingo.role: database
+      com.bingo.validation: ${M6B_RUN_ID:-not-a-validation-run}
+  application:
+    internal: true
+    labels:
+      com.bingo.owner: bingo-private-staging
+      com.bingo.role: application
+  ingress:
+    internal: true
+    labels:
+      com.bingo.owner: bingo-private-staging
+      com.bingo.role: ingress

@@ -1,0 +1,14 @@
+# Private HTTP hop only. HTTPS is supplied by Tailscale Serve on the host;
+# this router is not an Internet-facing TLS endpoint and must not be published.
+http:
+  routers:
+    bingo-frontend:
+      entryPoints:
+        - web
+      rule: PathPrefix(`/`)
+      service: bingo-frontend
+  services:
+    bingo-frontend:
+      loadBalancer:
+        servers:
+          - url: http://frontend:80
