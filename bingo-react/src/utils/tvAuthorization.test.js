@@ -13,7 +13,7 @@ describe('TV capability handoff', () => {
   it('keeps the TV capability out of the display URL', () => {
     const url = createTVDisplayURL('https://bingo.example', 'abc123');
 
-    expect(url).toBe('https://bingo.example/?tv=ABC123');
+    expect(url).toBe('https://bingo.example/tv/ABC123');
     expect(url).not.toContain(capability);
   });
 
@@ -21,7 +21,7 @@ describe('TV capability handoff', () => {
     const token = 'r'.repeat(43);
     const url = createRemoteTVDisplayURL('https://bingo.example', 'abc123', token);
 
-    expect(url).toBe(`https://bingo.example/?tv=ABC123&tvToken=${token}`);
+    expect(url).toBe(`https://bingo.example/tv/ABC123?tvToken=${token}`);
     expect(isTVAuthorizationToken(token)).toBe(true);
     expect(isTVAuthorizationToken('not-a-token')).toBe(false);
   });
@@ -98,7 +98,7 @@ describe('TV capability handoff', () => {
       clearTimeout: vi.fn()
     };
 
-    expect(openTVDisplay(windowRef, '/?tv=ABC123', 'ABC123', capability, onBlocked)).toBeNull();
+    expect(openTVDisplay(windowRef, '/tv/ABC123', 'ABC123', capability, onBlocked)).toBeNull();
     expect(onBlocked).toHaveBeenCalledOnce();
     expect(windowRef.clearTimeout).toHaveBeenCalledWith(9);
     expect(windowRef.removeEventListener).toHaveBeenCalledWith('message', expect.any(Function));

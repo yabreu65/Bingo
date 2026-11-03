@@ -13,6 +13,7 @@ import { isLocalTvMediaPolicy, resolveTvMediaUrl } from '../../utils/localTvMedi
 import { attemptMediaPlayback, checkLocalTvReadiness, isLoopbackBrowserOrigin, readLoopbackPermission } from '../../utils/localTvDiagnostics';
  
 import { getShareableUrl } from '../../utils/networkUtils';
+import { createPlayerEntryURL } from '../../utils/entryRoutes';
 import './TVDisplay.css';
 
 const MotionBox = ({ children, ...props }) => (
@@ -917,7 +918,7 @@ const TVDisplay = ({ roomCode, tvCapability, tvSessionToken, tvAuthorizationErro
                     <p className="qr-instructions">Escanea el código QR o entra a la sala:</p>
                     <strong className="qr-room-code">{roomCode}</strong>
                     <div className="qr-code-container">
-                        <QRCodeSVG value={`${getShareableUrl()}/?room=${roomCode}`} size={220} includeMargin={true} />
+                        <QRCodeSVG value={createPlayerEntryURL(getShareableUrl(), roomCode)} size={220} includeMargin={true} />
                     </div>
                 </div>
             </MotionBox>

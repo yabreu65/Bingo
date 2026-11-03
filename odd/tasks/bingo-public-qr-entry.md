@@ -1,6 +1,6 @@
 # Bingo Public QR Entry
 Scope: Add explicit public player/TV entry routes and preserve the organizer's Basic Auth boundary for the temporary Bingo deployment.
-Status: Authorized implementation; no production database access or Contabo deployment.
+Status: T1 implemented and verified in commit `5936542`; no production database access or Contabo deployment.
 
 ## Specs
 
@@ -67,7 +67,7 @@ Status: Authorized implementation; no production database access or Contabo depl
 > No ampliar el alcance a nuevas funcionalidades de Bingo.”
 
 ## Tasks
-- T1 [S1-S2] route: frontend entry resolver for `/player/:code`, `/tv/:code`, `/organizer`, and safe legacy redirects; commit: pending.
+- T1 [S1-S2] route: frontend entry resolver for `/player/:code`, `/tv/:code`, `/organizer`, and safe legacy redirects; commit: `5936542`.
 - T2 [S1-S2,S5-S6] route: frontend QR/TV URL generation and focused compatibility/capability tests; commit: pending.
 - T3 [S3-S8] route: Bingo-only Traefik overlay with path/method allowlists, protected fallback, static routes, and Socket.IO rate limit; commit: pending. Risk: item 2 (selected public routers change the security boundary).
 - T4 [S3-S8] route: isolated HTTP, Socket.IO, TV, and Compose-routing tests plus controlled-deployment instructions; commit: pending.
@@ -146,3 +146,6 @@ Status: Authorized implementation; no production database access or Contabo depl
 > Implementación mínima, pruebas dirigidas PASS/FAIL y cambios necesarios para desplegar de manera controlada.
 >
 > No ampliar el alcance a nuevas funcionalidades de Bingo.”
+
+### L3 — Branch and slice boundary
+> The feature branch is based on local `main` commit `020d654`; commit `5936542` carries T1. The branch inherited 13 commits beyond `origin/main`, and the original worktree had 104 dirty/untracked entries. The 3,881-line branch-total hook counts inherited history; later feature commits must stage only this feature's in-scope hunks and must not include or publish inherited work.

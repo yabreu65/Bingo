@@ -1,9 +1,16 @@
 import { describe, expect, it } from 'vitest';
-import { resolveEntryRoute } from './entryRoutes';
+import { createPlayerEntryURL, resolveEntryRoute } from './entryRoutes';
 
 const resolve = (pathname, search = '') => resolveEntryRoute({ pathname, search });
 
 describe('explicit frontend entry routes', () => {
+  it('generates QR links with an explicit path and no router query', () => {
+    const url = createPlayerEntryURL('https://bingo.example', 'abc123');
+
+    expect(url).toBe('https://bingo.example/player/ABC123');
+    expect(url).not.toContain('?room=');
+  });
+
   it('resolves a player route from its path, not the legacy room query', () => {
     expect(resolve('/player/abc123', '?room=OTHER1')).toEqual({
       type: 'player',

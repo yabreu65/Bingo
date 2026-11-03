@@ -11,6 +11,7 @@ import { Play, Pause, RefreshCw, Users, Link as LinkIcon, Tv, X, Search, Crown, 
 import RecordingChallenge from '../Recording/RecordingChallenge';
 import { getShareableUrl } from '../../utils/networkUtils';
 import { createRemoteTVDisplayURL, createTVDisplayURL, openTVDisplay } from '../../utils/tvAuthorization';
+import { createPlayerEntryURL } from '../../utils/entryRoutes';
 import AdminCenter from './AdminCenter';
 import './OrganizerDashboard.css';
 import {
@@ -828,7 +829,7 @@ export default function OrganizerDashboard({ roomData }) {
   ).sort((a, b) => b.isConnected - a.isConnected);
 
   const shareableBaseUrl = getShareableUrl();
-  const joinUrl = `${shareableBaseUrl}/?room=${roomState.code}`;
+  const joinUrl = createPlayerEntryURL(shareableBaseUrl, roomState.code);
   const tvUrl = createTVDisplayURL(shareableBaseUrl, roomState.code);
 
   const copyToClipboard = (text, message) => {

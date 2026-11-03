@@ -1,5 +1,9 @@
 import { isTVAuthorizationToken } from './tvAuthorization';
 
+export const createPlayerEntryURL = (baseUrl, roomCode) => (
+  new URL(`/player/${encodeURIComponent(roomCode.toUpperCase())}`, baseUrl).toString()
+);
+
 const ROOM_CODE_PATTERN = /^[A-Z0-9]{6}$/i;
 
 const normalizeRoomCode = (value) => (
