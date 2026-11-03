@@ -5,7 +5,7 @@ import { useGame } from './context/useGame';
 import { useSocket } from './context/useSocket';
 import { API_URL } from './config/api';
 import { isTVAuthorizationToken, listenForTVAuthorization } from './utils/tvAuthorization';
-import { resolveEntryRoute } from './utils/entryRoutes';
+import { canRestorePlayerEntrySession, resolveEntryRoute } from './utils/entryRoutes';
 import './App.css';
 
 const STORAGE_KEY = 'bingo_session';
@@ -166,14 +166,22 @@ function App() {
   useEffect(() => {
     const loadSavedSession = async () => {
       try {
-        // NO cargar sesión si hay parámetros de URL (QR o TV)
-        if (tvRoomCode || quickJoinRoomCode) {
-          console.log('🔗 URL params detected, skipping session load');
+        // TV never reads a player's saved session. For QR entry, restore only
+        // an already authenticated guest of this exact room, otherwise join anew.
+        if (tvRoomCode) {
           setIsReconnecting(false);
           return;
         }
 
         const savedSession = localStorage.getItem(STORAGE_KEY);
+        if (quickJoinRoomCode) {
+          let candidate;
+          try { candidate = JSON.parse(savedSession || 'null'); } catch { candidate = null; }
+          if (!canRestorePlayerEntrySession(quickJoinRoomCode, candidate)) {
+            setIsReconnecting(false);
+            return;
+          }
+        }
         if (!savedSession) {
           setIsReconnecting(false);
           return;
@@ -407,7 +415,7 @@ function App() {
 
   // Quick Join - Acceso directo a sala mediante QR
   // URL de ejemplo: http://192.168.1.39:5173/player/ABC123
-  if (quickJoinRoomCode && !roomData) {
+  if (quickJoinRoomCode && !roomData && !isReconnecting) {
     const handleQuickJoinComplete = (data) => {
       setRoomData(data);
       setMode('multi');

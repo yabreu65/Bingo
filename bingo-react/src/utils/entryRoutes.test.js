@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { createPlayerEntryURL, resolveEntryRoute } from './entryRoutes';
+import { canRestorePlayerEntrySession, createPlayerEntryURL, resolveEntryRoute } from './entryRoutes';
 
 const resolve = (pathname, search = '') => resolveEntryRoute({ pathname, search });
 
@@ -78,5 +78,23 @@ describe('legacy entry URL compatibility', () => {
       navigation: 'document'
     });
     expect(resolve('/player/not-a-code')).toEqual({ type: 'not-found' });
+  });
+});
+
+describe('QR guest reload isolation', () => {
+  const guest = {
+    roomCode: 'ABC123', playerId: '507f1f77bcf86cd799439011',
+    playerCapability: 'a'.repeat(43), isHost: false
+  };
+  it('restores an existing guest only for the exact same QR room', () => {
+    expect(canRestorePlayerEntrySession('ABC123', guest)).toBe(true);
+    expect(canRestorePlayerEntrySession('OTHER1', guest)).toBe(false);
+    expect(canRestorePlayerEntrySession('abc123', guest)).toBe(false);
+  });
+  it('does not restore an organizer or a stale/invalid player credential', () => {
+    expect(canRestorePlayerEntrySession('ABC123', { ...guest, isHost: true })).toBe(false);
+    expect(canRestorePlayerEntrySession('ABC123', { ...guest, playerCapability: 'short' })).toBe(false);
+    expect(canRestorePlayerEntrySession('ABC123', { ...guest, playerId: 'bad' })).toBe(false);
+    expect(canRestorePlayerEntrySession('ABC123', null)).toBe(false);
   });
 });

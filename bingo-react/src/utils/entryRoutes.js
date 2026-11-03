@@ -1,5 +1,14 @@
 import { isTVAuthorizationToken } from './tvAuthorization';
 
+// A QR route may restore only the same guest in the same room, never a
+// different room's session or an organizer capability.
+export const canRestorePlayerEntrySession = (roomCode, saved) => (
+  typeof roomCode === 'string' && /^[A-Z0-9]{6}$/.test(roomCode) &&
+  saved?.roomCode === roomCode && saved.isHost === false &&
+  typeof saved.playerId === 'string' && /^[a-fA-F0-9]{24}$/.test(saved.playerId) &&
+  typeof saved.playerCapability === 'string' && saved.playerCapability.length === 43
+);
+
 export const createPlayerEntryURL = (baseUrl, roomCode) => (
   new URL(`/player/${encodeURIComponent(roomCode.toUpperCase())}`, baseUrl).toString()
 );
