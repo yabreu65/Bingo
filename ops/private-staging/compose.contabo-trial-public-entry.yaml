@@ -1,0 +1,34 @@
+# Add the public guest entry surface only to the Bingo frontend.
+# The existing host router remains the BasicAuth fallback for every unmatched path.
+services:
+  frontend:
+    labels:
+      traefik.http.routers.bingo-m6-trial.priority: "1"
+
+      traefik.http.routers.bingo-m6-trial-public-ui.rule: "Host(`${BINGO_TEST_HOST:?Set the approved BINGO_TEST_HOST}`) && (Path(`/`) || PathRegexp(`^/player/[A-Za-z0-9]{6}/?$`) || PathRegexp(`^/tv/[A-Za-z0-9]{6}/?$`) || PathPrefix(`/assets/`) || PathPrefix(`/music/`) || PathPrefix(`/sounds/`) || Path(`/vite.svg`))"
+      traefik.http.routers.bingo-m6-trial-public-ui.entrypoints: websecure
+      traefik.http.routers.bingo-m6-trial-public-ui.priority: "1000"
+      traefik.http.routers.bingo-m6-trial-public-ui.service: bingo-m6-trial
+      traefik.http.routers.bingo-m6-trial-public-ui.tls: "true"
+      traefik.http.routers.bingo-m6-trial-public-ui.tls.certresolver: letsencrypt
+
+      traefik.http.routers.bingo-m6-trial-public-api.rule: "Host(`${BINGO_TEST_HOST:?Set the approved BINGO_TEST_HOST}`) && ((Method(`POST`) && Path(`/api/rooms/join`)) || (Method(`GET`) && PathRegexp(`^/api/rooms/[A-Za-z0-9]{6}$`)) || (Method(`POST`) && PathRegexp(`^/api/rooms/[A-Za-z0-9]{6}/(select-card|reconnect)$`)) || (Method(`GET`) && PathRegexp(`^/api/players/[a-fA-F0-9]{24}$`)) || (Method(`POST`) && PathRegexp(`^/api/rooms/[A-Za-z0-9]{6}/tv-authorization/(claim|renew)$`)))"
+      traefik.http.routers.bingo-m6-trial-public-api.entrypoints: websecure
+      traefik.http.routers.bingo-m6-trial-public-api.priority: "1000"
+      traefik.http.routers.bingo-m6-trial-public-api.service: bingo-m6-trial
+      traefik.http.routers.bingo-m6-trial-public-api.tls: "true"
+      traefik.http.routers.bingo-m6-trial-public-api.tls.certresolver: letsencrypt
+
+      traefik.http.routers.bingo-m6-trial-public-socket.rule: "Host(`${BINGO_TEST_HOST:?Set the approved BINGO_TEST_HOST}`) && (Path(`/socket.io`) || PathPrefix(`/socket.io/`)) && (Method(`GET`) || Method(`POST`))"
+      traefik.http.routers.bingo-m6-trial-public-socket.entrypoints: websecure
+      traefik.http.routers.bingo-m6-trial-public-socket.priority: "1000"
+      traefik.http.routers.bingo-m6-trial-public-socket.service: bingo-m6-trial
+      traefik.http.routers.bingo-m6-trial-public-socket.middlewares: bingo-m6-trial-socket-limit
+      traefik.http.routers.bingo-m6-trial-public-socket.tls: "true"
+      traefik.http.routers.bingo-m6-trial-public-socket.tls.certresolver: letsencrypt
+
+      # RateLimit uses the incoming remote address; allow a 150-request connection burst
+      # for a shared NAT while smoothing sustained Socket.IO polling to 50 requests/second.
+      traefik.http.middlewares.bingo-m6-trial-socket-limit.ratelimit.average: "50"
+      traefik.http.middlewares.bingo-m6-trial-socket-limit.ratelimit.period: 1s
+      traefik.http.middlewares.bingo-m6-trial-socket-limit.ratelimit.burst: "150"
