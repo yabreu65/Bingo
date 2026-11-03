@@ -46,6 +46,7 @@ const {
   speedLimiter
 } = require('../config/rateLimiters');
 const { normalizeNewRoomConfig } = require('../utils/roomConfiguration');
+const { admitGuest, admitManual, selectGuestCard, AdmissionError, participantCountExpression } = require('../services/roomAdmission');
 
 // Crear sala
 router.post('/create', createRoomLimiter, speedLimiter, validateRequest(createRoomSchema), async (req, res) => {
@@ -90,60 +91,24 @@ router.post('/create', createRoomLimiter, speedLimiter, validateRequest(createRo
 });
 
 // Unirse a sala
-router.post('/join', joinRoomLimiter, speedLimiter, validateRequest(joinRoomSchema), async (req, res) => {
+router.post('/join', joinRoomLimiter, validateRequest(joinRoomSchema), async (req, res) => {
   try {
-    const roomCode = req.body.roomCode || req.body.code;
-
-    if (!roomCode) {
-      return res.status(400).json({ error: 'Código de sala requerido' });
-    }
-
-    const room = await Room.findOne({
-      code: roomCode.toUpperCase(),
-      isActive: true
-    });
-
-    if (!room) {
-      return res.status(404).json({ error: 'Sala no encontrada' });
-    }
-
-    if (room.config?.activePlaylist && typeof room.populate === 'function') {
+    const { room, player, playerCapability } = await admitGuest(
+      req.body.roomCode.toUpperCase(), req.body.playerName, req.body.admissionToken
+    );
+    if (room.config?.activePlaylist) {
       await room.populate({ path: 'config.activePlaylist', populate: { path: 'tracks' } });
     }
-
-    const totalPlayers = room.players.length + (room.manualPlayers?.length || 0);
-    if (totalPlayers >= room.config.maxPlayers) {
-      return res.status(400).json({ error: 'Sala llena' });
-    }
-
-    const player = new Player({
-      name: req.body.playerName,
-      room: room._id,
-      isHost: false
-    });
-    const playerCapability = createPlayerCapability();
-    player.guestCapabilityHash = createPlayerCapabilityHash(
-      playerCapability,
-      room._id,
-      player._id
-    );
-    await player.save();
-
-    room.players.push(player._id);
-    room.lastActivity = new Date();
-    await room.save();
-
-    // Actualizar timestamp de actividad
-    await updateRoomActivity(roomCode);
-
+    await room.populate('players');
     res.json({
       success: true,
-      room: stripPrivatePlayerData(stripGuestCapabilityHashes(await room.populate('players'))),
+      room: stripPrivatePlayerData(stripGuestCapabilityHashes(room)),
       player: stripGuestCapabilityHashes(player),
       playerCapability
     });
   } catch (error) {
-    logger.error('Error joining room:', error);
+    if (error instanceof AdmissionError) return res.status(error.status).json({ error: error.message });
+    logger.error('Error joining room');
     res.status(500).json({ error: 'Error interno del servidor' });
   }
 });
@@ -417,24 +382,7 @@ router.post('/:code/select-card', selectCardLimiter, validateRequest(selectCardS
       return res.status(403).json({ error: 'No se pueden cambiar cartones después de iniciar la partida' });
     }
 
-    const player = await Player.findOneAndUpdate(
-      playerFilter,
-      {
-        $set: {
-          cardNumber,
-          'bingoCard.matrix': bingoCard,
-          'bingoCard.matrixVersion': CARD_MATRIX_VERSION,
-          'bingoCard.markedCells': [[2, 2]]
-        }
-      },
-      { new: true, runValidators: true }
-    );
-    if (!player) {
-      return res.status(403).json({ error: 'No tienes permisos para modificar este cartón' });
-    }
-
-    // Actualizar timestamp de actividad de la sala
-    await updateRoomActivity(req.params.code);
+    const player = await selectGuestCard(room._id, playerFilter, cardNumber);
 
     res.json(stripGuestCapabilityHashes({
       success: true,
@@ -442,6 +390,7 @@ router.post('/:code/select-card', selectCardLimiter, validateRequest(selectCardS
       cardNumber
     }));
   } catch (error) {
+    if (error instanceof AdmissionError) return res.status(error.status).json({ error: error.message });
     logger.error('Error selecting card:', error);
     if (error?.code === 11000) {
       return res.status(409).json({ error: 'El cartón ya está en uso. Elige otro número.' });
@@ -460,7 +409,8 @@ router.patch('/:code/config', generalApiLimiter, optionalAuth, validateRequest(u
       return res.status(403).json({ error: 'No tienes permisos para modificar la sala' });
     }
     if (room.gameState && room.gameState !== 'waiting' &&
-        (Object.prototype.hasOwnProperty.call(req.body.config, 'gameMode') ||
+        (Object.prototype.hasOwnProperty.call(req.body.config, 'gameModes') ||
+         Object.prototype.hasOwnProperty.call(req.body.config, 'gameMode') ||
          Object.prototype.hasOwnProperty.call(req.body.config, 'maxPlayers'))) {
       return res.status(409).json({ error: 'Esta configuración no puede cambiar durante una partida' });
     }
@@ -491,10 +441,34 @@ router.patch('/:code/config', generalApiLimiter, optionalAuth, validateRequest(u
         ...(req.body.config.multimediaPolicy || {})
       };
     }
-    room.config = nextConfig;
-    await room.save();
-    room.hostCapabilityHash = undefined;
-    res.json({ success: true, room });
+    // Patch only requested fields. Replacing a stale full config can undo a
+    // concurrent capacity increase after guests have already been admitted.
+    const configPatch = {};
+    for (const [key, value] of Object.entries(req.body.config)) {
+      if (value && typeof value === 'object' && !Array.isArray(value)) {
+        for (const [nested, entry] of Object.entries(value)) configPatch[`config.${key}.${nested}`] = entry;
+      } else configPatch[`config.${key}`] = value;
+    }
+    if (req.body.config.eventMode && !currentConfig.eventMode) {
+      configPatch['config.multimediaPolicy'] = nextConfig.multimediaPolicy;
+      for (const key of Object.keys(configPatch)) {
+        if (key.startsWith('config.multimediaPolicy.')) delete configPatch[key];
+      }
+    }
+    const filter = { _id: room._id };
+    if (req.body.config.maxPlayers !== undefined) {
+      filter.$expr = { $lte: [
+        participantCountExpression(),
+        req.body.config.maxPlayers
+      ] };
+    }
+    if (req.body.config.maxPlayers !== undefined || req.body.config.gameMode !== undefined || req.body.config.gameModes !== undefined) {
+      filter.gameState = { $in: ['waiting', null] };
+    }
+    const updated = await Room.findOneAndUpdate(filter, { $set: configPatch }, { new: true, runValidators: true });
+    if (!updated) return res.status(409).json({ error: 'El cupo o el estado actual no permite este cambio' });
+    res.json({ success: true, room: stripGuestCapabilityHashes(updated) });
+
   } catch (error) {
     logger.error('Error updating room config:', error);
     res.status(500).json({ error: 'Error interno del servidor' });
@@ -628,29 +602,7 @@ router.post('/:code/assign-manual-card', generalApiLimiter, optionalAuth, async 
       return res.status(403).json(errorResponse('INSUFFICIENT_PERMISSIONS', 'No tienes permisos para modificar la sala'));
     }
 
-    // Verificar que el cartón no esté ya asignado
-    const isAlreadyAssigned = room.manualPlayers.some(
-      p => p.cardNumber === cardNum
-    );
-
-    if (isAlreadyAssigned) {
-      return res.status(409).json(
-        conflictErrorResponse(`El cartón #${cardNum} ya está asignado a otro jugador`)
-      );
-    }
-
-    // Crear jugador manual
-    const manualPlayer = {
-      playerId: `manual-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-      playerName: playerName.trim(),
-      cardNumber: cardNum,
-      assignedAt: new Date()
-    };
-
-    room.manualPlayers.push(manualPlayer);
-    room.reservedCards.push(cardNum);
-    await updateRoomActivity(room);
-    await room.save();
+    const manualPlayer = await admitManual(room._id, playerName.trim(), cardNum);
 
     res.json(successResponse({
       player: manualPlayer,
@@ -658,7 +610,8 @@ router.post('/:code/assign-manual-card', generalApiLimiter, optionalAuth, async 
     }));
 
   } catch (error) {
-    logger.error('Error assigning manual card:', error);
+    if (error instanceof AdmissionError) return res.status(error.status).json(errorResponse('ADMISSION_REJECTED', error.message));
+    logger.error('Error assigning manual card');
     res.status(500).json(errorResponse('INTERNAL_ERROR', 'Error interno del servidor'));
   }
 });
@@ -733,12 +686,15 @@ router.delete('/:code/manual-players/:playerId', generalApiLimiter, optionalAuth
     const removedPlayer = room.manualPlayers[playerIndex];
     const cardNumber = removedPlayer.cardNumber;
 
-    // Remover jugador y liberar cartón
-    room.manualPlayers.splice(playerIndex, 1);
-    room.reservedCards = room.reservedCards.filter(c => c !== cardNumber);
+    // Pull only this membership; never overwrite concurrently admitted guests.
+    const removed = await Room.updateOne({ _id: room._id,
+      manualPlayers: { $elemMatch: { playerId, cardNumber } }
+    }, {
+      $pull: { manualPlayers: { playerId }, reservedCards: cardNumber },
+      $set: { lastActivity: new Date() }
+    });
 
-    await updateRoomActivity(room);
-    await room.save();
+    if (!removed.modifiedCount) return res.status(404).json(notFoundErrorResponse('Jugador manual'));
 
     res.json(successResponse({
       message: `Jugador ${removedPlayer.playerName} removido`,

@@ -49,8 +49,13 @@ const resolveNetworkPolicy = (source = process.env) => {
     throw new Error('BINGO_ACCESS_MODE=public requires an HTTPS FRONTEND_URL');
   }
 
-  const trustProxyHops = Number.parseInt(source.TRUST_PROXY_HOPS ?? '0', 10);
-  if (!Number.isInteger(trustProxyHops) || trustProxyHops < 0) {
+  if (mode === 'public' && [...allowedOrigins].some(origin => new URL(origin).protocol !== 'https:')) {
+    throw new Error('BINGO_ACCESS_MODE=public requires HTTPS for every allowed origin');
+  }
+
+  const rawHops = String(source.TRUST_PROXY_HOPS ?? '0');
+  const trustProxyHops = Number(rawHops);
+  if (!/^\d+$/.test(rawHops) || !Number.isSafeInteger(trustProxyHops)) {
     throw new Error('TRUST_PROXY_HOPS must be a non-negative integer');
   }
 

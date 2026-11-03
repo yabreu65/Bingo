@@ -4,37 +4,23 @@ require('dotenv').config();
 const { validateEnv } = require('./config/env');
 const env = validateEnv();
 
-const express = require('express');
 const http = require('http');
 const socketIo = require('socket.io');
-const cors = require('cors');
-const helmet = require('helmet');
 const connectDB = require('./config/database');
-
-const roomRoutes = require('./routes/roomRoutes');
-const playerRoutes = require('./routes/playerRoutes');
-const gameRoutes = require('./routes/gameRoutes');
-const spotifyRoutes = require('./routes/spotifyRoutes');
-const deezerRoutes = require('./routes/deezerRoutes');
-const authRoutes = require('./routes/authRoutes');
-const recordingsRoutes = require('./routes/recordings');
-const adminRoutes = require('./routes/adminRoutes');
+const { createApp } = require('./app');
 const socketHandlers = require('./socket/socketHandlers');
+const { attachSocketDisconnectDiagnostics } = require('./socket/disconnectDiagnostics');
 const { socketAuthMiddleware } = require('./middleware/socketAuthMiddleware');
 const logger = require('./config/logger');
-const requestLogger = require('./middleware/requestLogger');
-const { errorHandler, notFoundHandler } = require('./middleware/errorHandler');
 const roomCleanupService = require('./services/roomCleanup');
 const { recoverPersistedRooms } = require('./socket/handlers/gameHandlers');
 const { resolveNetworkPolicy, createCorsOptions } = require('./config/networkPolicy');
 const { createSocketEventRateLimiter } = require('./middleware/socketRateLimiter');
 
-const app = express();
-const server = http.createServer(app);
-
 const networkPolicy = resolveNetworkPolicy(env);
 const corsOptions = createCorsOptions(networkPolicy);
-app.set('trust proxy', networkPolicy.trustProxyHops);
+const app = createApp({ networkPolicy });
+const server = http.createServer(app);
 
 const io = socketIo(server, {
   cors: corsOptions,
@@ -49,75 +35,40 @@ app.set('io', io);
 // Socket.io authentication middleware
 io.use(socketAuthMiddleware);
 
-connectDB().then(() => recoverPersistedRooms(io));
+// Recovery and cleanup are started only after database/index readiness.
 
-// Iniciar servicio de limpieza de salas inactivas
-roomCleanupService.start();
-
-// Security headers con Helmet
-app.use(helmet({
-  contentSecurityPolicy: {
-    directives: {
-      defaultSrc: ["'self'"],
-      styleSrc: ["'self'", "'unsafe-inline'"],
-      scriptSrc: ["'self'", "'unsafe-inline'"],
-      imgSrc: ["'self'", "data:", "https:"],
-      connectSrc: ["'self'", "https://api.deezer.com"],
-      frameSrc: ["'self'", "https://www.youtube.com"],
-      mediaSrc: ["'self'", "https:"]
-    }
-  },
-  crossOriginEmbedderPolicy: false, // Necesario para cargar recursos externos como YouTube
-  crossOriginResourcePolicy: { policy: "cross-origin" }
-}));
-
-app.use(cors(corsOptions));
-// Keep JSON/form payloads bounded; multipart recording uploads are limited by multer.
-app.use(express.json({ limit: '100kb' }));
-app.use(express.urlencoded({ extended: true, limit: '100kb' }));
-app.use('/uploads', express.static('uploads'));
-
-// Request logging middleware
-app.use(requestLogger);
-
-app.use('/api/auth', authRoutes);
-app.use('/api/rooms', roomRoutes);
-app.use('/api/players', playerRoutes);
-app.use('/api/games', gameRoutes);
-app.use('/api/spotify', spotifyRoutes);
-app.use('/api/deezer', deezerRoutes);
-app.use('/api/recordings', recordingsRoutes);
-app.use('/api/admin/rooms/:code', adminRoutes);
-
-app.get('/api/health', (req, res) => {
-  res.json({ status: 'OK', timestamp: new Date() });
-});
-
-// Error handling middlewares (deben ir al final, después de todas las rutas)
-app.use(notFoundHandler);
-app.use(errorHandler);
 
 io.on('connection', (socket) => {
+  const connectedAtMonotonicNs = process.hrtime.bigint();
   socket.use(createSocketEventRateLimiter());
+  attachSocketDisconnectDiagnostics(socket, logger, { connectedAtMonotonicNs });
   logger.logSocketEvent(socket.id, 'connected', {
     isGuest: socket.isGuest,
     userId: socket.user?.userId
   });
   socketHandlers(io, socket);
-
-  socket.on('disconnect', () => {
-    logger.logSocketEvent(socket.id, 'disconnected');
-  });
 });
 
 const PORT = process.env.PORT || 5000;
-server.listen(PORT, () => {
+const startup = (async () => {
+  await connectDB();
+  const { isDatabaseReady } = require('./utils/databaseReadiness');
+  if (!(await isDatabaseReady())) throw new Error('Database is not ready for admission');
+  await recoverPersistedRooms(io);
+  roomCleanupService.start();
+  server.listen(PORT, () => {
   logger.info(`
 🎄 =============================================== 🎅
    BINGO NAVIDEÑO - Backend running on port ${PORT}
    Environment: ${process.env.NODE_ENV || 'development'}
 🎄 =============================================== 🎅
   `);
+  });
+})().catch(async () => {
+  logger.error('Backend startup failed: database is not ready');
+  await require('mongoose').disconnect();
+  io.close();
+  process.exitCode = 1;
 });
 
-module.exports = { app, server, io };
+module.exports = { app, server, io, startup };

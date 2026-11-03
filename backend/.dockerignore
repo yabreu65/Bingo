@@ -7,3 +7,16 @@ uploads
 coverage
 tests
 *.log
+
+# Exclude local database, load-test, and diagnostic residue from build context.
+.tmp-*
+.t7-*.json
+.t8-*.json
+WiredTiger*
+**/WiredTiger*
+*.wt
+**/*.wt
+*.bson
+**/*.bson
+**/journal/
+**/diagnostic.data/

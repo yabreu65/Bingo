@@ -33,6 +33,7 @@ const createRoomSchema = z.object({
         .optional(),
 
       gameMode: z.enum(['line', 'fourCorners', 'centralCross', 'full']).optional(),
+      gameModes: z.array(z.enum(['line', 'fourCorners', 'centralCross', 'full'])).min(1).max(3).refine(modes => new Set(modes).size === modes.length && (!modes.includes('full') || modes.length === 1), 'Cartón completo es exclusivo').optional(),
 
       tieBreakEnabled: z.boolean().optional().default(false),
       eventName: z.string().max(160).optional(),
@@ -63,6 +64,7 @@ const createRoomSchema = z.object({
  */
 const joinRoomSchema = z.object({
   body: z.object({
+    admissionToken: z.string().regex(/^[A-Z0-9]{6}\.[A-Za-z0-9_-]{43}$/, 'Clave de admisión inválida'),
     playerName: z.string()
       .min(1, 'El nombre del jugador es requerido')
       .max(50, 'El nombre del jugador no puede exceder 50 caracteres')
@@ -136,6 +138,9 @@ const updateConfigSchema = z.object({
         .max(600, 'La duración máxima del karaoke es 600 segundos')
         .optional(),
 
+      challengeMusicStartSeconds: z.number().int().min(0).max(180).optional(),
+      danceDurationSeconds: z.number().int().min(10).max(120).optional(),
+      groupDurationSeconds: z.number().int().min(10).max(120).optional(),
       challengeEffectsMuted: z.boolean().optional(),
 
       challengeFrequency: z.number()
@@ -151,6 +156,7 @@ const updateConfigSchema = z.object({
         .optional(),
 
       gameMode: z.enum(['line', 'fourCorners', 'centralCross', 'full']).optional(),
+      gameModes: z.array(z.enum(['line', 'fourCorners', 'centralCross', 'full'])).min(1).max(3).refine(modes => new Set(modes).size === modes.length && (!modes.includes('full') || modes.length === 1), 'Cartón completo es exclusivo').optional(),
 
       tieBreakEnabled: z.boolean().optional(),
       eventName: z.string().max(160).optional(),
