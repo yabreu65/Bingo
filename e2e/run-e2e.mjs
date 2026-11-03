@@ -600,7 +600,8 @@ async function main() {
     await hostPage.getByLabel('Intervalo (s)').fill('7');
     await hostPage.getByLabel('Frecuencia de retos').fill('2');
     await hostPage.getByLabel('Máximo de jugadores').fill('12');
-    await hostPage.locator('.admin-card--narrow select').nth(2).selectOption('line');
+    await hostPage.getByRole('checkbox', { name: 'Línea', exact: true }).check();
+    assert.equal(await hostPage.getByRole('checkbox', { name: 'Cartón completo', exact: true }).isChecked(), false);
     await hostPage.getByRole('checkbox', { name: 'Desempate habilitado' }).check();
     await hostPage.getByLabel('Playlist activa').selectOption({ label: 'Playlist E2E local' });
     await hostPage.getByRole('button', { name: /Guardar/ }).click();
@@ -619,7 +620,8 @@ async function main() {
     }
     await hostPage.getByLabel('Frecuencia de retos').fill('10');
     await hostPage.getByLabel('Intervalo (s)').fill('7');
-    await hostPage.locator('.admin-card--narrow select').nth(2).selectOption('full');
+    await hostPage.getByRole('checkbox', { name: 'Cartón completo', exact: true }).check();
+    assert.equal(await hostPage.getByRole('checkbox', { name: 'Línea', exact: true }).isChecked(), false);
     await hostPage.getByLabel('Máximo de jugadores').fill('50');
     await hostPage.getByRole('button', { name: /Guardar/ }).click();
     await waitForBody(hostPage, /Configuración guardada/);
