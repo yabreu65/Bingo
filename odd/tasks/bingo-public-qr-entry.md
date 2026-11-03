@@ -1,6 +1,6 @@
 # Bingo Public QR Entry
 Scope: Add explicit public player/TV entry routes and preserve the organizer's Basic Auth boundary for the temporary Bingo deployment.
-Status: T1 implemented and verified in commit `5936542`; no production database access or Contabo deployment.
+Status: T1-T3 implemented and verified in commits `5936542`, `2e7fff0`, `5ef9c75`, and `4f172c1`; isolated access proof and controlled-rollout documentation remain in T4-T5. Live Traefik ingress remains unverified. No production database access or Contabo deployment.
 
 ## Specs
 
@@ -68,9 +68,9 @@ Status: T1 implemented and verified in commit `5936542`; no production database 
 
 ## Tasks
 - T1 [S1-S2] route: frontend entry resolver for `/player/:code`, `/tv/:code`, `/organizer`, and safe legacy redirects; commit: `5936542`.
-- T2 [S1-S2,S5-S6] route: frontend QR/TV URL generation and focused compatibility/capability tests; commit: pending.
-- T3 [S3-S8] route: Bingo-only Traefik overlay with path/method allowlists, protected fallback, static routes, and Socket.IO rate limit; commit: pending. Risk: item 2 (selected public routers change the security boundary).
-- T4 [S3-S8] route: isolated HTTP, Socket.IO, TV, and Compose-routing tests plus controlled-deployment instructions; commit: pending.
+- T2 [S1-S2,S5-S6] route: frontend QR/TV URL generation and focused compatibility/capability tests; commit: `2e7fff0`.
+- T3 [S3-S8] route: Bingo-only Traefik overlay with path/method allowlists, protected fallback, static routes, and Socket.IO rate limit; commits: `5ef9c75`, `4f172c1`. Risk: item 2 (selected public routers change the security boundary).
+- T4 [S3-S8] route: reuse focused isolated HTTP, Socket.IO, capability, admin, TV, and Compose-routing suites; add only uncovered assertions and controlled-rollout instructions; commit: pending.
 - T5 [S1-S8] route: run focused verification, inspect final diff, and record PASS/FAIL evidence; commit: pending.
 
 ## Log
@@ -148,4 +148,16 @@ Status: T1 implemented and verified in commit `5936542`; no production database 
 > No ampliar el alcance a nuevas funcionalidades de Bingo.”
 
 ### L3 — Branch and slice boundary
-> The feature branch is based on local `main` commit `020d654`; commit `5936542` carries T1. The branch inherited 13 commits beyond `origin/main`, and the original worktree had 104 dirty/untracked entries. The 3,881-line branch-total hook counts inherited history; later feature commits must stage only this feature's in-scope hunks and must not include or publish inherited work.
+> The feature branch is based on local `main` commit `020d654`; T1 is commit `5936542`, T2 is commit `2e7fff0`, and T3 is in commits `5ef9c75` and `4f172c1`. The branch inherited 13 commits beyond `origin/main`, and the original worktree had 104 dirty/untracked entries. The 4,095-line branch-total hook counts inherited history, not only this feature. Delivery strategy: treat `020d654..HEAD` as the local feature slice, stage only reviewed in-scope hunks, keep each high-risk Traefik change in its own commit, and do not publish the branch or inherited history.
+
+### L4 — T3 verification status
+> The structural Compose test passes 4/4 in the feature worktree and in a clean checkout of `4f172c1`. A static `docker compose config` merge of the current local trial files with synthetic environment values passed: BasicAuth fallback remains, backend/Mongo have no public Traefik labels, public network, or host ports, the UI router is GET/HEAD-only, and Socket.IO burst is 150. Docker is available but no local Traefik binary/image exists, and no image was pulled; live ingress/WebSocket behavior remains untested. No deployment or production database access occurred.
+
+### L5 — T3 independent review and correction
+> `gentle_review assess` marked the overlay high risk/item 2 and required an independent verifier. The first verifier found two actionable issues: the public UI router lacked GET/HEAD methods, and its structural test depended on pre-existing untracked Compose files. Parent reproduced RED (2/4), then corrected both in `4f172c1`; the test now uses a committed, explicitly test-only Compose fixture and passes 4/4 from a clean checkout. The first verifier's bare-root concern was a false positive: committed `main.jsx` redirects bare `/` to protected `/organizer` before mounting the SPA. Follow-up review marked S3-S7 PASS structurally/source-spot-check and noted that its own test run was not performed because it had no exact command authorization; the parent-run clean-checkout test and local merged-stack static validation passed. The fixture remains synthetic and does not replace live Traefik verification; the deployment Compose files are pre-existing untracked files and are not part of this feature commit.
+
+### L6 — T4 test-harness map
+> The existing isolated suite already covers HTTP admission/card assignment, role-bound player/host/TV Socket.IO joins, capability denials, TV-only actions, and room-state isolation in `backend/tests/u1IsolatedIntegration.test.js`; focused suites also exist for admission concurrency, player capabilities, host/admin routes, TV authorization, socket identity, and rate limiting. A parent spot-check confirmed `u1IsolatedIntegration.test.js` uses a disposable `MongoMemoryReplSet`, an ephemeral loopback HTTP server, and teardown cleanup. The public-access architecture doc is the appropriate rollout-document target. Reuse these suites and add no duplicate tests unless the run identifies a specific gap; shared-source-IP limits still cannot be proven through Traefik without runtime access.
+
+### L7 — T4 access-suite and rollout evidence
+> Ran the focused backend Jest command recorded in `docs/m5.4-public-access.md`: 8 suites and 81 tests passed. `u1IsolatedIntegration.test.js` used a disposable `MongoMemoryReplSet` and loopback HTTP/Socket.IO server. Existing tests cover admission/card assignment, capability denials, host/admin protection, TV authorization, socket identity, and event limits; no duplicate backend test was added. `docs/m5.4-public-access.md` now records exact public route/method allowlists, protected fallback, pre-deployment validation, smoke/rollback gates, and the explicit not-deployed/runtime-unverified status. Actual Traefik same-IP and WSS behavior remain unverified.
