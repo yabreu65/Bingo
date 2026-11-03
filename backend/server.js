@@ -53,7 +53,15 @@ const PORT = process.env.PORT || 5000;
 const startup = (async () => {
   await connectDB();
   const { isDatabaseReady } = require('./utils/databaseReadiness');
-  if (!(await isDatabaseReady())) throw new Error('Database is not ready for admission');
+  // A fresh disposable replica set can briefly elect a primary after indexes
+  // have initialized. Never listen before the complete read-only readiness
+  // check passes; bound the retry so persistent failures remain fail-closed.
+  let ready = false;
+  for (let attempt = 0; attempt < 20 && !ready; attempt += 1) {
+    ready = await isDatabaseReady();
+    if (!ready && attempt < 19) await new Promise(resolve => setTimeout(resolve, 250));
+  }
+  if (!ready) throw new Error('Database is not ready for admission');
   await recoverPersistedRooms(io);
   roomCleanupService.start();
   server.listen(PORT, () => {
