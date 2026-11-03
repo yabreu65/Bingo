@@ -6,8 +6,7 @@ const test = require('node:test');
 const stagingDir = __dirname;
 const repoRoot = path.resolve(stagingDir, '../..');
 const composeFiles = [
-  path.join(stagingDir, 'compose.yaml'),
-  path.join(stagingDir, 'compose.contabo-trial.yaml'),
+  path.join(stagingDir, 'compose-public-entry.fixture.yaml'),
   path.join(stagingDir, 'compose.contabo-trial-public-entry.yaml')
 ];
 
@@ -16,13 +15,6 @@ function composeEnvironment() {
     ...process.env,
     COMPOSE_DISABLE_ENV_FILE: '1',
     COMPOSE_PROFILES: '',
-    MONGO_ROOT_USERNAME: 'synthetic-root',
-    MONGO_ROOT_PASSWORD: 'synthetic-root-password',
-    MONGODB_URI: 'mongodb://synthetic-app:synthetic-app-password@mongo:27017/bingo_private?replicaSet=bingo-rs&authSource=bingo_private',
-    JWT_SECRET: 'synthetic-jwt-secret',
-    FRONTEND_URL: 'https://trial.invalid',
-    ALLOWED_ORIGINS: 'https://trial.invalid',
-    TRUST_PROXY_HOPS: '2',
     BINGO_TEST_HOST: 'trial.invalid',
     BINGO_TRIAL_BASIC_AUTH: 'synthetic-user:$2y$12$synthetic-bcrypt-hash-for-static-test'
   };
@@ -51,7 +43,7 @@ test('public UI router exposes only explicit entry and required static paths', (
 
   assert.equal(
     uiRule,
-    'Host(`trial.invalid`) && (Path(`/`) || PathRegexp(`^/player/[A-Za-z0-9]{6}/?$`) || PathRegexp(`^/tv/[A-Za-z0-9]{6}/?$`) || PathPrefix(`/assets/`) || PathPrefix(`/music/`) || PathPrefix(`/sounds/`) || Path(`/vite.svg`))'
+    'Host(`trial.invalid`) && (Method(`GET`) || Method(`HEAD`)) && (Path(`/`) || PathRegexp(`^/player/[A-Za-z0-9]{6}/?$`) || PathRegexp(`^/tv/[A-Za-z0-9]{6}/?$`) || PathPrefix(`/assets/`) || PathPrefix(`/music/`) || PathPrefix(`/sounds/`) || Path(`/vite.svg`))'
   );
   assert.doesNotMatch(uiRule, /Query\(/);
   assert.equal(labels['traefik.http.routers.bingo-m6-trial-public-ui.priority'], '1000');
@@ -103,7 +95,7 @@ test('unmatched routes retain Basic Auth and backend/Mongo stay private', () => 
   assert.equal(labels['traefik.http.routers.bingo-m6-trial.middlewares'], 'bingo-m6-trial-auth');
   assert.ok(labels['traefik.http.middlewares.bingo-m6-trial-auth.basicauth.users']);
   for (const service of [backend, mongo, config.services['mongo-bootstrap']]) {
-    assert.deepEqual(Object.keys(service.labels).filter(key => key.startsWith('traefik.')), []);
+    assert.deepEqual(Object.keys(service.labels ?? {}).filter(key => key.startsWith('traefik.')), []);
     assert.equal(Object.hasOwn(service, 'ports'), false);
     assert.equal(Object.hasOwn(service.networks, 'pawtech_public'), false);
   }

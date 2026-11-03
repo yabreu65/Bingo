@@ -5,7 +5,7 @@ services:
     labels:
       traefik.http.routers.bingo-m6-trial.priority: "1"
 
-      traefik.http.routers.bingo-m6-trial-public-ui.rule: "Host(`${BINGO_TEST_HOST:?Set the approved BINGO_TEST_HOST}`) && (Path(`/`) || PathRegexp(`^/player/[A-Za-z0-9]{6}/?$`) || PathRegexp(`^/tv/[A-Za-z0-9]{6}/?$`) || PathPrefix(`/assets/`) || PathPrefix(`/music/`) || PathPrefix(`/sounds/`) || Path(`/vite.svg`))"
+      traefik.http.routers.bingo-m6-trial-public-ui.rule: "Host(`${BINGO_TEST_HOST:?Set the approved BINGO_TEST_HOST}`) && (Method(`GET`) || Method(`HEAD`)) && (Path(`/`) || PathRegexp(`^/player/[A-Za-z0-9]{6}/?$`) || PathRegexp(`^/tv/[A-Za-z0-9]{6}/?$`) || PathPrefix(`/assets/`) || PathPrefix(`/music/`) || PathPrefix(`/sounds/`) || Path(`/vite.svg`))"
       traefik.http.routers.bingo-m6-trial-public-ui.entrypoints: websecure
       traefik.http.routers.bingo-m6-trial-public-ui.priority: "1000"
       traefik.http.routers.bingo-m6-trial-public-ui.service: bingo-m6-trial
