@@ -6,6 +6,7 @@ import { useSocket } from './context/useSocket';
 import Snowflakes from './components/UI/Snowflakes';
 import { API_URL } from './config/api';
 import { isTVAuthorizationToken, listenForTVAuthorization } from './utils/tvAuthorization';
+import { resolveEntryRoute } from './utils/entryRoutes';
 import './App.css';
 
 const STORAGE_KEY = 'bingo_session';
@@ -47,11 +48,10 @@ function App() {
   const [showReconnectPrompt, setShowReconnectPrompt] = useState(false);
   const [savedSessionData, setSavedSessionData] = useState(null);
 
-  // Detectar parámetros de URL
-  const urlParams = new URLSearchParams(window.location.search);
-  const tvRoomCode = urlParams.get('tv');
-  const tvToken = urlParams.get('tvToken');
-  const quickJoinRoomCode = urlParams.get('room');
+  const entryRoute = resolveEntryRoute(window.location);
+  const tvRoomCode = entryRoute.type === 'tv' ? entryRoute.roomCode : null;
+  const tvToken = entryRoute.type === 'tv' ? entryRoute.tvToken : null;
+  const quickJoinRoomCode = entryRoute.type === 'player' ? entryRoute.roomCode : null;
 
   // Receive the scoped TV credential without putting it in the URL.
   useEffect(() => {
@@ -108,7 +108,7 @@ function App() {
           if (!response.ok) throw new Error(data.error || 'El enlace temporal de TV no es válido');
           token = data.tvSessionToken;
           expiresAt = data.expiresAt;
-          window.history.replaceState({}, document.title, `/?tv=${encodeURIComponent(normalizedRoomCode)}`);
+          window.history.replaceState({}, document.title, `/tv/${encodeURIComponent(normalizedRoomCode)}`);
         } else {
           const stored = JSON.parse(sessionStorage.getItem(storageKey) || 'null');
           token = stored?.token;
@@ -389,7 +389,7 @@ function App() {
   };
 
   // Vista de TV - Pantalla para mostrar en televisor
-  // URL de ejemplo: http://192.168.1.39:5173/?tv=ABC123
+  // URL de ejemplo: http://192.168.1.39:5173/tv/ABC123
   if (tvRoomCode) {
     return (
       <div className="app">
@@ -407,7 +407,7 @@ function App() {
   }
 
   // Quick Join - Acceso directo a sala mediante QR
-  // URL de ejemplo: http://192.168.1.39:5173/?room=ABC123
+  // URL de ejemplo: http://192.168.1.39:5173/player/ABC123
   if (quickJoinRoomCode && !roomData) {
     const handleQuickJoinComplete = (data) => {
       setRoomData(data);
@@ -415,7 +415,7 @@ function App() {
       setCardSelected(true);
       setInWaitingRoom(true);
       setShowLanding(false);
-      // Limpiar el parámetro room de la URL sin recargar
+      // Clear transient query data while retaining the explicit player path.
       window.history.replaceState({}, '', window.location.pathname);
     };
 
