@@ -269,12 +269,24 @@ async function main() {
         metrics.minigames.attempted.push(type);
         host.socket.emit('launch-event', { roomCode, type, hostCapability: host.capability });
         try {
+          // The game snapshot is saved before the room is paused. Do not send
+          // completion until both writes are committed: in real use a client
+          // cannot complete a challenge before it has been announced.
           const active = await waitForCondition(
-            () => Game.findOne({ room: persistedRoom._id }).lean(),
-            current => current?.activeChallenge?.type === type,
-            `${type} challenge`
+            async () => {
+              const [currentRoom, currentGame] = await Promise.all([
+                Room.findOne({ code: roomCode }).lean(),
+                Game.findOne({ room: persistedRoom._id }).lean()
+              ]);
+              return {
+                roomState: currentRoom?.gameState,
+                challenge: currentGame?.activeChallenge
+              };
+            },
+            state => state?.roomState === 'paused' && state?.challenge?.type === type,
+            `${type} challenge activation`
           );
-          const challenge = active.activeChallenge;
+          const challenge = active.challenge;
           const participants = type === 'group'
             ? players
             : players.filter(client => client.id.toString() === challenge.player.toString());
@@ -296,6 +308,34 @@ async function main() {
             ),
             `${type} challenge completion`
           );
+
+          // Clearing Game.activeChallenge precedes persisting Room.gameState
+          // when a challenge completes. The next host action must wait until
+          // both documents reflect an active game, otherwise its Socket.IO
+          // event can be rejected while the room is still paused.
+          let lastResumptionState;
+          try {
+            await waitForCondition(
+              async () => {
+                const [currentRoom, currentGame] = await Promise.all([
+                  Room.findOne({ code: roomCode }).lean(),
+                  Game.findOne({ room: persistedRoom._id }).lean()
+                ]);
+                lastResumptionState = {
+                  roomState: currentRoom?.gameState,
+                  gameStatus: currentGame?.status,
+                  activeChallenge: currentGame?.activeChallenge?.type || null
+                };
+                return lastResumptionState;
+              },
+              state => state?.roomState === 'playing' &&
+                ['active', 'playing'].includes(state.gameStatus) &&
+                !state.activeChallenge,
+              `${type} game resumption`
+            );
+          } catch (error) {
+            throw new Error(`${error.message}: ${JSON.stringify(lastResumptionState)}`);
+          }
           metrics.minigames.completed.push(type);
         } catch (error) {
           metrics.minigames.errors.push({ type, error: error.message });
