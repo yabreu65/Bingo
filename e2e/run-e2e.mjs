@@ -754,6 +754,20 @@ async function main() {
       const video = document.querySelector('.video-wrapper video');
       return Boolean(video?.currentSrc) && video.readyState >= 2;
     }, null, { timeout: 30000 });
+    // The TV must remain silent while showing its waiting/QR screen.
+    assert.equal(await tvPage.locator('.video-wrapper video').evaluate(video => video.paused), true,
+      'TV played music before the Bingo started');
+    const tvInitialText = await tvPage.locator('body').innerText();
+    assert.match(tvInitialText, /Bingo Bailable/);
+    await waitForBody(tvPage, /En Espera|En Juego|CANTADOS|Únete al Bingo/);
+
+    await hostPage.getByRole('button', { name: /Iniciar/ }).last().click();
+    await waitForBody(hostPage, /En Juego|Número Cantado/);
+    await waitForBody(playerAPage, /En Juego|Números cantados/);
+    await waitForBody(playerBPage, /En Juego|Números cantados/);
+    await waitForBody(tvPage, /En Juego|PAUSADO|CANTADOS|Números Cantados|Número/, 20000);
+    // Once the organizer starts the game, playback is allowed. The CI media
+    // fixture is muted to avoid browser audio-autoplay policy restrictions.
     const tvPlayback = await tvPage.locator('.video-wrapper video').evaluate(async (video) => {
       video.muted = true;
       video.play().catch(() => {});
@@ -768,15 +782,7 @@ async function main() {
         .waitFor({ state: 'visible', timeout: 10000 });
       assert.deepEqual(centralTvMediaRequests, [], 'LOCAL_TV requested media from the central server');
     }
-    const tvInitialText = await tvPage.locator('body').innerText();
-    assert.match(tvInitialText, /Bingo Bailable/);
-    await waitForBody(tvPage, /En Espera|En Juego|CANTADOS|Únete al Bingo/);
 
-    await hostPage.getByRole('button', { name: /Iniciar/ }).last().click();
-    await waitForBody(hostPage, /En Juego|Número Cantado/);
-    await waitForBody(playerAPage, /En Juego|Números cantados/);
-    await waitForBody(playerBPage, /En Juego|Números cantados/);
-    await waitForBody(tvPage, /En Juego|PAUSADO|CANTADOS|Números Cantados|Número/, 20000);
     await waitForBody(playerAPage, /Números cantados \([1-9]/, 12000);
     const playerNumber = await playerAPage.locator('.called-number').first().innerText();
     await waitForBody(tvPage, new RegExp('\\b' + playerNumber + '\\b'), 5000);
