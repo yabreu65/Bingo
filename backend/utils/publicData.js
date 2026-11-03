@@ -44,7 +44,7 @@ const stripGuestCapabilityHashes = (value) => {
 
   const safeValue = {};
   for (const [key, nestedValue] of Object.entries(value)) {
-    if (key === 'guestCapabilityHash' || key === 'hostCapabilityHash' || key === 'tvCapabilityHash' || key === 'tvAuthorization') continue;
+    if (key === 'admissionTokenHash' || key === 'guestCapabilityHash' || key === 'hostCapabilityHash' || key === 'tvCapabilityHash' || key === 'tvAuthorization') continue;
     safeValue[key] = stripGuestCapabilityHashes(nestedValue);
   }
   return safeValue;

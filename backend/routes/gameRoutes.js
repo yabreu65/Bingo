@@ -36,6 +36,7 @@ router.post('/start', validateRequest(startGameSchema), optionalAuth, async (req
     const game = new Game({
       room: room._id,
       gameMode: room.config?.gameMode || 'full',
+      gameModes: room.config?.gameModes?.length ? room.config.gameModes : [room.config?.gameMode || 'full'],
       startTime: new Date(),
       availablePools: room.config?.managedContentEnabled ? await loadChallengePoolsForRoom(room._id) : initializeChallengePools()
     });

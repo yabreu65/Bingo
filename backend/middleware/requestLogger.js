@@ -1,17 +1,5 @@
 const logger = require('../config/logger');
-
-const sanitizeRequestUrl = (requestUrl) => {
-  if (typeof requestUrl !== 'string') return requestUrl;
-  try {
-    const url = new URL(requestUrl, 'http://request.invalid');
-    ['token', 'tvToken', 'tvSessionToken', 'hostCapability', 'playerCapability', 'authorization'].forEach((key) => {
-      if (url.searchParams.has(key)) url.searchParams.set(key, '***REDACTED***');
-    });
-    return `${url.pathname}${url.search}`;
-  } catch {
-    return requestUrl.replace(/(token|tvToken|tvSessionToken|hostCapability|playerCapability|authorization)=[^&\s]+/gi, '$1=***REDACTED***');
-  }
-};
+const { sanitizeBody, sanitizeRequestUrl } = require('../utils/redactSecrets');
 
 /**
  * Middleware para logging de requests HTTP
@@ -57,27 +45,6 @@ const requestLogger = (req, res, next) => {
 
   next();
 };
-
-/**
- * Sanitiza el body del request para no logear información sensible
- */
-function sanitizeBody(body) {
-  if (!body) return undefined;
-
-  const sanitized = { ...body };
-  const sensitiveFields = [
-    'password', 'token', 'refreshToken', 'secret', 'tvToken', 'tvSessionToken',
-    'hostCapability', 'playerCapability', 'authorization'
-  ];
-
-  sensitiveFields.forEach(field => {
-    if (sanitized[field]) {
-      sanitized[field] = '***REDACTED***';
-    }
-  });
-
-  return sanitized;
-}
 
 module.exports = requestLogger;
 module.exports.sanitizeBody = sanitizeBody;

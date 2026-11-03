@@ -221,28 +221,27 @@ async function endVoting(io, socket, data = {}) {
     // Completar la votación
     const results = await votingService.completeVoting(voteId);
 
-    // Actualizar el juego
+    // Claim completion atomically so duplicate or concurrent host events cannot award twice.
     const game = await Game.findOne({ 'activeVoting.voteId': voteId });
     if (game) {
-      const completedVoteIds = Array.isArray(game.completedVotes)
-        ? game.completedVotes.map(id => id.toString())
-        : [];
-      const alreadyCompleted = completedVoteIds.includes(voteId.toString());
-      // Agregar a votaciones completadas
-      if (!alreadyCompleted) game.completedVotes.push(voteId);
+      const completedGame = await Game.findOneAndUpdate(
+        {
+          _id: game._id,
+          'activeVoting.voteId': voteId,
+          completedVotes: { $ne: voteId }
+        },
+        {
+          $addToSet: { completedVotes: voteId },
+          $set: { activeVoting: null }
+        },
+        { new: true }
+      );
 
-      // Limpiar votación activa
-      game.activeVoting = null;
-
-      await game.save();
-
-      // Actualizar puntos del jugador
-      if (!alreadyCompleted) {
-        const player = await Player.findById(results.performerId);
-        if (player) {
-          player.stats.points = (player.stats?.points || 0) + results.bonusPoints;
-          await player.save();
-        }
+      if (completedGame) {
+        await Player.findOneAndUpdate(
+          { _id: results.performerId, room: room._id },
+          { $inc: { 'stats.points': results.bonusPoints } }
+        );
       }
     }
 
