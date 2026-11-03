@@ -34,3 +34,18 @@ e2e/artifacts/
 
 # Backup files
 *.backup
+
+# Disposable MongoDB integration fixtures and local diagnostics
+backend/.tmp-t*/
+backend/.t[0-9]*
+
+# Local RDD/operational evidence; tracked historical records remain unchanged
+odd/results/bingo-contabo-*
+odd/tasks/bingo-contabo-*
+odd/tasks/bingo-docker-*
+odd/tasks/bingo-m6*
+odd/tasks/bingo-private-staging-*
+odd/tasks/bingo-virtual-player-*
+
+# Generated local review inventory, not a source artifact
+docs/m6-t8-inventory.json
