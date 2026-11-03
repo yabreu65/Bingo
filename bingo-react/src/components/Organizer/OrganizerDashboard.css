@@ -63,3 +63,448 @@
   .organizer-dashboard > .relative > header > button { width: 100% !important; }
   .organizer-dashboard > .relative > header > div:last-child { justify-content: center; }
 }
+
+/* 2026-11: dashboard hierarchy and responsive organizer navigation. */
+.organizer-dashboard {
+  padding: clamp(16px, 2.2vw, 36px) !important;
+  overflow-x: clip;
+}
+
+.organizer-dashboard .organizer-shell {
+  width: min(100%, 1500px);
+  max-width: 1500px;
+  margin-inline: auto;
+}
+
+.organizer-dashboard .organizer-header {
+  align-items: center;
+  gap: clamp(16px, 2vw, 30px);
+  padding: clamp(16px, 2.2vw, 30px);
+  margin-bottom: 0;
+  border: 1px solid var(--pf-border);
+  border-radius: var(--pf-radius-lg);
+  background: rgba(21, 18, 23, .88);
+  box-shadow: var(--pf-shadow-panel);
+}
+
+.organizer-dashboard .organizer-heading {
+  min-width: 0;
+}
+
+.organizer-dashboard .organizer-heading h1 {
+  margin: 0;
+  font-size: clamp(1.55rem, 2.8vw, 2.8rem);
+  line-height: 1.15;
+  overflow-wrap: anywhere;
+}
+
+.organizer-dashboard .organizer-heading p {
+  margin-top: 8px;
+  font-size: clamp(.85rem, 1.2vw, 1rem);
+}
+
+.organizer-dashboard .organizer-header-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  flex-shrink: 0;
+  gap: 12px;
+}
+
+.organizer-dashboard .organizer-header-actions button {
+  width: auto;
+  max-width: 100%;
+}
+
+.organizer-dashboard .organizer-header-actions > div {
+  min-height: 48px;
+  padding: 10px 16px;
+  font-size: .9rem;
+}
+
+.organizer-dashboard .organizer-stats {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: clamp(12px, 1.3vw, 20px);
+}
+
+.organizer-dashboard .organizer-stats > div {
+  min-width: 0;
+  padding: clamp(12px, 1.5vw, 22px);
+  gap: 12px;
+}
+
+.organizer-dashboard .organizer-stats > div > div:first-child {
+  flex-shrink: 0;
+  padding: clamp(9px, 1.1vw, 13px);
+}
+
+.organizer-dashboard .organizer-stats > div > div:last-child {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.organizer-dashboard .organizer-stats > div p:last-child {
+  font-size: clamp(1.1rem, 1.8vw, 1.55rem);
+  line-height: 1.25;
+}
+
+.organizer-dashboard .organizer-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.8fr) minmax(300px, 1fr);
+  gap: clamp(16px, 2vw, 30px);
+  align-items: start;
+}
+
+.organizer-dashboard .organizer-main,
+.organizer-dashboard .organizer-aside {
+  display: grid;
+  grid-column: auto;
+  gap: clamp(16px, 2vw, 28px);
+  min-width: 0;
+}
+
+.organizer-dashboard .organizer-main > *,
+.organizer-dashboard .organizer-aside > * {
+  min-width: 0;
+}
+
+.organizer-dashboard .organizer-main > * + *,
+.organizer-dashboard .organizer-aside > * + * {
+  margin-top: 0 !important;
+}
+
+.organizer-dashboard .organizer-pane {
+  display: grid;
+  align-content: start;
+  gap: clamp(16px, 2vw, 28px);
+  min-width: 0;
+}
+
+.organizer-dashboard .organizer-pane > section {
+  min-width: 0;
+  padding: clamp(18px, 2vw, 30px);
+}
+
+.organizer-dashboard .organizer-pane h3 {
+  margin-bottom: clamp(14px, 1.3vw, 20px);
+  line-height: 1.3;
+}
+
+.organizer-dashboard .organizer-current-number .text-\[8rem\] {
+  font-size: clamp(5.5rem, 10vw, 10rem) !important;
+}
+
+.organizer-dashboard .organizer-event-grid,
+.organizer-dashboard .organizer-control-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 165px), 1fr));
+  gap: 12px;
+}
+
+.organizer-dashboard .organizer-event-grid button,
+.organizer-dashboard .organizer-control-grid button {
+  width: 100%;
+  min-width: 0;
+  min-height: 64px;
+  padding: 12px;
+  line-height: 1.35;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  box-shadow: none;
+  transition: background-color .18s ease, border-color .18s ease;
+}
+
+.organizer-dashboard .organizer-event-grid button:hover,
+.organizer-dashboard .organizer-control-grid button:hover {
+  transform: none !important;
+}
+
+.organizer-dashboard .organizer-event-grid button svg,
+.organizer-dashboard .organizer-control-grid button svg {
+  flex: 0 0 auto;
+}
+
+.organizer-dashboard .organizer-settings-row {
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.organizer-dashboard .organizer-player-panel {
+  min-height: 320px;
+  max-height: min(720px, 75vh);
+}
+
+.organizer-dashboard .organizer-player-panel input {
+  min-width: 0;
+}
+
+.organizer-dashboard .organizer-player-panel .space-y-2 > div {
+  min-width: 0;
+}
+
+.organizer-dashboard .organizer-player-panel .space-y-2 p {
+  overflow-wrap: anywhere;
+}
+
+.organizer-dashboard .organizer-active-banner,
+.organizer-dashboard .organizer-mobile-nav {
+  display: none;
+}
+
+.organizer-dashboard > .organizer-shell > .admin-center {
+  padding: clamp(16px, 2vw, 28px);
+  border: 1px solid var(--pf-border);
+  border-radius: var(--pf-radius-lg);
+  background: rgba(21, 18, 23, .65);
+}
+
+@media (max-width: 1199px) {
+  .organizer-dashboard .organizer-header {
+    flex-wrap: wrap;
+  }
+
+  .organizer-dashboard .organizer-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .organizer-dashboard .organizer-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .organizer-dashboard .organizer-aside {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .organizer-dashboard .organizer-aside [data-mobile-section="acceso"] {
+    grid-column: 1;
+  }
+
+  .organizer-dashboard .organizer-aside [data-mobile-section="jugadores"] {
+    grid-column: 2;
+    grid-row: 1;
+  }
+}
+
+@media (max-width: 767px) {
+  .organizer-dashboard {
+    padding: max(12px, env(safe-area-inset-top)) 12px max(20px, env(safe-area-inset-bottom)) !important;
+  }
+
+  .organizer-dashboard .organizer-shell {
+    width: 100%;
+  }
+
+  .organizer-dashboard .organizer-header {
+    padding: 16px;
+    align-items: stretch !important;
+  }
+
+  .organizer-dashboard .organizer-heading h1 {
+    font-size: clamp(1.5rem, 6vw, 2rem);
+  }
+
+  .organizer-dashboard .organizer-header-actions {
+    justify-content: space-between;
+    flex-wrap: wrap;
+    width: 100%;
+    gap: 8px;
+  }
+
+  .organizer-dashboard .organizer-header-actions > button {
+    flex: 1 1 185px;
+    padding-inline: 10px;
+    font-size: .82rem;
+  }
+
+  .organizer-dashboard .organizer-header-actions > div {
+    flex: 0 0 auto;
+    min-height: 44px;
+    padding: 8px 12px;
+    font-size: .8rem;
+  }
+
+  .organizer-dashboard .organizer-mobile-nav {
+    display: grid;
+    position: sticky;
+    top: max(8px, env(safe-area-inset-top));
+    z-index: 20;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 6px;
+    padding: 8px;
+    border: 1px solid var(--pf-border);
+    border-radius: 16px;
+    background: rgba(21, 18, 23, .97);
+    box-shadow: var(--pf-shadow-panel);
+  }
+
+  .organizer-dashboard .organizer-mobile-nav button {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    align-items: center;
+    justify-content: center;
+    padding: 8px 3px;
+    min-width: 0;
+    min-height: 58px;
+    font-size: clamp(.67rem, 2.6vw, .83rem);
+    font-weight: 700;
+    color: var(--pf-text-muted);
+    border-radius: 10px;
+    border: 1px solid transparent;
+    background: transparent;
+  }
+
+  .organizer-dashboard .organizer-mobile-nav button.is-active,
+  .organizer-dashboard .organizer-mobile-nav button[aria-pressed="true"] {
+    color: #20170e;
+    background: var(--pf-accent);
+  }
+
+  .organizer-dashboard .organizer-active-banner {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    text-align: left;
+    padding: 12px 14px;
+    background: rgba(214, 168, 92, .12);
+    border: 1px solid var(--pf-border);
+    border-radius: var(--pf-radius-sm);
+    color: var(--pf-text);
+    font-weight: 600;
+    overflow-wrap: anywhere;
+  }
+
+  .organizer-dashboard .organizer-active-banner__link {
+    margin-left: auto;
+    font-size: .75rem;
+    color: var(--pf-accent-strong);
+    white-space: nowrap;
+  }
+
+  .organizer-dashboard [data-mobile-section] {
+    display: none !important;
+  }
+
+  .organizer-dashboard[data-mobile-view="juego"] [data-mobile-section="juego"],
+  .organizer-dashboard[data-mobile-view="retos"] [data-mobile-section="retos"],
+  .organizer-dashboard[data-mobile-view="jugadores"] [data-mobile-section="jugadores"],
+  .organizer-dashboard[data-mobile-view="acceso"] [data-mobile-section="acceso"] {
+    display: grid !important;
+  }
+
+  .organizer-dashboard .organizer-aside {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .organizer-dashboard .organizer-aside [data-mobile-section] {
+    grid-column: 1;
+    grid-row: auto;
+  }
+
+  .organizer-dashboard .organizer-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+  }
+
+  .organizer-dashboard .organizer-stats > div {
+    gap: 9px;
+    padding: 10px;
+    min-width: 0;
+  }
+
+  .organizer-dashboard .organizer-stats > div > div:first-child {
+    padding: 8px;
+  }
+
+  .organizer-dashboard .organizer-stats > div svg {
+    width: 19px;
+    height: 19px;
+  }
+
+  .organizer-dashboard .organizer-stats > div p:first-child {
+    font-size: .74rem;
+    line-height: 1.25;
+  }
+
+  .organizer-dashboard .organizer-stats > div p:last-child {
+    font-size: clamp(.95rem, 4vw, 1.18rem);
+  }
+
+  .organizer-dashboard .organizer-pane > section {
+    padding: 16px;
+  }
+
+  .organizer-dashboard .organizer-current-number .text-\[8rem\] {
+    font-size: clamp(5rem, 19vw, 7rem) !important;
+  }
+
+  .organizer-dashboard .organizer-control-grid,
+  .organizer-dashboard .organizer-event-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+  }
+
+  .organizer-dashboard .organizer-event-grid button,
+  .organizer-dashboard .organizer-control-grid button {
+    display: flex;
+    flex-direction: column;
+    min-height: 76px;
+    padding: 9px 7px;
+    font-size: .82rem;
+  }
+
+  .organizer-dashboard .organizer-player-panel {
+    max-height: min(70dvh, 700px);
+  }
+
+  .organizer-dashboard > .organizer-shell > .admin-center {
+    padding: 12px;
+    border-radius: 16px;
+  }
+}
+
+@media (max-width: 360px) {
+  .organizer-dashboard .organizer-header-actions > button {
+    flex-basis: 100%;
+  }
+
+  .organizer-dashboard .organizer-mobile-nav {
+    gap: 4px;
+    padding: 6px;
+  }
+
+  .organizer-dashboard .organizer-event-grid button {
+    font-size: .77rem;
+  }
+}
+
+/* Give administrative forms the whole canvas when open, without changing game state. */
+.organizer-dashboard[data-admin-open="true"] .organizer-mobile-nav,
+.organizer-dashboard[data-admin-open="true"] .organizer-active-banner,
+.organizer-dashboard[data-admin-open="true"] .organizer-stats,
+.organizer-dashboard[data-admin-open="true"] .organizer-layout {
+  display: none !important;
+}
+
+/* Always keep action rows symmetrical across wide and intermediate screens. */
+.organizer-dashboard .organizer-event-grid,
+.organizer-dashboard .organizer-control-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+}
+
+@media (max-width: 767px) {
+  /* Override the older mobile .grid-cols-2 rule which enforced one column. */
+  .organizer-dashboard .organizer-control-grid,
+  .organizer-dashboard .organizer-event-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+}
+
+.organizer-dashboard .organizer-control-grid button:disabled,
+.organizer-dashboard .organizer-event-grid button:disabled {
+  opacity: .48;
+  filter: saturate(.3);
+  cursor: not-allowed;
+}

@@ -225,7 +225,7 @@ const ManualPlayerModal = ({ isOpen, onClose, onAssign, formData, setFormData, a
   );
 };
 
-const ManualBingoValidator = ({ isOpen, onClose, player, calledNumbers, gameMode, onConfirmBingo }) => {
+const ManualBingoValidator = ({ isOpen, onClose, player, calledNumbers, gameMode, gameModes, onConfirmBingo }) => {
   if (!isOpen || !player) return null;
 
   // Generar cartón del jugador manual
@@ -233,7 +233,10 @@ const ManualBingoValidator = ({ isOpen, onClose, player, calledNumbers, gameMode
   const matrix = cardData.matrix;
 
   // Verificar si hay BINGO
-  const { hasBingo, pattern, markedCells } = checkBingoWithCalledNumbers(matrix, calledNumbers, gameMode);
+  const availableModes = gameModes?.length ? gameModes : [gameMode];
+  const checks = availableModes.map(mode => ({ mode, ...checkBingoWithCalledNumbers(matrix, calledNumbers, mode) }));
+  const matching = checks.find(check => check.hasBingo) || checks[0];
+  const { hasBingo, pattern, markedCells } = matching;
 
   // Crear set de celdas marcadas para búsqueda rápida
   const markedSet = new Set(markedCells.map(([r, c]) => `${r},${c}`));
@@ -353,7 +356,7 @@ const ManualBingoValidator = ({ isOpen, onClose, player, calledNumbers, gameMode
             <strong>Celdas marcadas:</strong> {markedCells.length} de 25
           </p>
           <p className="text-slate-300 text-sm">
-            <strong>Modo de juego:</strong> {gameMode === 'full' ? 'Cartón completo' : gameMode === 'line' ? 'Línea' : gameMode === 'fourCorners' ? '4 Esquinas' : 'Cruz Central'}
+            <strong>Modalidades:</strong> {availableModes.map(mode => ({ full: 'Cartón completo', line: 'Línea', fourCorners: '4 Esquinas', centralCross: 'Cruz central' }[mode])).join(' · ')}
           </p>
         </div>
 
@@ -416,6 +419,7 @@ export default function OrganizerDashboard({ roomData }) {
   const [calledNumbers, setCalledNumbers] = useState([]);
   const [nextNumberIn, setNextNumberIn] = useState(roomState?.config?.timeBetweenNumbers || 30);
   const [searchPlayer, setSearchPlayer] = useState('');
+  const [mobileView, setMobileView] = useState('juego');
   const [showRecording, setShowRecording] = useState(false);
   const [activeChallenge, setActiveChallenge] = useState(null);
   const [activeVoting, setActiveVoting] = useState(null);
@@ -897,22 +901,24 @@ export default function OrganizerDashboard({ roomData }) {
   const currentStatus = gameStatusMap[gameState] || { text: 'Desconocido', color: 'bg-slate-500' };
 
   return (
-    <div className="organizer-dashboard min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 text-slate-200 p-4 lg:p-6 font-sans relative overflow-hidden">
+    <div className="organizer-dashboard min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 text-slate-200 p-4 lg:p-6 font-sans relative overflow-hidden"
+      data-mobile-view={mobileView}
+      data-admin-open={showAdminCenter}>
       {/* Background decorativo */}
       <div className="absolute inset-0 opacity-20">
         <div className="absolute top-0 left-0 w-96 h-96 bg-indigo-600 rounded-full filter blur-3xl"></div>
         <div className="absolute bottom-0 right-0 w-96 h-96 bg-purple-600 rounded-full filter blur-3xl"></div>
       </div>
 
-      <div className="max-w-screen-2xl mx-auto relative z-10 space-y-6">
+      <div className="organizer-shell max-w-screen-2xl mx-auto relative z-10 space-y-6">
 
         {/* HEADER COMPLETO */}
         <motion.header
-          className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-2"
+          className="organizer-header flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-2"
           initial={{ opacity: 0, y: -20 }}
           animate={{ opacity: 1, y: 0 }}
         >
-          <div>
+          <div className="organizer-heading">
             <h1 className="text-4xl lg:text-5xl font-black text-transparent bg-clip-text bg-gradient-to-r from-indigo-400 via-purple-400 to-pink-400">
               🎵 Bingo Bailable
             </h1>
@@ -920,6 +926,7 @@ export default function OrganizerDashboard({ roomData }) {
               Sala: <span className="font-mono text-indigo-400 font-bold text-xl">{roomState.code}</span>
             </p>
           </div>
+          <div className="organizer-header-actions">
           <ActionButton
             icon={<Settings size={18} />}
             label={showAdminCenter ? 'Cerrar administración' : 'Centro de Administración'}
@@ -929,12 +936,12 @@ export default function OrganizerDashboard({ roomData }) {
           />
           <motion.div
             className={`flex items-center gap-3 px-6 py-3 rounded-full text-white font-bold text-lg ${currentStatus.color} shadow-xl`}
-            animate={{ scale: [1, 1.05, 1] }}
-            transition={{ repeat: Infinity, duration: 2 }}
+            role="status"
           >
             <span className="w-3 h-3 rounded-full bg-white animate-pulse shadow-lg"></span>
             {currentStatus.text}
           </motion.div>
+          </div>
         </motion.header>
 
         {showAdminCenter && (
@@ -946,8 +953,36 @@ export default function OrganizerDashboard({ roomData }) {
           />
         )}
 
+        <nav className="organizer-mobile-nav" aria-label="Secciones del organizador">
+          {[
+            ['juego', 'Juego', <Play key="juego" size={17} />],
+            ['retos', 'Retos', <Target key="retos" size={17} />],
+            ['jugadores', 'Jugadores', <Users key="jugadores" size={17} />],
+            ['acceso', 'Acceso', <Tv key="acceso" size={17} />]
+          ].map(([id, label, icon]) => (
+            <button
+              type="button"
+              key={id}
+              aria-pressed={mobileView === id}
+              onClick={() => setMobileView(id)}
+              className={mobileView === id ? 'is-active' : ''}
+            >
+              {icon}
+              <span>{label}</span>
+            </button>
+          ))}
+        </nav>
+
+        {activeChallenge && (
+          <button type="button" className="organizer-active-banner" onClick={() => setMobileView('retos')}>
+            <Target size={18} />
+            <span>Reto activo: {activeChallenge.type === 'group' ? 'Baile grupal' : activeChallenge.type === 'dance' ? 'Baile' : activeChallenge.type}</span>
+            <span className="organizer-active-banner__link">Ver reto</span>
+          </button>
+        )}
+
         {/* STATS CARDS - FILA COMPLETA */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="organizer-stats grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4" data-mobile-section="juego">
           <StatCard
             icon={<Users size={28} className="text-white" />}
             title="Jugadores Activos"
@@ -962,8 +997,8 @@ export default function OrganizerDashboard({ roomData }) {
           />
           <StatCard
             icon={<Music size={28} className="text-white" />}
-            title="Música Activa"
-            value="Playlist A"
+            title="Repertorio"
+            value={roomState.config?.activePlaylist ? 'Playlist asignada' : 'General'}
             color="blue"
           />
           <StatCard
@@ -975,13 +1010,14 @@ export default function OrganizerDashboard({ roomData }) {
         </div>
 
         {/* LAYOUT PRINCIPAL - 2 COLUMNAS */}
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+        <div className="organizer-layout grid grid-cols-1 lg:grid-cols-12 gap-6">
 
           {/* COLUMNA IZQUIERDA - JUEGO (8 COLUMNAS) */}
-          <div className="lg:col-span-8 space-y-6">
+          <div className="organizer-main lg:col-span-8 space-y-6">
 
+            <div className="organizer-pane" data-mobile-section="juego">
             {/* Número Cantado - MUY GRANDE */}
-            <DashboardSection className="text-center py-12 bg-gradient-to-br from-indigo-900/60 to-purple-900/60 border-2 border-indigo-500/40">
+            <DashboardSection className="organizer-current-number text-center py-12 bg-gradient-to-br from-indigo-900/60 to-purple-900/60 border-2 border-indigo-500/40">
               <p className="text-slate-300 mb-4 text-lg font-bold uppercase tracking-widest">
                 Número Cantado
               </p>
@@ -1009,9 +1045,48 @@ export default function OrganizerDashboard({ roomData }) {
               )}
             </DashboardSection>
 
-            {/* Eventos Especiales - HORIZONTAL debajo del número */}
+            {/* Controles del Juego - HORIZONTAL */}
+            <DashboardSection title="⚡ Controles del Juego">
+              <div className="organizer-control-grid grid grid-cols-2 md:grid-cols-4 gap-4">
+                <ActionButton
+                  icon={<Play size={24} />}
+                  label="Iniciar"
+                  onClick={handleStartGame}
+                  disabled={gameState === 'playing'}
+                  variant="success"
+                  className="!py-5"
+                />
+                <ActionButton
+                  icon={<Pause size={24} />}
+                  label={gameState === 'paused' ? 'Reanudar' : 'Pausar'}
+                  onClick={handlePauseGame}
+                  disabled={gameState === 'waiting'}
+                  variant="warning"
+                  className="!py-5"
+                />
+                <ActionButton
+                  icon={<RefreshCw size={24} />}
+                  label="Reiniciar"
+                  onClick={handleResetGame}
+                  disabled={gameState === 'waiting'}
+                  variant="secondary"
+                  className="!py-5"
+                />
+                <ActionButton
+                  icon={<X size={24} />}
+                  label="Finalizar Sala"
+                  onClick={handleFinishGame}
+                  variant="danger"
+                  className="!py-5"
+                />
+              </div>
+            </DashboardSection>
+
+            </div>
+            <div className="organizer-pane" data-mobile-section="retos">
+            {/* Eventos Especiales */}
             <DashboardSection title="🎮 Eventos Especiales">
-              <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+              <div className="organizer-event-grid grid grid-cols-1 md:grid-cols-4 gap-4">
                 <ActionButton
                   icon={<Target size={22} />}
                   label="Lanzar Reto"
@@ -1037,13 +1112,6 @@ export default function OrganizerDashboard({ roomData }) {
                   icon={<Music size={22} />}
                   label="Lanzar Baile"
                   onClick={() => handleLaunchEvent('dance')}
-                  variant="secondary"
-                  className="!py-4"
-                />
-                <ActionButton
-                  icon={<Mic size={22} />}
-                  label="Lanzar Canto"
-                  onClick={() => handleLaunchEvent('sing')}
                   variant="secondary"
                   className="!py-4"
                 />
@@ -1161,45 +1229,10 @@ export default function OrganizerDashboard({ roomData }) {
               )}
             </DashboardSection>
 
-            {/* Controles del Juego - HORIZONTAL */}
-            <DashboardSection title="⚡ Controles del Juego">
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                <ActionButton
-                  icon={<Play size={24} />}
-                  label="Iniciar"
-                  onClick={handleStartGame}
-                  disabled={gameState === 'playing'}
-                  variant="success"
-                  className="!py-5"
-                />
-                <ActionButton
-                  icon={<Pause size={24} />}
-                  label={gameState === 'paused' ? 'Reanudar' : 'Pausar'}
-                  onClick={handlePauseGame}
-                  disabled={gameState === 'waiting'}
-                  variant="warning"
-                  className="!py-5"
-                />
-                <ActionButton
-                  icon={<RefreshCw size={24} />}
-                  label="Reiniciar"
-                  onClick={handleResetGame}
-                  disabled={gameState === 'waiting'}
-                  variant="secondary"
-                  className="!py-5"
-                />
-                <ActionButton
-                  icon={<X size={24} />}
-                  label="Finalizar Sala"
-                  onClick={handleFinishGame}
-                  variant="danger"
-                  className="!py-5"
-                />
-              </div>
-            </DashboardSection>
-
+            </div>
+            <div className="organizer-pane organizer-pane--utilities" data-mobile-section="juego">
             <DashboardSection title="⚙️ Configuración">
-              <div className="flex items-center justify-between">
+              <div className="organizer-settings-row flex items-center justify-between">
                 <div className="flex items-center gap-3">
                   <span className="font-semibold">Desempate por baile</span>
                   <span className={`px-2 py-1 rounded ${tieBreakOn ? 'bg-green-600 text-white' : 'bg-slate-600 text-white'}`}>{tieBreakOn ? 'Activado' : 'Desactivado'}</span>
@@ -1236,11 +1269,13 @@ export default function OrganizerDashboard({ roomData }) {
                 )}
               </div>
             </DashboardSection>
+            </div>
           </div>
 
           {/* COLUMNA DERECHA - ACCESO Y JUGADORES (4 COLUMNAS) */}
-          <div className="lg:col-span-4 space-y-6">
+          <div className="organizer-aside lg:col-span-4 space-y-6">
 
+            <div className="organizer-pane" data-mobile-section="acceso">
             {/* Acceso a la Sala */}
             <DashboardSection title="🎪 Acceso">
               <div className="bg-white p-3 rounded-xl w-full max-w-[180px] mx-auto shadow-2xl">
@@ -1249,7 +1284,7 @@ export default function OrganizerDashboard({ roomData }) {
               <p className="text-center text-xs text-slate-400 mt-2 mb-3">
                 Escanea o comparte
               </p>
-              <div className="space-y-2">
+              <div className="organizer-access-actions flex flex-col gap-2">
                 <ActionButton
                   icon={<LinkIcon size={16} />}
                   label="Copiar URL"
@@ -1327,8 +1362,10 @@ export default function OrganizerDashboard({ roomData }) {
               </DashboardSection>
             )}
 
+            </div>
+            <div className="organizer-pane" data-mobile-section="jugadores">
             {/* Jugadores */}
-            <DashboardSection title="👥 Jugadores" className="flex flex-col max-h-[600px]">
+            <DashboardSection title="👥 Jugadores" className="organizer-player-panel flex flex-col max-h-[600px]">
               <div className="relative mb-3">
                 <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
                 <input
@@ -1401,6 +1438,7 @@ export default function OrganizerDashboard({ roomData }) {
                 )}
               </div>
             </DashboardSection>
+            </div>
           </div>
         </div>
 
@@ -1424,6 +1462,7 @@ export default function OrganizerDashboard({ roomData }) {
           player={validatingPlayer}
           calledNumbers={calledNumbers}
           gameMode={roomState.config?.gameMode || 'full'}
+          gameModes={roomState.config?.gameModes}
           onConfirmBingo={handleConfirmManualBingo}
         />
       </div>

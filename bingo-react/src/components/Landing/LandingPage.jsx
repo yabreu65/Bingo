@@ -4,11 +4,6 @@ import './LandingPage.css';
 
 const LandingPage = ({ onStartGame }) => {
   const [showAnimation, setShowAnimation] = useState(true);
-  const snowflakes = Array.from({ length: 50 }, (_, i) => ({
-    left: `${(i * 37) % 100}%`,
-    animationDelay: `${(i * 7) % 10}s`,
-    animationDuration: `${10 + ((i * 11) % 20)}s`
-  }));
   const stars = Array.from({ length: 20 }, (_, i) => ({
     top: `${(i * 47) % 100}%`,
     left: `${(i * 29) % 100}%`,
@@ -24,17 +19,6 @@ const LandingPage = ({ onStartGame }) => {
 
   return (
     <div className="landing-page">
-      {/* Fondo animado con nieve */}
-      <div className="snow-container">
-        {snowflakes.map((flake, i) => (
-          <div key={i} className="snowflake" style={{
-            left: flake.left,
-            animationDelay: flake.animationDelay,
-            animationDuration: flake.animationDuration
-          }}>❄</div>
-        ))}
-      </div>
-
       {/* Estrellas doradas */}
       <div className="stars-container">
         {stars.map((star, i) => (

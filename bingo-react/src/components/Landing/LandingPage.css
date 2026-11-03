@@ -25,15 +25,13 @@
 .info-badges { display: flex; justify-content: center; flex-wrap: wrap; gap: var(--pf-space-3); }
 .info-badge { min-height: var(--pf-touch-target); display: inline-flex; align-items: center; gap: var(--pf-space-2); padding: var(--pf-space-2) var(--pf-space-3); color: var(--pf-text-muted); background: rgba(214, 168, 92, .08); border: 1px solid var(--pf-border); border-radius: 999px; font-size: .85rem; }
 .badge-icon { color: var(--pf-accent-strong); }
-.snow-container, .stars-container, .bottom-decoration { position: absolute; inset: 0; pointer-events: none; }
-.snow-container, .stars-container { z-index: 1; overflow: hidden; }
-.snowflake { position: absolute; top: -10%; color: rgba(248, 239, 224, .45); font-size: 1.1rem; animation: pf-snowfall linear infinite; }
+.stars-container, .bottom-decoration { position: absolute; inset: 0; pointer-events: none; }
+.stars-container { z-index: 1; overflow: hidden; }
 .star { position: absolute; color: var(--pf-accent-strong); font-size: .9rem; animation: pf-twinkle 3s ease-in-out infinite; }
 .bottom-decoration { z-index: 2; display: flex; align-items: end; justify-content: space-between; padding: 0 4vw 2vh; font-size: clamp(2rem, 5vw, 4rem); opacity: .18; }
-@keyframes pf-snowfall { to { transform: translateY(110vh) rotate(360deg); } }
 @keyframes pf-twinkle { 0%, 100% { opacity: .2; transform: scale(.8); } 50% { opacity: .8; transform: scale(1.15); } }
 @keyframes pf-fade-out { to { opacity: 0; transform: scale(.98); } }
 @media (max-width: 900px) { .features-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 600px) { .landing-page { align-items: start; overflow-y: auto; } .landing-content { padding-top: 8px; } .features-grid { gap: var(--pf-space-3); } .feature-card { min-height: 150px; padding: var(--pf-space-4); } .feature-icon { font-size: 1.8rem; } }
 @media (max-width: 420px) { .landing-page { padding-inline: 16px; } .features-grid { grid-template-columns: 1fr; } .feature-card { min-height: 0; } .info-badges { align-items: stretch; flex-direction: column; width: min(100%, 300px); margin-inline: auto; } .info-badge { justify-content: center; } }
-@media (prefers-reduced-motion: reduce) { .snowflake, .star, .landing-content { animation: none; } }
+@media (prefers-reduced-motion: reduce) { .star, .landing-content { animation: none; } }
