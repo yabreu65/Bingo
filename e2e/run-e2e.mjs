@@ -918,7 +918,7 @@ async function main() {
       return { challengeId, performerId };
     };
 
-    console.log('E2E 4b/10: riddle, dance, sing, group and karaoke challenge contracts');
+    console.log('E2E 4b/10: riddle, dance, group and karaoke; singing frozen');
     await launchChallengeAndComplete('riddle', async (page) => {
       const game = await gameForRoom();
       const answer = game.activeChallenge.data.answers[0];
@@ -941,24 +941,16 @@ async function main() {
       await page.locator('.challenge-modal .btn-close-challenge').click();
     });
     await Promise.all(challengePages.map(([, page]) => page.unroute('**/api/deezer/track/**', musicFailureRoute)));
-    const singBeforeStats = new Map();
-    for (const session of [playerASession, playerBSession]) {
-      const player = await Player.findById(session.playerId);
-      singBeforeStats.set(session.playerId.toString(), {
-        points: player.stats.points,
-        challengesCompleted: player.stats.challengesCompleted
-      });
-    }
-    const singRun = await launchChallengeAndComplete('sing', async (page) => {
-      await page.locator('.challenge-modal .btn-close-challenge').click();
-    });
-    const singBefore = singBeforeStats.get(singRun.performerId);
-    await waitForMongoDocument(
-      () => Player.findById(singRun.performerId),
-      (player) => player.stats.challengesCompleted === singBefore.challengesCompleted + 1 &&
-        player.stats.points === singBefore.points + getChallengePoints('sing', { success: true }),
-      'sing points persistence before group baseline'
-    );
+    // Singing challenges are intentionally frozen. The authorized launch
+    // must not create a challenge or award points; karaoke remains available.
+    const gameBeforeFrozenSing = await gameForRoom();
+    assert.equal(gameBeforeFrozenSing?.activeChallenge ?? null, null);
+    await launchChallenge('sing');
+    await new Promise(resolve => setTimeout(resolve, 250));
+    const gameAfterFrozenSing = await gameForRoom();
+    assert.equal(gameAfterFrozenSing?.activeChallenge ?? null, null,
+      'Singing challenge must stay disabled');
+    console.log('  frozen sing challenge rejected; karaoke remains available');
 
     const groupBeforeStats = new Map();
     for (const session of [playerASession, playerBSession]) {
@@ -1044,11 +1036,13 @@ async function main() {
     const timeoutStartedAt = Date.now();
     await launchChallenge('group');
     await waitForChallengePage(challengePages, 'group');
+    const timeoutGroup = (await gameForRoom())?.activeChallenge;
+    assert.equal(timeoutGroup?.duration, 45, 'Default group dance must last 45 seconds');
     // The host control socket can reclaim and disconnect the organizer page's socket.
     // Observe the same public state transition on the independently connected player UI.
     await playerAPage.locator('.status-badge.paused').waitFor({ state: 'visible', timeout: 10000 });
-    await playerAPage.locator('.status-badge.playing').waitFor({ state: 'visible', timeout: 40000 });
-    assert.ok(Date.now() - timeoutStartedAt >= 25000, 'Group challenge recovered before its timeout');
+    await playerAPage.locator('.status-badge.playing').waitFor({ state: 'visible', timeout: 65000 });
+    assert.ok(Date.now() - timeoutStartedAt >= 40000, 'Group challenge recovered before its 45-second timeout');
     await launchChallenge('karaoke');
     await waitForChallengePage([['player-a', playerAPage], ['player-b', playerBPage], ['tv', tvPage]], 'karaoke');
     const karaokeGame = await gameForRoom();
