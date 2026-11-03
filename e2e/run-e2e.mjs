@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict';
+import { VirtualPlayerBehavior } from './virtual-player-behavior.mjs';
+import { VirtualPlayerFleet } from './virtual-player-fleet.mjs';
 import { execFileSync, spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -23,7 +25,7 @@ const requireFromE2E = createRequire(import.meta.url);
 const requireFromBackend = createRequire(join(backendDir, 'server.js'));
 const requireFromFrontend = createRequire(join(frontendDir, 'package.json'));
 const { chromium } = requireFromE2E('playwright');
-const { MongoMemoryServer } = requireFromBackend('mongodb-memory-server');
+const { MongoMemoryReplSet } = requireFromBackend('mongodb-memory-server');
 const { CHALLENGE_POOLS } = requireFromBackend(join(backendDir, 'constants/index.js'));
 const { io: socketIO } = requireFromFrontend('socket.io-client');
 const mongoose = requireFromBackend('mongoose');
@@ -281,9 +283,142 @@ async function openAuthorizedSocket(payload) {
   return socket;
 }
 
+async function exerciseVirtualPlayerFleet() {
+  const response = await fetch(`${backendURL}/api/rooms/create`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      hostName: 'E2E Virtual Fleet Organizer',
+      roomName: 'E2E Virtual Fleet',
+      config: { maxPlayers: 25, gameMode: 'line', timeBetweenNumbers: 120 }
+    })
+  });
+  assert.equal(response.ok, true, `Virtual-fleet test room creation failed (HTTP ${response.status})`);
+  const created = await response.json();
+  assert.equal(created.success, true);
+  assert.match(created.room.code, /^[A-Z0-9]{6}$/);
+
+  const roomCode = created.room.code;
+  const playerCards = new Map();
+  let target;
+  let resolveBotMark;
+  const botMark = new Promise(resolve => { resolveBotMark = resolve; });
+  const behavior = new VirtualPlayerBehavior({ triviaResponseProbability: 1, voteResponseProbability: 1 });
+  const fleet = new VirtualPlayerFleet({
+    backendUrl: backendURL,
+    roomCode,
+    seed: 'e2e-virtual-fleet-seed',
+    minReactionMs: 0,
+    maxReactionMs: 0,
+    onPlayerReady: player => playerCards.set(player.alias, player),
+    configurePlayer: bot => {
+      const detachBehavior = behavior.attach(bot);
+      const onCellMarked = event => {
+        if (bot.alias === 'bot-01' && target && String(event.playerId) === String(bot.playerId) &&
+            event.row === target.row && event.col === target.col) resolveBotMark(event);
+      };
+      bot.socket.on('cell-marked', onCellMarked);
+      return () => {
+        bot.socket.off('cell-marked', onCellMarked);
+        detachBehavior?.();
+      };
+    }
+  });
+  let hostSocket;
+  let stopStatus;
+  const withTimeout = (promise, label, milliseconds = 10_000) => {
+    let timer;
+    return Promise.race([
+      promise,
+      new Promise((_, reject) => { timer = setTimeout(() => reject(new Error(`Timed out waiting for ${label}`)), milliseconds); })
+    ]).finally(() => clearTimeout(timer));
+  };
+  const waitForEvent = (socket, eventName, predicate = () => true) => new Promise((resolve, reject) => {
+    const timer = setTimeout(() => finish(new Error(`Timed out waiting for ${eventName}`)), 10_000);
+    const onEvent = event => {
+      if (predicate(event)) finish(null, event);
+    };
+    const finish = (error, event) => {
+      clearTimeout(timer);
+      socket.off(eventName, onEvent);
+      if (error) reject(error);
+      else resolve(event);
+    };
+    socket.on(eventName, onEvent);
+  });
+
+  try {
+    const status = await fleet.start();
+    assert.deepEqual(status, { requested: 24, admitted: 24, connected: 24, stopped: false });
+    hostSocket = await openAuthorizedSocket({
+      roomCode,
+      playerId: String(created.player._id),
+      hostCapability: created.hostCapability
+    });
+
+    const gameStarted = waitForEvent(hostSocket, 'game-started');
+    hostSocket.emit('start-game', { roomCode, hostCapability: created.hostCapability });
+    await withTimeout(gameStarted, 'virtual fleet game start');
+    const firstCall = await withTimeout(waitForEvent(hostSocket, 'number-called'), 'first called number');
+
+    const card = playerCards.get('bot-01');
+    assert.ok(card?.bingoCardMatrix, 'bot-01 public card was not captured');
+    for (let col = 0; col < 5 && !target; col += 1) {
+      for (let row = 0; row < 5; row += 1) {
+        const number = card.bingoCardMatrix[col][row];
+        if (Number.isInteger(number) && number !== firstCall.number) {
+          target = { number, row, col };
+          break;
+        }
+      }
+    }
+    assert.ok(target, 'bot-01 card has no uncalled number to exercise');
+
+    const targetCalled = new Promise((resolve, reject) => {
+      const timer = setTimeout(() => finish(new Error('Timed out calling the selected bot card number')), 5_000);
+      const onCalled = event => {
+        if (event?.number === target.number) finish(null, event);
+      };
+      const onError = error => finish(new Error(`Selected card number was rejected: ${error?.message || 'socket error'}`));
+      const finish = (error, event) => {
+        clearTimeout(timer);
+        hostSocket.off('number-called', onCalled);
+        hostSocket.off('error', onError);
+        if (error) reject(error);
+        else resolve(event);
+      };
+      hostSocket.on('number-called', onCalled);
+      hostSocket.on('error', onError);
+      hostSocket.emit('call-number', { roomCode, number: target.number, hostCapability: created.hostCapability });
+    });
+    await targetCalled;
+    const marked = await withTimeout(botMark, 'bot-01 public cell mark', 5_000);
+    assert.equal(marked.row, target.row);
+    assert.equal(marked.col, target.col);
+
+    const restored = await fleet.reconnect('bot-01');
+    assert.equal(restored.data.roomCode, roomCode);
+    assert.equal(String(restored.data.playerData.playerId), String(marked.playerId));
+    assert.ok(restored.data.calledNumbers.includes(target.number));
+    assert.ok(restored.data.playerData.markedCells.some(cell =>
+      Array.isArray(cell) ? cell[0] === target.row && cell[1] === target.col :
+        cell.row === target.row && cell.col === target.col
+    ));
+    assert.equal(fleet.status().connected, 24);
+    console.log('  virtual-player E2E admitted 24 players; bot-01 marked a called card number and restored its state after public reconnect');
+  } finally {
+    hostSocket?.disconnect();
+    stopStatus = await fleet.stop();
+  }
+  assert.equal(stopStatus.connected, 0);
+  assert.equal(stopStatus.stopped, true);
+}
+
 async function main() {
   const chromiumPath = findChromiumExecutable();
-  const mongo = await MongoMemoryServer.create();
+  const mongo = await MongoMemoryReplSet.create({
+    replSet: { count: 1, ip: '127.0.0.1', storageEngine: 'wiredTiger' }
+  });
   const mongoUri = mongo.getUri('bingo-e2e');
   await mongoose.connect(mongoUri);
   const ciMediaAliases = [];
@@ -368,6 +503,7 @@ async function main() {
   try {
     await waitForHttp(backendURL + '/api/health');
     await waitForHttp(baseURL);
+    await exerciseVirtualPlayerFleet();
 
     browser = await chromium.launch({ headless: true, executablePath: chromiumPath });
 
@@ -745,7 +881,11 @@ async function main() {
       (game) => !game?.activeChallenge,
       'automatic trivia completion'
     );
-    await configureRoom(hostPage, roomCode, hostSession.hostCapability, { challengeFrequency: 10 });
+    // Keep the scheduler quiet while the following challenges are driven manually.
+    await configureRoom(hostPage, roomCode, hostSession.hostCapability, {
+      challengeFrequency: 10,
+      timeBetweenNumbers: 120
+    });
 
     const challengePages = [['player-a', playerAPage], ['player-b', playerBPage]];
     const launchChallenge = async (type) => {
@@ -893,13 +1033,14 @@ async function main() {
     const completedRoom = await Room.findOne({ code: roomCode });
     assert.equal(completedRoom.gameState, 'playing', 'Bingo did not resume after interactive group completion');
 
+    const timeoutStartedAt = Date.now();
     await launchChallenge('group');
     await waitForChallengePage(challengePages, 'group');
-    const timeoutGroup = await gameForRoom();
-    assert.ok(timeoutGroup?.activeChallenge?.id, 'Timeout group challenge was not persisted');
-    await waitForMongoDocument(gameForRoom, (game) => !game?.activeChallenge, 'group timeout recovery', 40000);
-    const timeoutRoom = await Room.findOne({ code: roomCode });
-    assert.equal(timeoutRoom.gameState, 'playing', 'Bingo did not resume after group timeout');
+    // The host control socket can reclaim and disconnect the organizer page's socket.
+    // Observe the same public state transition on the independently connected player UI.
+    await playerAPage.locator('.status-badge.paused').waitFor({ state: 'visible', timeout: 10000 });
+    await playerAPage.locator('.status-badge.playing').waitFor({ state: 'visible', timeout: 40000 });
+    assert.ok(Date.now() - timeoutStartedAt >= 25000, 'Group challenge recovered before its timeout');
     await launchChallenge('karaoke');
     await waitForChallengePage([['player-a', playerAPage], ['player-b', playerBPage], ['tv', tvPage]], 'karaoke');
     const karaokeGame = await gameForRoom();

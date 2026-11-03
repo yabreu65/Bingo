@@ -3,7 +3,9 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node media-audit.mjs && node run-phase1-parity.mjs && node run-e2e.mjs && node run-phase1-engine.mjs",
+    "test": "npm run test:virtual-players && node media-audit.mjs && node run-phase1-parity.mjs && node run-e2e.mjs && node run-phase1-engine.mjs",
+    "test:virtual-players": "node --test virtual-player-fleet.test.mjs virtual-player-behavior.test.mjs contabo-one-bot-preflight.test.mjs",
+    "virtual-players": "node virtual-player-bots.mjs",
     "test:local": "MEDIA_AUDIT_MODE=local npm test",
     "test:ci": "MEDIA_AUDIT_MODE=ci npm test",
     "test:media": "npm run test:media:local",
