@@ -1188,7 +1188,7 @@ export default function OrganizerDashboard({ roomData }) {
               <p className="text-center text-xs text-slate-400 mt-2 mb-3">
                 Escanea o comparte
               </p>
-              <div className="space-y-2">
+              <div className="organizer-access-actions flex flex-col gap-2">
                 <ActionButton
                   icon={<LinkIcon size={16} />}
                   label="Copiar URL"
