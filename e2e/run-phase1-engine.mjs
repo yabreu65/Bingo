@@ -16,7 +16,7 @@ const requireFromE2E = createRequire(import.meta.url);
 const requireFromBackend = createRequire(join(backendDir, 'server.js'));
 const requireFromFrontend = createRequire(join(frontendDir, 'package.json'));
 const { chromium } = requireFromE2E('playwright');
-const { MongoMemoryServer } = requireFromBackend('mongodb-memory-server');
+const { MongoMemoryReplSet } = requireFromBackend('mongodb-memory-server');
 const { io: socketIO } = requireFromFrontend('socket.io-client');
 const mongoose = requireFromBackend('mongoose');
 const Room = requireFromBackend(join(backendDir, 'models/Room.js'));
@@ -165,7 +165,10 @@ async function configureRoom(hostPage, roomCode, hostCapability, gameMode) {
           timeBetweenNumbers: 120,
           challengeFrequency: 10,
           tieBreakEnabled: false,
-          gameMode: mode
+          // Each scenario tests exactly one winning pattern, even though new
+          // rooms default to three combined patterns for ordinary play.
+          gameMode: mode,
+          gameModes: [mode]
         }
       })
     });
@@ -537,7 +540,15 @@ async function runStateAndStatsScenario(browser) {
       'game resumed'
     );
 
+    // A visually restored card may render before its new Socket.IO session
+    // owns the player in Mongo. Marking requires that exact socket ownership.
+    const previousPlayerSocketId = (await Player.findById(playerASession.playerId)).socketId;
     await playerAPage.reload();
+    await waitForMongoDocument(
+      () => Player.findById(playerASession.playerId),
+      player => player.isConnected && player.socketId && player.socketId !== previousPlayerSocketId,
+      'player socket ownership restored after reload'
+    );
     await waitForBody(playerAPage, /Números cantados \([1-9][0-9]*\)/, 10000);
     const stateCellSelector = `[data-testid="bingo-card-cell"][data-row="${stateCell[0]}"][data-col="${stateCell[1]}"]`;
     await playerAPage.waitForFunction(
@@ -640,7 +651,11 @@ async function runStateAndStatsScenario(browser) {
 
 async function main() {
   const chromiumPath = findChromiumExecutable();
-  const mongo = await MongoMemoryServer.create();
+  // Admission transactions require a writable replica set with the same
+  // index guarantees as production. This Mongo fixture is disposable.
+  const mongo = await MongoMemoryReplSet.create({
+    replSet: { count: 1, storageEngine: 'wiredTiger' }
+  });
   const mongoUri = mongo.getUri('bingo-phase1-engine');
   await mongoose.connect(mongoUri);
 
