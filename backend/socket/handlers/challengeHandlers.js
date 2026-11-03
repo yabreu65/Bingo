@@ -56,6 +56,23 @@ async function finishChallengeUnlocked(io, actor, { result, publicResult = resul
   const challengeId = activeChallenge.id;
   const gameHandlers = require('./gameHandlers');
 
+  // Claim completion in MongoDB, not from the pre-lock snapshot. A second
+  // process/socket may have read the same active challenge before this lock.
+  const claimed = await Game.findOneAndUpdate({
+    _id: game._id || room.currentGame,
+    'activeChallenge.id': challengeId,
+    'activeChallenge.type': activeChallenge.type,
+    'activeChallenge.pointsAwarded': { $ne: true }
+  }, {
+    $set: { activeChallenge: null },
+    $push: { gameEvents: {
+      type: 'challenge_completed', player: activeChallenge.player,
+      data: { challengeId, challengeType: activeChallenge.type, result, responses: activeChallenge.responses || [] },
+      timestamp: new Date()
+    } }
+  }, { new: true });
+  if (!claimed) return false;
+
   activeChallenge.status = 'completed';
   activeChallenge.completedAt = new Date();
   activeChallenge.result = result;
@@ -73,7 +90,8 @@ async function finishChallengeUnlocked(io, actor, { result, publicResult = resul
     timestamp: new Date()
   });
   game.activeChallenge = null;
-  if (typeof game.save === 'function') await game.save();
+  // The conditional update above already persisted completion and its event.
+  // Do not save a stale game snapshot over a newly created challenge.
 
   const uniquePlayerIds = [...new Set(pointsPlayerIds.map(playerId => playerId?.toString()).filter(Boolean))];
   for (const playerId of uniquePlayerIds) {
@@ -106,6 +124,7 @@ async function finishChallengeUnlocked(io, actor, { result, publicResult = resul
   await gameHandlers.scheduleRoomInterval(io, roomCode);
   const { ensureWatchdog } = require('../utils/roomTimer');
   ensureWatchdog(roomCode, (rc) => gameHandlers.scheduleRoomInterval(io, rc), room.config);
+  return true;
 }
 
 async function finishChallenge(io, actor, options) {
@@ -189,12 +208,7 @@ function handleChallengeAnswer(io, socket) {
         ];
         actor.activeChallenge.status = 'evaluating';
         actor.activeChallenge.result = { answer, success: isCorrect, points };
-        socket.emit('challenge-result', {
-          playerId,
-          challengeId,
-          result: { answer, success: isCorrect, points }
-        });
-        await finishChallenge(io, actor, {
+        const completed = await finishChallenge(io, actor, {
           result: { answer, success: isCorrect, points },
           publicResult: {
             playerId,
@@ -207,6 +221,8 @@ function handleChallengeAnswer(io, socket) {
           pointsPlayerIds: [playerId],
           broadcastResult: false
         });
+        if (!completed) return;
+        socket.emit('challenge-result', { playerId, challengeId, result: { answer, success: isCorrect, points } });
         io.to(roomCode).emit('challenge-result-public', {
           playerId,
           playerName: actor.player.name,
@@ -466,13 +482,27 @@ function handleTriviaAnswered(io, socket) {
         return socket.emit('error', { message: 'Ya respondiste este desafío' });
       }
       const points = getChallengePoints('trivia', { success: isCorrect, configuredPoints: activeChallenge.points });
-      activeChallenge.responses = [
-        ...existingResponses,
-        { playerId, answer: answerNum, success: isCorrect, points, submittedAt: new Date() }
-      ];
-      activeChallenge.status = 'evaluating';
-      activeChallenge.result = { answer: answerNum, success: isCorrect, points };
-      if (typeof game.save === 'function') await game.save();
+      const response = { playerId, answer: answerNum, success: isCorrect, points, submittedAt: new Date() };
+      const claimedGame = await Game.findOneAndUpdate(
+        {
+          _id: game._id,
+          'activeChallenge.id': activeChallenge.id,
+          'activeChallenge.type': 'trivia',
+          'activeChallenge.player': challengePlayerId,
+          'activeChallenge.responses.playerId': { $ne: playerId }
+        },
+        {
+          $push: { 'activeChallenge.responses': response },
+          $set: {
+            'activeChallenge.status': 'evaluating',
+            'activeChallenge.result': { answer: answerNum, success: isCorrect, points }
+          }
+        },
+        { new: true }
+      );
+      if (!claimedGame) {
+        return socket.emit('error', { message: 'Ya respondiste este desafío' });
+      }
 
       if (typeof Player.findOneAndUpdate === 'function' && playerId && actor.room?._id) {
         const statUpdate = {

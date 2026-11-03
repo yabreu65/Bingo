@@ -62,7 +62,9 @@ function contentToChallenge(content) {
   if (base.kind === 'trivia') return { question: base.statement, options: base.options, correct: base.correctAnswer, points, duration };
   if (base.kind === 'riddle') return { prompt: base.statement, answers: base.acceptedAnswers, id: base._id?.toString(), points, duration };
   if (base.kind === 'karaoke') return { text: base.statement, title: base.title || base.statement, artist: base.artist, localFile: base.resourceId, karaokeId: base._id?.toString(), points, duration };
-  return { text: base.statement, deezerId: base.resourceId, points, duration };
+  const localMp3 = ['dance', 'group'].includes(base.kind) && base.sourceType === 'local' && /^[a-z0-9-]+\.mp3$/.test(base.resourceId || '');
+  return { text: base.statement, deezerId: localMp3 ? undefined : base.resourceId,
+    audioFile: localMp3 ? base.resourceId : undefined, points, duration };
 }
 
 module.exports = { CONTENT_KINDS, MAX_IMPORT_ITEMS, normalizeContent, parseImport, contentToChallenge };

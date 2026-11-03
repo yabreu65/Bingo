@@ -10,9 +10,10 @@ const normalizeAnswer = (value) => String(value ?? '')
 
 const evaluateRiddleAnswer = (answer, acceptedAnswers) => {
   if (!Array.isArray(acceptedAnswers) || acceptedAnswers.length === 0) return false;
-  const normalizedAnswer = normalizeAnswer(answer);
+  const withoutArticle = (value) => value.replace(/^(?:el|la|los|las|un|una|unos|unas)\s+/, '');
+  const normalizedAnswer = withoutArticle(normalizeAnswer(answer));
   if (!normalizedAnswer) return false;
-  return acceptedAnswers.some((accepted) => normalizeAnswer(accepted) === normalizedAnswer);
+  return acceptedAnswers.some((accepted) => withoutArticle(normalizeAnswer(accepted)) === normalizedAnswer);
 };
 
 const getChallengePoints = (type, outcome = {}) => {

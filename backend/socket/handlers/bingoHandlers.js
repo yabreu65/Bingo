@@ -265,7 +265,8 @@ function handleClaimBingo(io, socket) {
       io.to(roomCode).emit('bingo-claimed', { playerId, bingoType });
 
       const configuredType = room.config?.gameMode || game.gameMode || 'full';
-      if (bingoType !== configuredType) {
+      const enabledModes = room.config?.gameModes?.length ? room.config.gameModes : (game.gameModes?.length ? game.gameModes : [configuredType]);
+      if (!enabledModes.includes(bingoType)) {
         io.to(roomCode).emit('bingo-rejected', { playerId, bingoType });
         return;
       }
@@ -779,21 +780,23 @@ function handleVerifyBingoManual(io, socket) {
         return socket.emit('error', error);
       }
 
+      let winningManualMode = room.config?.gameMode || game.gameMode || 'full';
       if (Array.isArray(game.calledNumbers)) {
-        const bingoType = room.config?.gameMode || game.gameMode || 'full';
+        const enabledModes = room.config?.gameModes?.length ? room.config.gameModes : (game.gameModes?.length ? game.gameModes : [winningManualMode]);
         const manualCard = getCard(cardNumber);
         const markedCells = getCalledMarkedCells(manualCard, game.calledNumbers);
-        const validation = validateBingoClaim({
+        const validMode = enabledModes.find(bingoType => validateBingoClaim({
           matrix: manualCard,
           markedCells,
           calledNumbers: game.calledNumbers,
           bingoType
-        });
-        if (!validation.isValid) {
+        }).isValid);
+        if (!validMode) {
           const error = 'El cartón manual no cumple la modalidad activa';
           ack?.({ success: false, error });
           return socket.emit('error', { message: error });
         }
+        winningManualMode = validMode;
       }
 
       // Finalizar juego con jugador manual como ganador
@@ -806,7 +809,7 @@ function handleVerifyBingoManual(io, socket) {
         cardNumber: manualPlayer.cardNumber,
         playerId: manualPlayer.playerId,
         isManualPlayer: true,
-        achievement: 'full',
+        achievement: winningManualMode,
         timestamp: new Date()
       });
       await game.save();
@@ -822,7 +825,7 @@ function handleVerifyBingoManual(io, socket) {
         playerName: manualPlayer.playerName,
         cardNumber: manualPlayer.cardNumber,
         playerId: manualPlayer.playerId,
-        bingoType: 'full'
+        bingoType: winningManualMode
       });
 
       io.to(room.code).emit('game-state-changed', { state: 'finished' });
@@ -831,7 +834,7 @@ function handleVerifyBingoManual(io, socket) {
         winnerName: manualPlayer.playerName,
         cardNumber: manualPlayer.cardNumber,
         isManualPlayer: true,
-        achievement: 'full'
+        achievement: winningManualMode
       });
 
       logger.logGameEvent(room.code, 'BINGO manual verificado', {
