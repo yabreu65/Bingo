@@ -16,7 +16,7 @@ const requireFromE2E = createRequire(import.meta.url);
 const requireFromBackend = createRequire(join(backendDir, 'server.js'));
 const requireFromFrontend = createRequire(join(frontendDir, 'package.json'));
 const { chromium } = requireFromE2E('playwright');
-const { MongoMemoryServer } = requireFromBackend('mongodb-memory-server');
+const { MongoMemoryReplSet } = requireFromBackend('mongodb-memory-server');
 const { io: socketIO } = requireFromFrontend('socket.io-client');
 const mongoose = requireFromBackend('mongoose');
 const Room = requireFromBackend(join(backendDir, 'models/Room.js'));
@@ -165,7 +165,10 @@ async function configureRoom(hostPage, roomCode, hostCapability, gameMode) {
           timeBetweenNumbers: 120,
           challengeFrequency: 10,
           tieBreakEnabled: false,
-          gameMode: mode
+          // Each scenario tests exactly one winning pattern, even though new
+          // rooms default to three combined patterns for ordinary play.
+          gameMode: mode,
+          gameModes: [mode]
         }
       })
     });
@@ -254,6 +257,16 @@ async function markCell(page, session, row, col) {
     `[data-testid="bingo-card-cell"][data-row="${row}"][data-col="${col}"]`
   );
   await cell.waitFor({ state: 'visible', timeout: 10000 });
+  // The organizer socket can call a number before the player browser receives
+  // the corresponding Socket.IO update. Only click once the visual card marks
+  // the called value as available; this keeps the E2E aligned with a real user.
+  await page.waitForFunction(
+    ({ row: targetRow, col: targetCol }) => document.querySelector(
+      `[data-testid="bingo-card-cell"][data-row="${targetRow}"][data-col="${targetCol}"]`
+    )?.classList.contains('available'),
+    { row, col },
+    { timeout: 10000 }
+  );
   await cell.click({ force: true });
   try {
     await waitForMongoDocument(
@@ -527,7 +540,15 @@ async function runStateAndStatsScenario(browser) {
       'game resumed'
     );
 
+    // A visually restored card may render before its new Socket.IO session
+    // owns the player in Mongo. Marking requires that exact socket ownership.
+    const previousPlayerSocketId = (await Player.findById(playerASession.playerId)).socketId;
     await playerAPage.reload();
+    await waitForMongoDocument(
+      () => Player.findById(playerASession.playerId),
+      player => player.isConnected && player.socketId && player.socketId !== previousPlayerSocketId,
+      'player socket ownership restored after reload'
+    );
     await waitForBody(playerAPage, /Números cantados \([1-9][0-9]*\)/, 10000);
     const stateCellSelector = `[data-testid="bingo-card-cell"][data-row="${stateCell[0]}"][data-col="${stateCell[1]}"]`;
     await playerAPage.waitForFunction(
@@ -630,7 +651,11 @@ async function runStateAndStatsScenario(browser) {
 
 async function main() {
   const chromiumPath = findChromiumExecutable();
-  const mongo = await MongoMemoryServer.create();
+  // Admission transactions require a writable replica set with the same
+  // index guarantees as production. This Mongo fixture is disposable.
+  const mongo = await MongoMemoryReplSet.create({
+    replSet: { count: 1, storageEngine: 'wiredTiger' }
+  });
   const mongoUri = mongo.getUri('bingo-phase1-engine');
   await mongoose.connect(mongoUri);
 

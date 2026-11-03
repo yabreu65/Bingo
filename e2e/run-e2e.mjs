@@ -1,8 +1,11 @@
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
+import { VirtualPlayerBehavior } from './virtual-player-behavior.mjs';
+import { VirtualPlayerFleet } from './virtual-player-fleet.mjs';
+import { execFileSync, spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
+import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 
 const root = resolve(fileURLToPath(new URL('..', import.meta.url)));
@@ -16,12 +19,13 @@ const ciMediaFixtureSource = join(root, 'e2e', 'fixtures', 'media');
 const ciMediaFixturePublicDir = join(frontendDir, 'public', 'music', ciMediaFixtureName);
 const ciKaraokeAliasSource = join(ciMediaFixtureSource, 'ci-karaoke.mp4');
 const ciMediaAliasSource = ciKaraokeAliasSource;
+const localTvMediaOrigin = 'http://127.0.0.1:8787';
 
 const requireFromE2E = createRequire(import.meta.url);
 const requireFromBackend = createRequire(join(backendDir, 'server.js'));
 const requireFromFrontend = createRequire(join(frontendDir, 'package.json'));
 const { chromium } = requireFromE2E('playwright');
-const { MongoMemoryServer } = requireFromBackend('mongodb-memory-server');
+const { MongoMemoryReplSet } = requireFromBackend('mongodb-memory-server');
 const { CHALLENGE_POOLS } = requireFromBackend(join(backendDir, 'constants/index.js'));
 const { io: socketIO } = requireFromFrontend('socket.io-client');
 const mongoose = requireFromBackend('mongoose');
@@ -279,12 +283,147 @@ async function openAuthorizedSocket(payload) {
   return socket;
 }
 
+async function exerciseVirtualPlayerFleet() {
+  const response = await fetch(`${backendURL}/api/rooms/create`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      hostName: 'E2E Virtual Fleet Organizer',
+      roomName: 'E2E Virtual Fleet',
+      config: { maxPlayers: 25, gameMode: 'line', timeBetweenNumbers: 120 }
+    })
+  });
+  assert.equal(response.ok, true, `Virtual-fleet test room creation failed (HTTP ${response.status})`);
+  const created = await response.json();
+  assert.equal(created.success, true);
+  assert.match(created.room.code, /^[A-Z0-9]{6}$/);
+
+  const roomCode = created.room.code;
+  const playerCards = new Map();
+  let target;
+  let resolveBotMark;
+  const botMark = new Promise(resolve => { resolveBotMark = resolve; });
+  const behavior = new VirtualPlayerBehavior({ triviaResponseProbability: 1, voteResponseProbability: 1 });
+  const fleet = new VirtualPlayerFleet({
+    backendUrl: backendURL,
+    roomCode,
+    seed: 'e2e-virtual-fleet-seed',
+    minReactionMs: 0,
+    maxReactionMs: 0,
+    onPlayerReady: player => playerCards.set(player.alias, player),
+    configurePlayer: bot => {
+      const detachBehavior = behavior.attach(bot);
+      const onCellMarked = event => {
+        if (bot.alias === 'bot-01' && target && String(event.playerId) === String(bot.playerId) &&
+            event.row === target.row && event.col === target.col) resolveBotMark(event);
+      };
+      bot.socket.on('cell-marked', onCellMarked);
+      return () => {
+        bot.socket.off('cell-marked', onCellMarked);
+        detachBehavior?.();
+      };
+    }
+  });
+  let hostSocket;
+  let stopStatus;
+  const withTimeout = (promise, label, milliseconds = 10_000) => {
+    let timer;
+    return Promise.race([
+      promise,
+      new Promise((_, reject) => { timer = setTimeout(() => reject(new Error(`Timed out waiting for ${label}`)), milliseconds); })
+    ]).finally(() => clearTimeout(timer));
+  };
+  const waitForEvent = (socket, eventName, predicate = () => true) => new Promise((resolve, reject) => {
+    const timer = setTimeout(() => finish(new Error(`Timed out waiting for ${eventName}`)), 10_000);
+    const onEvent = event => {
+      if (predicate(event)) finish(null, event);
+    };
+    const finish = (error, event) => {
+      clearTimeout(timer);
+      socket.off(eventName, onEvent);
+      if (error) reject(error);
+      else resolve(event);
+    };
+    socket.on(eventName, onEvent);
+  });
+
+  try {
+    const status = await fleet.start();
+    assert.deepEqual(status, { requested: 24, admitted: 24, connected: 24, stopped: false });
+    hostSocket = await openAuthorizedSocket({
+      roomCode,
+      playerId: String(created.player._id),
+      hostCapability: created.hostCapability
+    });
+
+    const gameStarted = waitForEvent(hostSocket, 'game-started');
+    hostSocket.emit('start-game', { roomCode, hostCapability: created.hostCapability });
+    await withTimeout(gameStarted, 'virtual fleet game start');
+    const firstCall = await withTimeout(waitForEvent(hostSocket, 'number-called'), 'first called number');
+
+    const card = playerCards.get('bot-01');
+    assert.ok(card?.bingoCardMatrix, 'bot-01 public card was not captured');
+    for (let col = 0; col < 5 && !target; col += 1) {
+      for (let row = 0; row < 5; row += 1) {
+        const number = card.bingoCardMatrix[col][row];
+        if (Number.isInteger(number) && number !== firstCall.number) {
+          target = { number, row, col };
+          break;
+        }
+      }
+    }
+    assert.ok(target, 'bot-01 card has no uncalled number to exercise');
+
+    const targetCalled = new Promise((resolve, reject) => {
+      const timer = setTimeout(() => finish(new Error('Timed out calling the selected bot card number')), 5_000);
+      const onCalled = event => {
+        if (event?.number === target.number) finish(null, event);
+      };
+      const onError = error => finish(new Error(`Selected card number was rejected: ${error?.message || 'socket error'}`));
+      const finish = (error, event) => {
+        clearTimeout(timer);
+        hostSocket.off('number-called', onCalled);
+        hostSocket.off('error', onError);
+        if (error) reject(error);
+        else resolve(event);
+      };
+      hostSocket.on('number-called', onCalled);
+      hostSocket.on('error', onError);
+      hostSocket.emit('call-number', { roomCode, number: target.number, hostCapability: created.hostCapability });
+    });
+    await targetCalled;
+    const marked = await withTimeout(botMark, 'bot-01 public cell mark', 5_000);
+    assert.equal(marked.row, target.row);
+    assert.equal(marked.col, target.col);
+
+    const restored = await fleet.reconnect('bot-01');
+    assert.equal(restored.data.roomCode, roomCode);
+    assert.equal(String(restored.data.playerData.playerId), String(marked.playerId));
+    assert.ok(restored.data.calledNumbers.includes(target.number));
+    assert.ok(restored.data.playerData.markedCells.some(cell =>
+      Array.isArray(cell) ? cell[0] === target.row && cell[1] === target.col :
+        cell.row === target.row && cell.col === target.col
+    ));
+    assert.equal(fleet.status().connected, 24);
+    console.log('  virtual-player E2E admitted 24 players; bot-01 marked a called card number and restored its state after public reconnect');
+  } finally {
+    hostSocket?.disconnect();
+    stopStatus = await fleet.stop();
+  }
+  assert.equal(stopStatus.connected, 0);
+  assert.equal(stopStatus.stopped, true);
+}
+
 async function main() {
   const chromiumPath = findChromiumExecutable();
-  const mongo = await MongoMemoryServer.create();
+  const mongo = await MongoMemoryReplSet.create({
+    replSet: { count: 1, ip: '127.0.0.1', storageEngine: 'wiredTiger' }
+  });
   const mongoUri = mongo.getUri('bingo-e2e');
   await mongoose.connect(mongoUri);
   const ciMediaAliases = [];
+  let localTvMediaRoot;
+  const localTvMode = process.env.LOCAL_TV_MEDIA_E2E === '1';
   if (process.env.MEDIA_AUDIT_MODE === 'ci') {
     cpSync(ciMediaFixtureSource, ciMediaFixturePublicDir, { recursive: true });
     const playlistSource = readFileSync(join(frontendDir, 'src/config/musicPlaylists.js'), 'utf8');
@@ -304,6 +443,37 @@ async function main() {
       ciMediaAliases.push(target);
     }
   }
+  if (localTvMode) {
+    localTvMediaRoot = mkdtempSync(join(tmpdir(), 'bingo-local-tv-'));
+    const playlistSource = readFileSync(join(frontendDir, 'src/config/musicPlaylists.js'), 'utf8');
+    const localFiles = [...playlistSource.matchAll(/"localFile":\s*"([^"]+)"/g)].map(match => match[1]);
+    for (const localFile of localFiles) {
+      const target = join(localTvMediaRoot, 'music', localFile);
+      mkdirSync(join(target, '..'), { recursive: true });
+      cpSync(ciKaraokeAliasSource, target);
+    }
+    mkdirSync(join(localTvMediaRoot, 'sounds'), { recursive: true });
+    cpSync(join(ciMediaFixtureSource, 'ci-tone.mp3'), join(localTvMediaRoot, 'sounds', 'aplauso.mp3'));
+    cpSync(join(ciMediaFixtureSource, 'ci-tone.mp3'), join(localTvMediaRoot, 'sounds', 'burro.mp3'));
+    for (const karaoke of CHALLENGE_POOLS.karaoke || []) {
+      const target = join(localTvMediaRoot, 'music', 'karaoke', karaoke.localFile);
+      mkdirSync(join(target, '..'), { recursive: true });
+      cpSync(ciKaraokeAliasSource, target);
+    }
+    const localManifest = join(localTvMediaRoot, 'tv-media-manifest.json');
+    execFileSync(process.execPath, [
+      join(root, 'tools/generate-local-tv-manifest.mjs'),
+      '--root', localTvMediaRoot,
+      '--out', localManifest
+    ], { cwd: root, stdio: 'inherit' });
+    startProcess('local-tv-media', process.execPath, [
+      join(root, 'tools/local-tv-media-server.mjs'),
+      '--root', localTvMediaRoot,
+      '--manifest', localManifest,
+      '--port', '8787'
+    ], root, {});
+    await waitForHttp(localTvMediaOrigin + '/health');
+  }
 
   startProcess('backend', process.execPath, ['server.js'], backendDir, {
     NODE_ENV: 'test',
@@ -320,7 +490,8 @@ async function main() {
   startProcess('frontend', 'npm', ['run', 'dev', '--', '--host', '127.0.0.1', '--port', '5174'], frontendDir, {
     BROWSER: 'none',
     VITE_BACKEND_URL: backendURL,
-    VITE_NETWORK_IP: '127.0.0.1'
+    VITE_NETWORK_IP: '127.0.0.1',
+    ...(localTvMode ? { VITE_LOCAL_TV_MEDIA_ORIGIN: localTvMediaOrigin } : {})
   });
 
   let browser;
@@ -332,6 +503,7 @@ async function main() {
   try {
     await waitForHttp(backendURL + '/api/health');
     await waitForHttp(baseURL);
+    await exerciseVirtualPlayerFleet();
 
     browser = await chromium.launch({ headless: true, executablePath: chromiumPath });
 
@@ -357,7 +529,18 @@ async function main() {
       typeof value.hostCapability === 'string' && value.hostCapability.length === 43
     );
     const roomCode = hostSession.roomCode;
-    await configureRoom(hostPage, roomCode, hostSession.hostCapability, { challengeFrequency: 10 });
+    await configureRoom(hostPage, roomCode, hostSession.hostCapability, {
+      challengeFrequency: 10,
+      ...(localTvMode ? {
+        eventMode: 'REMOTE_PRESENTIAL',
+        multimediaPolicy: {
+          primarySurface: 'tv',
+          tvMediaSource: 'LOCAL_TV',
+          playerPlayback: 'disabled',
+          allowExternalSources: false
+        }
+      } : {})
+    });
     console.log('  room ' + roomCode + ' created with isolated config');
 
     console.log('E2E 1b/10: organizer creates managed content through the browser');
@@ -410,10 +593,15 @@ async function main() {
     await playlistArticle.getByRole('button', { name: 'Asignar' }).click();
     await waitForBody(hostPage, /Playlist asignada/);
     await hostPage.getByRole('button', { name: 'Sala', exact: true }).click();
+    if (localTvMode) {
+      await hostPage.getByLabel('Modalidad del evento').selectOption('REMOTE_PRESENTIAL');
+      await hostPage.getByLabel('Fuente multimedia de la TV').selectOption('LOCAL_TV');
+    }
     await hostPage.getByLabel('Intervalo (s)').fill('7');
     await hostPage.getByLabel('Frecuencia de retos').fill('2');
     await hostPage.getByLabel('Máximo de jugadores').fill('12');
-    await hostPage.getByLabel('Modalidad').selectOption('line');
+    await hostPage.getByRole('checkbox', { name: 'Línea', exact: true }).check();
+    assert.equal(await hostPage.getByRole('checkbox', { name: 'Cartón completo', exact: true }).isChecked(), false);
     await hostPage.getByRole('checkbox', { name: 'Desempate habilitado' }).check();
     await hostPage.getByLabel('Playlist activa').selectOption({ label: 'Playlist E2E local' });
     await hostPage.getByRole('button', { name: /Guardar/ }).click();
@@ -426,9 +614,14 @@ async function main() {
     assert.equal(configuredRoom.config.tieBreakEnabled, true);
     assert.equal(configuredRoom.config.activePlaylist.name, 'Playlist E2E local');
     assert.equal(configuredRoom.config.activePlaylist.tracks.length, 2);
+    if (localTvMode) {
+      assert.equal(configuredRoom.config.eventMode, 'REMOTE_PRESENTIAL');
+      assert.equal(configuredRoom.config.multimediaPolicy.tvMediaSource, 'LOCAL_TV');
+    }
     await hostPage.getByLabel('Frecuencia de retos').fill('10');
     await hostPage.getByLabel('Intervalo (s)').fill('7');
-    await hostPage.getByLabel('Modalidad').selectOption('full');
+    await hostPage.getByRole('checkbox', { name: 'Cartón completo', exact: true }).check();
+    assert.equal(await hostPage.getByRole('checkbox', { name: 'Línea', exact: true }).isChecked(), false);
     await hostPage.getByLabel('Máximo de jugadores').fill('50');
     await hostPage.getByRole('button', { name: /Guardar/ }).click();
     await waitForBody(hostPage, /Configuración guardada/);
@@ -471,6 +664,33 @@ async function main() {
 
     const playerASession = await joinPlayer(playerAPage, 'Jugador A', 1);
     const playerBSession = await joinPlayer(playerBPage, 'Jugador B', 2);
+    const disabledPlayerMediaRequests = [];
+    const captureDisabledPlayerMedia = (request) => {
+      if (/\/music\//.test(request.url())) disabledPlayerMediaRequests.push(request.url());
+    };
+    playerAPage.on('request', captureDisabledPlayerMedia);
+    await configureRoom(hostPage, roomCode, hostSession.hostCapability, {
+      multimediaPolicy: {
+        primarySurface: 'tv',
+        playerPlayback: 'disabled',
+        allowExternalSources: false
+      }
+    });
+    await playerAPage.reload();
+    await waitForBody(playerAPage, /Números cantados|Mi Cartón|Esperando/);
+    assert.equal(await playerAPage.locator('.music-toggle-btn').count(), 0, 'Disabled player playback mounted a music control');
+    assert.deepEqual(disabledPlayerMediaRequests, [], 'Disabled player playback requested local media: ' + disabledPlayerMediaRequests.join(', '));
+    console.log('  disabled player playback mounted no media element and made no /music/ requests');
+    await configureRoom(hostPage, roomCode, hostSession.hostCapability, {
+      multimediaPolicy: {
+        primarySurface: 'tv',
+        playerPlayback: 'optional',
+        allowExternalSources: false
+      }
+    });
+    await playerAPage.reload();
+    await waitForBody(playerAPage, /Números cantados|Mi Cartón|Esperando/);
+    playerAPage.off('request', captureDisabledPlayerMedia);
     await playerAPage.locator('.music-toggle-btn').click({ force: true });
     await waitForBody(playerAPage, /Pista visual uno|Pista visual dos/);
     console.log('  player consumed the active room playlist through the visual music player');
@@ -513,23 +733,30 @@ async function main() {
     const popupPromise = hostPage.waitForEvent('popup', { timeout: 10000 });
     await hostPage.getByRole('button', { name: /Abrir TV/ }).click();
     const tvPage = await popupPromise;
+    const centralTvMediaRequests = [];
+    if (localTvMode) {
+      tvPage.on('request', request => {
+        if (request.url().startsWith(baseURL) && /\/music\//.test(request.url())) {
+          centralTvMediaRequests.push(request.url());
+        }
+      });
+    }
     await tvPage.waitForLoadState('domcontentloaded');
     await waitForBody(tvPage, /Bingo Bailable|Bingo Navideño/);
     await waitForBody(tvPage, new RegExp(roomCode));
     const musicSource = await tvPage.locator('.video-wrapper video source').getAttribute('src');
-    assert.ok(musicSource && musicSource.includes('/music/'), 'TV music source missing: ' + musicSource);
+    if (localTvMode) {
+      assert.match(musicSource || '', new RegExp(`${localTvMediaOrigin}/media/m_[0-9a-f]+`), 'TV did not resolve media to the loopback service: ' + musicSource);
+    } else {
+      assert.ok(musicSource && musicSource.includes('/music/'), 'TV music source missing: ' + musicSource);
+    }
     await tvPage.waitForFunction(() => {
       const video = document.querySelector('.video-wrapper video');
       return Boolean(video?.currentSrc) && video.readyState >= 2;
     }, null, { timeout: 30000 });
-    const tvPlayback = await tvPage.locator('.video-wrapper video').evaluate(async (video) => {
-      video.muted = true;
-      video.play().catch(() => {});
-      await new Promise(resolve => setTimeout(resolve, 500));
-      return { readyState: video.readyState, paused: video.paused, duration: video.duration };
-    });
-    assert.ok(tvPlayback.readyState >= 2 && !tvPlayback.paused && tvPlayback.duration > 0,
-      `TV media did not start: ${JSON.stringify(tvPlayback)}`);
+    // The TV must remain silent while showing its waiting/QR screen.
+    assert.equal(await tvPage.locator('.video-wrapper video').evaluate(video => video.paused), true,
+      'TV played music before the Bingo started');
     const tvInitialText = await tvPage.locator('body').innerText();
     assert.match(tvInitialText, /Bingo Bailable/);
     await waitForBody(tvPage, /En Espera|En Juego|CANTADOS|Únete al Bingo/);
@@ -539,6 +766,23 @@ async function main() {
     await waitForBody(playerAPage, /En Juego|Números cantados/);
     await waitForBody(playerBPage, /En Juego|Números cantados/);
     await waitForBody(tvPage, /En Juego|PAUSADO|CANTADOS|Números Cantados|Número/, 20000);
+    // Once the organizer starts the game, playback is allowed. The CI media
+    // fixture is muted to avoid browser audio-autoplay policy restrictions.
+    const tvPlayback = await tvPage.locator('.video-wrapper video').evaluate(async (video) => {
+      video.muted = true;
+      video.play().catch(() => {});
+      await new Promise(resolve => setTimeout(resolve, 500));
+      return { readyState: video.readyState, paused: video.paused, duration: video.duration };
+    });
+    assert.ok(tvPlayback.readyState >= 2 && !tvPlayback.paused && tvPlayback.duration > 0,
+      `TV media did not start: ${JSON.stringify(tvPlayback)}`);
+    if (localTvMode) {
+      await tvPage.locator('[data-testid="local-tv-media-status"]')
+        .filter({ hasText: /reproducción activa/ })
+        .waitFor({ state: 'visible', timeout: 10000 });
+      assert.deepEqual(centralTvMediaRequests, [], 'LOCAL_TV requested media from the central server');
+    }
+
     await waitForBody(playerAPage, /Números cantados \([1-9]/, 12000);
     const playerNumber = await playerAPage.locator('.called-number').first().innerText();
     await waitForBody(tvPage, new RegExp('\\b' + playerNumber + '\\b'), 5000);
@@ -645,7 +889,11 @@ async function main() {
       (game) => !game?.activeChallenge,
       'automatic trivia completion'
     );
-    await configureRoom(hostPage, roomCode, hostSession.hostCapability, { challengeFrequency: 10 });
+    // Keep the scheduler quiet while the following challenges are driven manually.
+    await configureRoom(hostPage, roomCode, hostSession.hostCapability, {
+      challengeFrequency: 10,
+      timeBetweenNumbers: 120
+    });
 
     const challengePages = [['player-a', playerAPage], ['player-b', playerBPage]];
     const launchChallenge = async (type) => {
@@ -670,7 +918,7 @@ async function main() {
       return { challengeId, performerId };
     };
 
-    console.log('E2E 4b/10: riddle, dance, sing, group and karaoke challenge contracts');
+    console.log('E2E 4b/10: riddle, dance, group and karaoke; singing frozen');
     await launchChallengeAndComplete('riddle', async (page) => {
       const game = await gameForRoom();
       const answer = game.activeChallenge.data.answers[0];
@@ -693,24 +941,16 @@ async function main() {
       await page.locator('.challenge-modal .btn-close-challenge').click();
     });
     await Promise.all(challengePages.map(([, page]) => page.unroute('**/api/deezer/track/**', musicFailureRoute)));
-    const singBeforeStats = new Map();
-    for (const session of [playerASession, playerBSession]) {
-      const player = await Player.findById(session.playerId);
-      singBeforeStats.set(session.playerId.toString(), {
-        points: player.stats.points,
-        challengesCompleted: player.stats.challengesCompleted
-      });
-    }
-    const singRun = await launchChallengeAndComplete('sing', async (page) => {
-      await page.locator('.challenge-modal .btn-close-challenge').click();
-    });
-    const singBefore = singBeforeStats.get(singRun.performerId);
-    await waitForMongoDocument(
-      () => Player.findById(singRun.performerId),
-      (player) => player.stats.challengesCompleted === singBefore.challengesCompleted + 1 &&
-        player.stats.points === singBefore.points + getChallengePoints('sing', { success: true }),
-      'sing points persistence before group baseline'
-    );
+    // Singing challenges are intentionally frozen. The authorized launch
+    // must not create a challenge or award points; karaoke remains available.
+    const gameBeforeFrozenSing = await gameForRoom();
+    assert.equal(gameBeforeFrozenSing?.activeChallenge ?? null, null);
+    await launchChallenge('sing');
+    await new Promise(resolve => setTimeout(resolve, 250));
+    const gameAfterFrozenSing = await gameForRoom();
+    assert.equal(gameAfterFrozenSing?.activeChallenge ?? null, null,
+      'Singing challenge must stay disabled');
+    console.log('  frozen sing challenge rejected; karaoke remains available');
 
     const groupBeforeStats = new Map();
     for (const session of [playerASession, playerBSession]) {
@@ -766,8 +1006,19 @@ async function main() {
       'Interactive group completion did not persist every participant response'
     );
     assert.ok(Date.now() - interactiveGroupStartedAt < 30000, 'Group completion used the timeout path');
+    const completedGroupPlayers = await waitForMongoDocument(
+      () => Promise.all([playerASession, playerBSession].map((session) => Player.findById(session.playerId))),
+      (players) => players.every((player) => {
+        if (!player) return false;
+        const before = groupBeforeStats.get(player._id.toString());
+        return player.stats.points === before.points + calculatedGroupPoints &&
+          player.stats.challengesCompleted === before.challengesCompleted + 1;
+      }),
+      'interactive group points persistence',
+      10000
+    );
     for (const session of [playerASession, playerBSession]) {
-      const player = await Player.findById(session.playerId);
+      const player = completedGroupPlayers.find((candidate) => candidate?._id.toString() === session.playerId.toString());
       const before = groupBeforeStats.get(session.playerId.toString());
       const persistedAccreditations = (player.stats.points - before.points) / calculatedGroupPoints;
       console.log(`  group participant ${session.playerId}: before=${before.points}, challengeId=${interactiveGroupId}, configured=${configuredGroupPoints}, calculated=${calculatedGroupPoints}, responses=${groupEvent.data.responses.length}, persistedAccreditations=${persistedAccreditations}, after=${player.stats.points}, completionEvents=${groupCompletionEvents.length}`);
@@ -782,13 +1033,16 @@ async function main() {
     const completedRoom = await Room.findOne({ code: roomCode });
     assert.equal(completedRoom.gameState, 'playing', 'Bingo did not resume after interactive group completion');
 
+    const timeoutStartedAt = Date.now();
     await launchChallenge('group');
     await waitForChallengePage(challengePages, 'group');
-    const timeoutGroup = await gameForRoom();
-    assert.ok(timeoutGroup?.activeChallenge?.id, 'Timeout group challenge was not persisted');
-    await waitForMongoDocument(gameForRoom, (game) => !game?.activeChallenge, 'group timeout recovery', 40000);
-    const timeoutRoom = await Room.findOne({ code: roomCode });
-    assert.equal(timeoutRoom.gameState, 'playing', 'Bingo did not resume after group timeout');
+    const timeoutGroup = (await gameForRoom())?.activeChallenge;
+    assert.equal(timeoutGroup?.duration, 45, 'Default group dance must last 45 seconds');
+    // The host control socket can reclaim and disconnect the organizer page's socket.
+    // Observe the same public state transition on the independently connected player UI.
+    await playerAPage.locator('.status-badge.paused').waitFor({ state: 'visible', timeout: 10000 });
+    await playerAPage.locator('.status-badge.playing').waitFor({ state: 'visible', timeout: 65000 });
+    assert.ok(Date.now() - timeoutStartedAt >= 40000, 'Group challenge recovered before its 45-second timeout');
     await launchChallenge('karaoke');
     await waitForChallengePage([['player-a', playerAPage], ['player-b', playerBPage], ['tv', tvPage]], 'karaoke');
     const karaokeGame = await gameForRoom();
@@ -805,7 +1059,12 @@ async function main() {
       null,
       { timeout: 10000 }
     );
-    assert.ok((await karaokeVideo.getAttribute('src'))?.includes('/music/karaoke/'), 'Karaoke must load its local media route');
+    const karaokeSource = await karaokeVideo.getAttribute('src');
+    if (localTvMode) {
+      assert.match(karaokeSource || '', new RegExp(`${localTvMediaOrigin}/media/m_[0-9a-f]+`), 'Karaoke did not resolve to loopback media');
+    } else {
+      assert.ok(karaokeSource?.includes('/music/karaoke/'), 'Karaoke must load its local media route');
+    }
     const karaokePlayerBefore = await Player.findById(karaokePlayerId);
     await karaokeVideo.evaluate(video => video.dispatchEvent(new Event('ended')));
     await waitForMongoDocument(gameForRoom, (game) => !game?.activeChallenge, 'karaoke completion');
@@ -1126,6 +1385,43 @@ async function main() {
     await waitForBody(playerBPage, /Finalizado/);
     console.log('  organizer, TV and both recovered player sessions remained synchronized');
 
+    console.log('E2E 11/11: temporary remote TV authorization and revocation');
+    await configureRoom(hostPage, roomCode, hostSession.hostCapability, { eventMode: 'REMOTE_PRESENTIAL' });
+    await hostPage.reload();
+    await waitForBody(hostPage, /TV remota/);
+    await hostPage.getByRole('button', { name: /Generar enlace TV/ }).click();
+    await waitForBody(hostPage, /Enlace temporal de TV generado/);
+    const remoteTvUrl = await hostPage.getByLabel('Enlace temporal de TV').inputValue();
+    assert.match(remoteTvUrl, /[?&]tvToken=[A-Za-z0-9_-]{43}/);
+    const remoteTvContext = await browser.newContext();
+    contexts.push(remoteTvContext);
+    const remoteTvPage = await remoteTvContext.newPage();
+    await remoteTvPage.goto(remoteTvUrl);
+    await waitForBody(remoteTvPage, /Bingo Bailable|Bingo Navideño/);
+    await remoteTvPage.waitForFunction(({ key }) => {
+      try {
+        const value = JSON.parse(sessionStorage.getItem(key) || 'null');
+        return Boolean(value?.token && value?.expiresAt);
+      } catch {
+        return false;
+      }
+    }, { key: `bingo-tv-session:${roomCode}` });
+    assert.equal(new URL(remoteTvPage.url()).searchParams.has('tvToken'), false, 'TV token remained in the URL after claim');
+    await waitForBody(remoteTvPage, new RegExp(roomCode));
+    await waitForBody(hostPage, /TV conectada/);
+    console.log('  remote TV claimed a one-time link, established a scoped session and removed the token from the URL');
+
+    const reusedTvContext = await browser.newContext();
+    contexts.push(reusedTvContext);
+    const reusedTvPage = await reusedTvContext.newPage();
+    await reusedTvPage.goto(remoteTvUrl);
+    await waitForBody(reusedTvPage, /Enlace temporal de TV|utilizado|expirado/);
+    await reusedTvPage.close();
+    await hostPage.getByRole('button', { name: /Revocar autorización/ }).click();
+    await waitForBody(hostPage, /Autorización de TV revocada/);
+    await waitForBody(remoteTvPage, /autorización temporal.*revocada/i);
+    console.log('  replay was rejected and organizer revocation disconnected the temporary TV');
+
     await tvPage.close();
     console.log('E2E PASS: complete organizer/player/TV flow and critical security/recovery scenarios');
   } finally {
@@ -1140,6 +1436,7 @@ async function main() {
     if (browser) await browser.close().catch(() => {});
     await Promise.all(processes.reverse().map(({ child }) => stopProcess(child)));
     await mongo.stop();
+    if (localTvMediaRoot) rmSync(localTvMediaRoot, { recursive: true, force: true });
     for (const target of ciMediaAliases) rmSync(target, { force: true });
     if (process.env.MEDIA_AUDIT_MODE === 'ci') rmSync(ciMediaFixturePublicDir, { recursive: true, force: true });
   }

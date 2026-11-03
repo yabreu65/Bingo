@@ -16,6 +16,14 @@ const {
 } = require('../utils/playerCapability');
 const { stripGuestCapabilityHashes, stripTriviaAnswers, stripPrivatePlayerData } = require('../utils/publicData');
 const { createTvCapability, createTvCapabilityHash } = require('../utils/tvCapability');
+const {
+  createTvAuthorizationToken,
+  isTvAuthorizationToken,
+  hashTvAuthorizationToken,
+  getTvAuthorizationLinkTtlMs,
+  getTvAuthorizationSessionTtlMs,
+  revokeTemporaryTvSockets
+} = require('../utils/tvAuthorization');
 const { matchesPlayerCapability } = require('../utils/playerCapability');
 const {
   createRoomSchema,
@@ -23,15 +31,22 @@ const {
   getRoomSchema,
   selectCardSchema,
   updateConfigSchema,
-  reconnectSchema
+  reconnectSchema,
+  createTvAuthorizationSchema,
+  claimTvAuthorizationSchema,
+  renewTvAuthorizationSchema,
+  revokeTvAuthorizationSchema
 } = require('../schemas/roomSchemas');
 const {
   createRoomLimiter,
   joinRoomLimiter,
   generalApiLimiter,
   selectCardLimiter,
+  tvAuthorizationLimiter,
   speedLimiter
 } = require('../config/rateLimiters');
+const { normalizeNewRoomConfig } = require('../utils/roomConfiguration');
+const { admitGuest, admitManual, selectGuestCard, AdmissionError, participantCountExpression } = require('../services/roomAdmission');
 
 // Crear sala
 router.post('/create', createRoomLimiter, speedLimiter, validateRequest(createRoomSchema), async (req, res) => {
@@ -51,7 +66,7 @@ router.post('/create', createRoomLimiter, speedLimiter, validateRequest(createRo
       name: req.body.roomName || `Sala ${code}`,
       host: hostPlayer._id,
       players: [hostPlayer._id],
-      config: req.body.config || {}
+      config: normalizeNewRoomConfig(req.body.config || {})
     });
     room.hostCapabilityHash = createHostCapabilityHash(hostCapability, room._id);
     room.tvCapabilityHash = createTvCapabilityHash(tvCapability, room._id);
@@ -76,61 +91,206 @@ router.post('/create', createRoomLimiter, speedLimiter, validateRequest(createRo
 });
 
 // Unirse a sala
-router.post('/join', joinRoomLimiter, speedLimiter, validateRequest(joinRoomSchema), async (req, res) => {
+router.post('/join', joinRoomLimiter, validateRequest(joinRoomSchema), async (req, res) => {
   try {
-    const roomCode = req.body.roomCode || req.body.code;
-
-    if (!roomCode) {
-      return res.status(400).json({ error: 'Código de sala requerido' });
-    }
-
-    const room = await Room.findOne({
-      code: roomCode.toUpperCase(),
-      isActive: true
-    });
-
-    if (!room) {
-      return res.status(404).json({ error: 'Sala no encontrada' });
-    }
-
-    if (room.config?.activePlaylist && typeof room.populate === 'function') {
+    const { room, player, playerCapability } = await admitGuest(
+      req.body.roomCode.toUpperCase(), req.body.playerName, req.body.admissionToken
+    );
+    if (room.config?.activePlaylist) {
       await room.populate({ path: 'config.activePlaylist', populate: { path: 'tracks' } });
     }
-
-    const totalPlayers = room.players.length + (room.manualPlayers?.length || 0);
-    if (totalPlayers >= room.config.maxPlayers) {
-      return res.status(400).json({ error: 'Sala llena' });
-    }
-
-    const player = new Player({
-      name: req.body.playerName,
-      room: room._id,
-      isHost: false
-    });
-    const playerCapability = createPlayerCapability();
-    player.guestCapabilityHash = createPlayerCapabilityHash(
-      playerCapability,
-      room._id,
-      player._id
-    );
-    await player.save();
-
-    room.players.push(player._id);
-    room.lastActivity = new Date();
-    await room.save();
-
-    // Actualizar timestamp de actividad
-    await updateRoomActivity(roomCode);
-
+    await room.populate('players');
     res.json({
       success: true,
-      room: stripPrivatePlayerData(stripGuestCapabilityHashes(await room.populate('players'))),
+      room: stripPrivatePlayerData(stripGuestCapabilityHashes(room)),
       player: stripGuestCapabilityHashes(player),
       playerCapability
     });
   } catch (error) {
-    logger.error('Error joining room:', error);
+    if (error instanceof AdmissionError) return res.status(error.status).json({ error: error.message });
+    logger.error('Error joining room');
     res.status(500).json({ error: 'Error interno del servidor' });
+  }
+});
+
+const findRoomForHostCapability = async (code) => Room.findOne({
+  code: code.toUpperCase(),
+  isActive: true
+}).select('+hostCapabilityHash');
+
+const authorizeRoomHost = async (req, res) => {
+  const room = await findRoomForHostCapability(req.params.code);
+  if (!room) {
+    res.status(404).json({ error: 'Sala no encontrada' });
+    return null;
+  }
+  const authorized = await isRoomHost(req, room, req.get('x-room-host-capability'));
+  if (!authorized) {
+    res.status(403).json({ error: 'No tienes permisos para autorizar la TV' });
+    return null;
+  }
+  return room;
+};
+
+// Generate a one-time TV link. MongoDB stores only the room-bound hash.
+router.post('/:code/tv-authorization', tvAuthorizationLimiter, validateRequest(createTvAuthorizationSchema), async (req, res) => {
+  try {
+    const room = await authorizeRoomHost(req, res);
+    if (!room) return;
+
+    const now = new Date();
+    const tvToken = createTvAuthorizationToken();
+    const linkExpiresAt = new Date(now.getTime() + getTvAuthorizationLinkTtlMs());
+    room.tvAuthorization = {
+      linkTokenHash: hashTvAuthorizationToken(tvToken, room._id),
+      linkExpiresAt,
+      linkClaimedAt: undefined,
+      sessionTokenHash: undefined,
+      sessionExpiresAt: undefined,
+      sessionLastSeenAt: undefined,
+      revokedAt: undefined
+    };
+    await room.save();
+
+    revokeTemporaryTvSockets(req.app.get('io'), room.code);
+    res.json({
+      success: true,
+      roomCode: room.code,
+      tvToken,
+      expiresAt: linkExpiresAt.toISOString()
+    });
+  } catch (error) {
+    logger.error('Error generating TV authorization:', error);
+    res.status(500).json({ error: 'No se pudo generar la autorización temporal de TV' });
+  }
+});
+
+// Consume the one-time link and issue a separate short-lived TV session.
+router.post('/:code/tv-authorization/claim', tvAuthorizationLimiter, validateRequest(claimTvAuthorizationSchema), async (req, res) => {
+  try {
+    const roomCode = req.params.code.toUpperCase();
+    const { token } = req.body;
+    const room = await Room.findOne({ code: roomCode, isActive: true })
+      .select('+tvAuthorization.linkTokenHash +tvAuthorization.sessionTokenHash');
+    if (!room || !isTvAuthorizationToken(token)) {
+      return res.status(400).json({ error: 'Enlace de TV inválido o expirado' });
+    }
+
+    const now = new Date();
+    const sessionToken = createTvAuthorizationToken();
+    const sessionExpiresAt = new Date(now.getTime() + getTvAuthorizationSessionTtlMs());
+    const claimedRoom = await Room.findOneAndUpdate(
+      {
+        _id: room._id,
+        isActive: true,
+        'tvAuthorization.linkTokenHash': hashTvAuthorizationToken(token, room._id),
+        'tvAuthorization.linkExpiresAt': { $gt: now },
+        'tvAuthorization.linkClaimedAt': null,
+        'tvAuthorization.revokedAt': null
+      },
+      {
+        $set: {
+          'tvAuthorization.linkClaimedAt': now,
+          'tvAuthorization.sessionTokenHash': hashTvAuthorizationToken(sessionToken, room._id),
+          'tvAuthorization.sessionExpiresAt': sessionExpiresAt,
+          'tvAuthorization.sessionLastSeenAt': now
+        }
+      },
+      { new: true, runValidators: true }
+    );
+    if (!claimedRoom) {
+      return res.status(409).json({ error: 'Enlace de TV inválido, expirado o ya utilizado' });
+    }
+
+    req.app.get('io')?.to(roomCode).emit('tv-authorization-status', {
+      roomCode,
+      connected: false,
+      claimed: true,
+      expiresAt: sessionExpiresAt.toISOString()
+    });
+    return res.json({
+      success: true,
+      roomCode,
+      tvSessionToken: sessionToken,
+      expiresAt: sessionExpiresAt.toISOString()
+    });
+  } catch (error) {
+    logger.error('Error claiming TV authorization:', error);
+    return res.status(500).json({ error: 'No se pudo reclamar el enlace de TV' });
+  }
+});
+
+router.post('/:code/tv-authorization/renew', tvAuthorizationLimiter, validateRequest(renewTvAuthorizationSchema), async (req, res) => {
+  try {
+    const roomCode = req.params.code.toUpperCase();
+    const sessionToken = req.get('x-tv-session-token');
+    if (!isTvAuthorizationToken(sessionToken)) {
+      return res.status(401).json({ error: 'Sesión de TV inválida' });
+    }
+
+    const now = new Date();
+    const sessionExpiresAt = new Date(now.getTime() + getTvAuthorizationSessionTtlMs());
+    const roomForSession = await Room.findOne({ code: roomCode, isActive: true })
+      .select('+tvAuthorization.sessionTokenHash');
+    if (!roomForSession) return res.status(401).json({ error: 'Sesión de TV inválida' });
+    const room = await Room.findOneAndUpdate(
+      {
+        _id: roomForSession._id,
+        isActive: true,
+        'tvAuthorization.sessionTokenHash': hashTvAuthorizationToken(sessionToken, roomForSession._id),
+        'tvAuthorization.sessionExpiresAt': { $gt: now },
+        'tvAuthorization.revokedAt': null
+      },
+      {
+        $set: {
+          'tvAuthorization.sessionExpiresAt': sessionExpiresAt,
+          'tvAuthorization.sessionLastSeenAt': now
+        }
+      },
+      { new: true }
+    );
+    if (!room) return res.status(401).json({ error: 'Sesión de TV expirada o revocada' });
+
+    req.app.get('io')?.to(roomCode).emit('tv-authorization-status', {
+      roomCode,
+      connected: true,
+      expiresAt: sessionExpiresAt.toISOString()
+    });
+
+    return res.json({ success: true, roomCode, expiresAt: sessionExpiresAt.toISOString() });
+  } catch (error) {
+    logger.error('Error renewing TV authorization:', error);
+    return res.status(500).json({ error: 'No se pudo renovar la sesión de TV' });
+  }
+});
+
+router.post('/:code/tv-authorization/revoke', tvAuthorizationLimiter, validateRequest(revokeTvAuthorizationSchema), async (req, res) => {
+  try {
+    const room = await authorizeRoomHost(req, res);
+    if (!room) return;
+
+    const now = new Date();
+    room.tvAuthorization = {
+      ...(room.tvAuthorization?.toObject?.() || room.tvAuthorization || {}),
+      linkTokenHash: undefined,
+      linkExpiresAt: undefined,
+      linkClaimedAt: undefined,
+      sessionTokenHash: undefined,
+      sessionExpiresAt: undefined,
+      sessionLastSeenAt: undefined,
+      revokedAt: now
+    };
+    await room.save();
+    revokeTemporaryTvSockets(req.app.get('io'), room.code);
+    req.app.get('io')?.to(room.code).emit('tv-authorization-status', {
+      roomCode: room.code,
+      connected: false,
+      revokedAt: now.toISOString()
+    });
+    return res.json({ success: true, roomCode: room.code, revokedAt: now.toISOString() });
+  } catch (error) {
+    logger.error('Error revoking TV authorization:', error);
+    return res.status(500).json({ error: 'No se pudo revocar la autorización de TV' });
   }
 });
 
@@ -222,24 +382,7 @@ router.post('/:code/select-card', selectCardLimiter, validateRequest(selectCardS
       return res.status(403).json({ error: 'No se pueden cambiar cartones después de iniciar la partida' });
     }
 
-    const player = await Player.findOneAndUpdate(
-      playerFilter,
-      {
-        $set: {
-          cardNumber,
-          'bingoCard.matrix': bingoCard,
-          'bingoCard.matrixVersion': CARD_MATRIX_VERSION,
-          'bingoCard.markedCells': [[2, 2]]
-        }
-      },
-      { new: true, runValidators: true }
-    );
-    if (!player) {
-      return res.status(403).json({ error: 'No tienes permisos para modificar este cartón' });
-    }
-
-    // Actualizar timestamp de actividad de la sala
-    await updateRoomActivity(req.params.code);
+    const player = await selectGuestCard(room._id, playerFilter, cardNumber);
 
     res.json(stripGuestCapabilityHashes({
       success: true,
@@ -247,6 +390,7 @@ router.post('/:code/select-card', selectCardLimiter, validateRequest(selectCardS
       cardNumber
     }));
   } catch (error) {
+    if (error instanceof AdmissionError) return res.status(error.status).json({ error: error.message });
     logger.error('Error selecting card:', error);
     if (error?.code === 11000) {
       return res.status(409).json({ error: 'El cartón ya está en uso. Elige otro número.' });
@@ -265,14 +409,15 @@ router.patch('/:code/config', generalApiLimiter, optionalAuth, validateRequest(u
       return res.status(403).json({ error: 'No tienes permisos para modificar la sala' });
     }
     if (room.gameState && room.gameState !== 'waiting' &&
-        (Object.prototype.hasOwnProperty.call(req.body.config, 'gameMode') ||
+        (Object.prototype.hasOwnProperty.call(req.body.config, 'gameModes') ||
+         Object.prototype.hasOwnProperty.call(req.body.config, 'gameMode') ||
          Object.prototype.hasOwnProperty.call(req.body.config, 'maxPlayers'))) {
       return res.status(409).json({ error: 'Esta configuración no puede cambiar durante una partida' });
     }
     const currentConfig = typeof room.config?.toObject === 'function'
       ? room.config.toObject()
       : { ...(room.config || {}) };
-    room.config = {
+    const nextConfig = {
       ...currentConfig,
       ...req.body.config,
       enabledChallengeTypes: {
@@ -280,9 +425,50 @@ router.patch('/:code/config', generalApiLimiter, optionalAuth, validateRequest(u
         ...(req.body.config.enabledChallengeTypes || {})
       }
     };
-    await room.save();
-    room.hostCapabilityHash = undefined;
-    res.json({ success: true, room });
+    if (currentConfig.multimediaPolicy || req.body.config.multimediaPolicy) {
+      nextConfig.multimediaPolicy = {
+        ...(currentConfig.multimediaPolicy || {}),
+        ...(req.body.config.multimediaPolicy || {})
+      };
+    }
+    // Only new/explicitly migrated configurations are normalized. A legacy
+    // room remains untouched when an unrelated setting is updated.
+    if (req.body.config.eventMode && !currentConfig.eventMode) {
+      const normalized = normalizeNewRoomConfig(nextConfig);
+      nextConfig.eventMode = normalized.eventMode;
+      nextConfig.multimediaPolicy = {
+        ...(normalized.multimediaPolicy || {}),
+        ...(req.body.config.multimediaPolicy || {})
+      };
+    }
+    // Patch only requested fields. Replacing a stale full config can undo a
+    // concurrent capacity increase after guests have already been admitted.
+    const configPatch = {};
+    for (const [key, value] of Object.entries(req.body.config)) {
+      if (value && typeof value === 'object' && !Array.isArray(value)) {
+        for (const [nested, entry] of Object.entries(value)) configPatch[`config.${key}.${nested}`] = entry;
+      } else configPatch[`config.${key}`] = value;
+    }
+    if (req.body.config.eventMode && !currentConfig.eventMode) {
+      configPatch['config.multimediaPolicy'] = nextConfig.multimediaPolicy;
+      for (const key of Object.keys(configPatch)) {
+        if (key.startsWith('config.multimediaPolicy.')) delete configPatch[key];
+      }
+    }
+    const filter = { _id: room._id };
+    if (req.body.config.maxPlayers !== undefined) {
+      filter.$expr = { $lte: [
+        participantCountExpression(),
+        req.body.config.maxPlayers
+      ] };
+    }
+    if (req.body.config.maxPlayers !== undefined || req.body.config.gameMode !== undefined || req.body.config.gameModes !== undefined) {
+      filter.gameState = { $in: ['waiting', null] };
+    }
+    const updated = await Room.findOneAndUpdate(filter, { $set: configPatch }, { new: true, runValidators: true });
+    if (!updated) return res.status(409).json({ error: 'El cupo o el estado actual no permite este cambio' });
+    res.json({ success: true, room: stripGuestCapabilityHashes(updated) });
+
   } catch (error) {
     logger.error('Error updating room config:', error);
     res.status(500).json({ error: 'Error interno del servidor' });
@@ -416,29 +602,7 @@ router.post('/:code/assign-manual-card', generalApiLimiter, optionalAuth, async 
       return res.status(403).json(errorResponse('INSUFFICIENT_PERMISSIONS', 'No tienes permisos para modificar la sala'));
     }
 
-    // Verificar que el cartón no esté ya asignado
-    const isAlreadyAssigned = room.manualPlayers.some(
-      p => p.cardNumber === cardNum
-    );
-
-    if (isAlreadyAssigned) {
-      return res.status(409).json(
-        conflictErrorResponse(`El cartón #${cardNum} ya está asignado a otro jugador`)
-      );
-    }
-
-    // Crear jugador manual
-    const manualPlayer = {
-      playerId: `manual-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-      playerName: playerName.trim(),
-      cardNumber: cardNum,
-      assignedAt: new Date()
-    };
-
-    room.manualPlayers.push(manualPlayer);
-    room.reservedCards.push(cardNum);
-    await updateRoomActivity(room);
-    await room.save();
+    const manualPlayer = await admitManual(room._id, playerName.trim(), cardNum);
 
     res.json(successResponse({
       player: manualPlayer,
@@ -446,7 +610,8 @@ router.post('/:code/assign-manual-card', generalApiLimiter, optionalAuth, async 
     }));
 
   } catch (error) {
-    logger.error('Error assigning manual card:', error);
+    if (error instanceof AdmissionError) return res.status(error.status).json(errorResponse('ADMISSION_REJECTED', error.message));
+    logger.error('Error assigning manual card');
     res.status(500).json(errorResponse('INTERNAL_ERROR', 'Error interno del servidor'));
   }
 });
@@ -521,12 +686,15 @@ router.delete('/:code/manual-players/:playerId', generalApiLimiter, optionalAuth
     const removedPlayer = room.manualPlayers[playerIndex];
     const cardNumber = removedPlayer.cardNumber;
 
-    // Remover jugador y liberar cartón
-    room.manualPlayers.splice(playerIndex, 1);
-    room.reservedCards = room.reservedCards.filter(c => c !== cardNumber);
+    // Pull only this membership; never overwrite concurrently admitted guests.
+    const removed = await Room.updateOne({ _id: room._id,
+      manualPlayers: { $elemMatch: { playerId, cardNumber } }
+    }, {
+      $pull: { manualPlayers: { playerId }, reservedCards: cardNumber },
+      $set: { lastActivity: new Date() }
+    });
 
-    await updateRoomActivity(room);
-    await room.save();
+    if (!removed.modifiedCount) return res.status(404).json(notFoundErrorResponse('Jugador manual'));
 
     res.json(successResponse({
       message: `Jugador ${removedPlayer.playerName} removido`,

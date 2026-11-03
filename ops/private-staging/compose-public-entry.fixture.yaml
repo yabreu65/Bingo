@@ -1,0 +1,50 @@
+# Test-only config fixture for validating the public-entry overlay. Never deploy this file.
+services:
+  frontend:
+    image: bingo-public-entry-test-frontend:local
+    labels:
+      traefik.enable: "true"
+      traefik.docker.network: pawtech_public
+      traefik.http.routers.bingo-m6-trial.rule: "Host(`${BINGO_TEST_HOST:?Set the approved BINGO_TEST_HOST}`)"
+      traefik.http.routers.bingo-m6-trial.entrypoints: websecure
+      traefik.http.routers.bingo-m6-trial.middlewares: bingo-m6-trial-auth
+      traefik.http.middlewares.bingo-m6-trial-auth.basicauth.users: "${BINGO_TRIAL_BASIC_AUTH:?Set the dedicated Bingo Basic Auth hash}"
+      traefik.http.routers.bingo-m6-trial.tls: "true"
+      traefik.http.routers.bingo-m6-trial.tls.certresolver: letsencrypt
+      traefik.http.services.bingo-m6-trial.loadbalancer.server.port: "80"
+    networks:
+      - application
+      - ingress
+      - pawtech_public
+
+  backend:
+    image: bingo-public-entry-test-backend:local
+    labels: {}
+    expose:
+      - "5001"
+    networks:
+      - application
+      - ingress
+
+  mongo:
+    image: bingo-public-entry-test-mongo:local
+    labels: {}
+    networks:
+      - database
+
+  mongo-bootstrap:
+    image: bingo-public-entry-test-mongo-bootstrap:local
+    labels: {}
+    networks:
+      - database
+
+networks:
+  application:
+    internal: true
+  database:
+    internal: true
+  ingress:
+    internal: true
+  pawtech_public:
+    name: pawtech_public
+    external: true

@@ -1,12 +1,21 @@
 const winston = require('winston');
 const DailyRotateFile = require('winston-daily-rotate-file');
 const path = require('path');
+const {
+  redactSensitiveText,
+  sanitizeLogInfo,
+  sanitizeLogValue,
+  sanitizeRequestUrl
+} = require('../utils/redactSecrets');
+
+const redactLogInfo = winston.format(sanitizeLogInfo);
 
 // Define custom log format
 const logFormat = winston.format.combine(
   winston.format.timestamp({ format: 'YYYY-MM-DD HH:mm:ss' }),
   winston.format.errors({ stack: true }),
   winston.format.splat(),
+  redactLogInfo(),
   winston.format.printf(({ timestamp, level, message, stack, ...metadata }) => {
     let msg = `${timestamp} [${level.toUpperCase()}]: ${message}`;
 
@@ -52,6 +61,9 @@ if (process.env.NODE_ENV !== 'production') {
       format: winston.format.combine(
         winston.format.colorize({ all: true }),
         winston.format.timestamp({ format: 'HH:mm:ss' }),
+        winston.format.errors({ stack: true }),
+        winston.format.splat(),
+        redactLogInfo(),
         winston.format.printf(({ timestamp, level, message, stack }) => {
           let msg = `${timestamp} ${level}: ${message}`;
           if (stack) {
@@ -107,20 +119,25 @@ logger.stream = {
 
 // Helper functions for common logging patterns
 logger.logRequest = (req, message) => {
-  logger.info(message, {
+  logger.info(redactSensitiveText(message), {
     method: req.method,
-    url: req.originalUrl,
+    url: sanitizeRequestUrl(req.originalUrl),
     ip: req.ip,
     userId: req.user?.userId
   });
 };
 
 logger.logError = (error, context = {}) => {
-  logger.error(error.message, {
-    ...context,
-    stack: error.stack,
-    name: error.name
-  });
+  const safeError = sanitizeLogValue(error);
+  const safeContext = sanitizeLogValue(context);
+  logger.error(
+    typeof safeError === 'string' ? safeError : (safeError?.message || 'Error'),
+    {
+      ...safeContext,
+      stack: safeError?.stack,
+      name: safeError?.name
+    }
+  );
 };
 
 logger.logRoomEvent = (roomCode, event, details = {}) => {

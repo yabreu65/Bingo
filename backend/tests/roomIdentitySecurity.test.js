@@ -1,4 +1,4 @@
-jest.mock('../models/Room', () => ({ findOne: jest.fn() }));
+jest.mock('../models/Room', () => ({ findOne: jest.fn(), findOneAndUpdate: jest.fn() }));
 jest.mock('../models/Player', () => ({
   findById: jest.fn(),
   findByIdAndUpdate: jest.fn(),
@@ -24,6 +24,7 @@ const Game = require('../models/Game');
 const { createHostCapabilityHash } = require('../middleware/socketAuthMiddleware');
 const { createPlayerCapabilityHash } = require('../utils/playerCapability');
 const { handleDisconnect, handleJoinRoom, handleLeaveRoom } = require('../socket/handlers/roomHandlers');
+const { createTvAuthorizationToken, hashTvAuthorizationToken } = require('../utils/tvAuthorization');
 const logger = require('../config/logger');
 
 const emitted = jest.fn();
@@ -412,5 +413,75 @@ describe('room socket identity boundaries', () => {
     expect(room.save).not.toHaveBeenCalled();
     expect(emitted).not.toHaveBeenCalledWith('game-state-changed', expect.anything());
     expect(emitted).not.toHaveBeenCalledWith('challenge-complete', expect.anything());
+  });
+
+  test('accepts a valid temporary TV session and limits the room to one active TV socket', async () => {
+    const sessionToken = createTvAuthorizationToken();
+    const room = { _id: 'room-a', code: 'ROOMA', isActive: true, players: [] };
+    Room.findOne.mockReturnValue(populateRoom(room));
+    Room.findOneAndUpdate.mockResolvedValue(room);
+
+    const firstSocket = makeSocket('tv-1');
+    const firstCallback = jest.fn();
+    await handleJoinRoom(io, firstSocket)({
+      roomCode: room.code,
+      playerId: 'tv-display',
+      tvSessionToken: sessionToken
+    }, firstCallback);
+
+    expect(firstCallback).toHaveBeenCalledWith({ success: true, roomCode: room.code, playerId: 'tv-display' });
+    expect(firstSocket.tvAuthorizationType).toBe('temporary');
+
+    const secondSocket = makeSocket('tv-2');
+    const secondCallback = jest.fn();
+    await handleJoinRoom(io, secondSocket)({
+      roomCode: room.code,
+      playerId: 'tv-display',
+      tvSessionToken: sessionToken
+    }, secondCallback);
+
+    expect(secondCallback).toHaveBeenCalledWith({
+      success: false,
+      error: 'Ya hay una TV autorizada activa en esta sala'
+    });
+    expect(secondSocket.join).not.toHaveBeenCalled();
+
+    await handleDisconnect(io, firstSocket)();
+    const replacementSocket = makeSocket('tv-3');
+    const replacementCallback = jest.fn();
+    await handleJoinRoom(io, replacementSocket)({
+      roomCode: room.code,
+      playerId: 'tv-display',
+      tvSessionToken: sessionToken
+    }, replacementCallback);
+    expect(replacementCallback).toHaveBeenCalledWith({ success: true, roomCode: room.code, playerId: 'tv-display' });
+    await handleDisconnect(io, replacementSocket)();
+  });
+
+  test('rejects a player or an expired/revoked TV token from the socket identity boundary', async () => {
+    const room = { _id: 'room-a', code: 'ROOMA', isActive: true, players: [] };
+    Room.findOne.mockReturnValue(populateRoom(room));
+    Room.findOneAndUpdate.mockResolvedValue(null);
+
+    const socket = makeSocket('spoofed-tv');
+    const callback = jest.fn();
+    await handleJoinRoom(io, socket)({
+      roomCode: room.code,
+      playerId: 'tv-display',
+      tvSessionToken: 'p'.repeat(43)
+    }, callback);
+
+    expect(callback).toHaveBeenCalledWith({
+      success: false,
+      error: 'Credencial de TV inválida o expirada'
+    });
+    expect(socket.join).not.toHaveBeenCalled();
+    expect(Room.findOneAndUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        'tvAuthorization.sessionTokenHash': hashTvAuthorizationToken('p'.repeat(43), room._id)
+      }),
+      expect.any(Object),
+      expect.any(Object)
+    );
   });
 });

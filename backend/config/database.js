@@ -3,9 +3,10 @@ const logger = require('./logger');
 
 const connectDB = async () => {
   try {
-    const conn = await mongoose.connect(process.env.MONGODB_URI);
+    await mongoose.connect(process.env.MONGODB_URI, { serverSelectionTimeoutMS: 5000, socketTimeoutMS: 5000 });
 
-    logger.info(`✅ MongoDB Connected: ${conn.connection.host}`);
+    await Promise.all(mongoose.modelNames().map(name => mongoose.model(name).init()));
+    logger.info('MongoDB connected and model indexes initialized');
 
     // Log MongoDB connection events
     mongoose.connection.on('error', (err) => {
@@ -21,8 +22,8 @@ const connectDB = async () => {
     });
 
   } catch (error) {
-    logger.error(`❌ MongoDB connection failed: ${error.message}`);
-    process.exit(1);
+    logger.error('MongoDB connection or index initialization failed');
+    throw new Error('Database initialization failed');
   }
 };
 

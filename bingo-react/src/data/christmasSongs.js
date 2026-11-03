@@ -14,7 +14,7 @@ export const christmasSongs = [
     artist: "Wham!",
     youtubeId: "E8gmARGvPlI",
     duration: 263,
-    emoji: "❄️"
+    emoji: "🎵"
   },
   {
     id: 3,
@@ -78,7 +78,7 @@ export const christmasSongs = [
     artist: "Dean Martin",
     youtubeId: "mN7LW0Y00kE",
     duration: 112,
-    emoji: "❄️"
+    emoji: "🎵"
   },
   {
     id: 11,

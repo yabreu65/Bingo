@@ -4,147 +4,79 @@ require('dotenv').config();
 const { validateEnv } = require('./config/env');
 const env = validateEnv();
 
-const express = require('express');
 const http = require('http');
 const socketIo = require('socket.io');
-const cors = require('cors');
-const helmet = require('helmet');
 const connectDB = require('./config/database');
-
-const roomRoutes = require('./routes/roomRoutes');
-const playerRoutes = require('./routes/playerRoutes');
-const gameRoutes = require('./routes/gameRoutes');
-const spotifyRoutes = require('./routes/spotifyRoutes');
-const deezerRoutes = require('./routes/deezerRoutes');
-const authRoutes = require('./routes/authRoutes');
-const recordingsRoutes = require('./routes/recordings');
-const adminRoutes = require('./routes/adminRoutes');
+const { createApp } = require('./app');
 const socketHandlers = require('./socket/socketHandlers');
+const { attachSocketDisconnectDiagnostics } = require('./socket/disconnectDiagnostics');
 const { socketAuthMiddleware } = require('./middleware/socketAuthMiddleware');
 const logger = require('./config/logger');
-const requestLogger = require('./middleware/requestLogger');
-const { errorHandler, notFoundHandler } = require('./middleware/errorHandler');
 const roomCleanupService = require('./services/roomCleanup');
 const { recoverPersistedRooms } = require('./socket/handlers/gameHandlers');
+const { resolveNetworkPolicy, createCorsOptions } = require('./config/networkPolicy');
+const { createSocketEventRateLimiter } = require('./middleware/socketRateLimiter');
 
-const app = express();
+const networkPolicy = resolveNetworkPolicy(env);
+const corsOptions = createCorsOptions(networkPolicy);
+const app = createApp({ networkPolicy });
 const server = http.createServer(app);
 
-// Configuración de CORS para permitir múltiples orígenes
-const allowedOrigins = [
-  'http://localhost:5173',
-  'http://localhost:5174',
-  'http://127.0.0.1:5173',
-  'http://127.0.0.1:5174',
-  'http://127.0.0.1:5500',
-  'http://192.168.1.8:5173',
-  'http://192.168.1.39:5173',
-  'http://192.168.1.43:5173',
-  'http://192.168.1.43:5174',
-  process.env.FRONTEND_URL
-].filter(Boolean);
-
-const corsOptions = {
-  origin: function (origin, callback) {
-    // Permitir requests sin origin (como mobile apps o curl)
-    if (!origin) return callback(null, true);
-
-    // En desarrollo, permitir cualquier localhost o IP de red local
-    if (process.env.NODE_ENV !== 'production') {
-      const isLocalhost = origin.includes('localhost') || origin.includes('127.0.0.1');
-      const isLocalNetwork = origin.match(/^http:\/\/192\.168\.\d{1,3}\.\d{1,3}:\d{4,5}$/);
-
-      if (isLocalhost || isLocalNetwork) {
-        return callback(null, true);
-      }
-    }
-
-    // En producción o si no coincide con desarrollo, verificar whitelist
-    if (allowedOrigins.indexOf(origin) !== -1) {
-      callback(null, true);
-    } else {
-      callback(new Error('Not allowed by CORS'));
-    }
-  },
-  methods: ['GET', 'POST', 'PATCH', 'DELETE'],
-  credentials: true
-};
-
 const io = socketIo(server, {
-  cors: corsOptions
+  cors: corsOptions,
+  maxHttpBufferSize: 100 * 1024,
+  allowRequest: (request, callback) => {
+    const origin = request.headers.origin;
+    callback(null, !origin || networkPolicy.allowedOrigins.includes(origin));
+  }
 });
+app.set('io', io);
 
 // Socket.io authentication middleware
 io.use(socketAuthMiddleware);
 
-connectDB().then(() => recoverPersistedRooms(io));
+// Recovery and cleanup are started only after database/index readiness.
 
-// Iniciar servicio de limpieza de salas inactivas
-roomCleanupService.start();
-
-// Security headers con Helmet
-app.use(helmet({
-  contentSecurityPolicy: {
-    directives: {
-      defaultSrc: ["'self'"],
-      styleSrc: ["'self'", "'unsafe-inline'"],
-      scriptSrc: ["'self'", "'unsafe-inline'"],
-      imgSrc: ["'self'", "data:", "https:"],
-      connectSrc: ["'self'", "ws://localhost:5001", "wss://localhost:5001", "https://api.deezer.com"],
-      frameSrc: ["'self'", "https://www.youtube.com"],
-      mediaSrc: ["'self'", "https:"]
-    }
-  },
-  crossOriginEmbedderPolicy: false, // Necesario para cargar recursos externos como YouTube
-  crossOriginResourcePolicy: { policy: "cross-origin" }
-}));
-
-app.use(cors(corsOptions));
-// Keep JSON/form payloads bounded; multipart recording uploads are limited by multer.
-app.use(express.json({ limit: '100kb' }));
-app.use(express.urlencoded({ extended: true, limit: '100kb' }));
-app.use('/uploads', express.static('uploads'));
-
-// Request logging middleware
-app.use(requestLogger);
-
-app.use('/api/auth', authRoutes);
-app.use('/api/rooms', roomRoutes);
-app.use('/api/players', playerRoutes);
-app.use('/api/games', gameRoutes);
-app.use('/api/spotify', spotifyRoutes);
-app.use('/api/deezer', deezerRoutes);
-app.use('/api/recordings', recordingsRoutes);
-app.use('/api/admin/rooms/:code', adminRoutes);
-
-app.get('/api/health', (req, res) => {
-  res.json({ status: 'OK', timestamp: new Date() });
-});
-
-// Error handling middlewares (deben ir al final, después de todas las rutas)
-app.use(notFoundHandler);
-app.use(errorHandler);
 
 io.on('connection', (socket) => {
+  const connectedAtMonotonicNs = process.hrtime.bigint();
+  socket.use(createSocketEventRateLimiter());
+  attachSocketDisconnectDiagnostics(socket, logger, { connectedAtMonotonicNs });
   logger.logSocketEvent(socket.id, 'connected', {
     isGuest: socket.isGuest,
     userId: socket.user?.userId
   });
   socketHandlers(io, socket);
-
-  socket.on('disconnect', () => {
-    logger.logSocketEvent(socket.id, 'disconnected');
-  });
 });
 
 const PORT = process.env.PORT || 5000;
-server.listen(PORT, () => {
+const startup = (async () => {
+  await connectDB();
+  const { isDatabaseReady } = require('./utils/databaseReadiness');
+  // A fresh disposable replica set can briefly elect a primary after indexes
+  // have initialized. Never listen before the complete read-only readiness
+  // check passes; bound the retry so persistent failures remain fail-closed.
+  let ready = false;
+  for (let attempt = 0; attempt < 20 && !ready; attempt += 1) {
+    ready = await isDatabaseReady();
+    if (!ready && attempt < 19) await new Promise(resolve => setTimeout(resolve, 250));
+  }
+  if (!ready) throw new Error('Database is not ready for admission');
+  await recoverPersistedRooms(io);
+  roomCleanupService.start();
+  server.listen(PORT, () => {
   logger.info(`
 🎄 =============================================== 🎅
    BINGO NAVIDEÑO - Backend running on port ${PORT}
    Environment: ${process.env.NODE_ENV || 'development'}
 🎄 =============================================== 🎅
   `);
+  });
+})().catch(async () => {
+  logger.error('Backend startup failed: database is not ready');
+  await require('mongoose').disconnect();
+  io.close();
+  process.exitCode = 1;
 });
 
-module.exports = { app, server, io };
+module.exports = { app, server, io, startup };

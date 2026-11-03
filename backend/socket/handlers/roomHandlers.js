@@ -6,7 +6,31 @@ const { isRoomHost, emitPermissionError } = require('../../middleware/socketAuth
 const { createPlayerCapabilityHash, isPlayerCapability } = require('../../utils/playerCapability');
 const { stripGuestCapabilityHashes, stripPrivatePlayerData } = require('../../utils/publicData');
 const { matchesTvCapability } = require('../../utils/tvCapability');
+const {
+  isTvAuthorizationToken,
+  hashTvAuthorizationToken,
+  claimTemporaryTvSocket,
+  releaseTemporaryTvSocket,
+  revokeTemporaryTvSockets
+} = require('../../utils/tvAuthorization');
 const { clearAllRoomTimers } = require('../utils/roomTimer');
+
+async function matchesTvSession(room, sessionToken) {
+  if (!room?._id || !isTvAuthorizationToken(sessionToken)) return false;
+  const now = new Date();
+  const updatedRoom = await Room.findOneAndUpdate(
+    {
+      _id: room._id,
+      isActive: true,
+      'tvAuthorization.sessionTokenHash': hashTvAuthorizationToken(sessionToken, room._id),
+      'tvAuthorization.sessionExpiresAt': { $gt: now },
+      'tvAuthorization.revokedAt': null
+    },
+    { $set: { 'tvAuthorization.sessionLastSeenAt': now } },
+    { new: true }
+  );
+  return !!updatedRoom;
+}
 
 /**
  * Emite información de la sala a todos los conectados
@@ -26,7 +50,20 @@ async function broadcastRoomInfo(io, roomCode) {
       io.to(roomCode).emit('room-info', {
         playerCount: totalPlayers, // Incluir jugadores digitales Y manuales
         gameState: room.gameState,
-        config: { challengeEffectsMuted: room.config?.challengeEffectsMuted === true },
+        // Only non-sensitive presentation settings are broadcast. Capability
+        // hashes and temporary TV secrets never belong in room-info.
+        config: {
+          challengeEffectsMuted: room.config?.challengeEffectsMuted === true,
+          eventMode: room.config?.eventMode,
+          multimediaPolicy: room.config?.multimediaPolicy
+            ? {
+              primarySurface: room.config.multimediaPolicy.primarySurface,
+              tvMediaSource: room.config.multimediaPolicy.tvMediaSource || 'SERVER',
+              playerPlayback: room.config.multimediaPolicy.playerPlayback,
+              allowExternalSources: room.config.multimediaPolicy.allowExternalSources === true
+            }
+            : undefined
+        },
         manualPlayers: room.manualPlayers || []
       });
     }
@@ -60,13 +97,23 @@ function handleJoinRoom(io, socket) {
       }
 
       if (playerId === 'tv-display') {
-        if (!matchesTvCapability(data?.tvCapability, room.tvCapabilityHash, room._id)) {
-          if (callback) callback({ success: false, error: 'Credencial de TV inválida' });
+        const usesTemporarySession = typeof data?.tvSessionToken === 'string';
+        const authorized = usesTemporarySession
+          ? await matchesTvSession(room, data.tvSessionToken)
+          : matchesTvCapability(data?.tvCapability, room.tvCapabilityHash, room._id);
+        if (!authorized) {
+          if (callback) callback({ success: false, error: 'Credencial de TV inválida o expirada' });
+          return;
+        }
+        if (usesTemporarySession && !(await claimTemporaryTvSocket(room.code, socket))) {
+          if (callback) callback({ success: false, error: 'Ya hay una TV autorizada activa en esta sala' });
           return;
         }
         socket.tvAuthorized = true;
+        socket.tvAuthorizationType = usesTemporarySession ? 'temporary' : 'legacy';
       } else {
         socket.tvAuthorized = false;
+        socket.tvAuthorizationType = undefined;
         const player = await Player.findById(playerId);
         const playerRoomId = player?.room?._id || player?.room;
         const isListedInRoom = room.players.some((roomPlayer) => {
@@ -150,6 +197,14 @@ function handleJoinRoom(io, socket) {
 
       await broadcastRoomInfo(io, room.code);
 
+      if (playerId === 'tv-display' && socket.tvAuthorizationType === 'temporary') {
+        io.to(room.code).emit('tv-authorization-status', {
+          roomCode: room.code,
+          connected: true,
+          expiresAt: room.tvAuthorization?.sessionExpiresAt || null
+        });
+      }
+
       logger.logRoomEvent(room.code, playerId === 'tv-display' ? 'TV Display joined' : 'Player joined', {
         playerId,
         socketId: socket.id
@@ -204,6 +259,10 @@ function handleLeaveRoom(io, socket) {
       socket.roomCode = undefined;
       socket.playerId = undefined;
       socket.tvAuthorized = false;
+      if (playerId === 'tv-display' && socket.tvAuthorizationType === 'temporary') {
+        releaseTemporaryTvSocket(roomCode, socket);
+      }
+      socket.tvAuthorizationType = undefined;
 
       const updatedRoom = await Room.findOne({ code: roomCode }).populate('players');
       io.to(roomCode).emit('player-left', {
@@ -220,6 +279,27 @@ function handleLeaveRoom(io, socket) {
       logger.error('Error in leave-room:', error);
       socket.emit('error', { message: 'No se pudo dejar la sala' });
     }
+  };
+}
+
+function handleTvMediaStatus(io, socket) {
+  return (data = {}) => {
+    const allowedStatuses = new Set([
+      'checking', 'available', 'playing', 'autoplay-blocked',
+      'permission-denied', 'unavailable', 'unsupported'
+    ]);
+    const roomCode = typeof data.roomCode === 'string' ? data.roomCode.toUpperCase() : '';
+    if (socket.playerId !== 'tv-display' || socket.tvAuthorized !== true ||
+        !socket.roomCode || roomCode !== socket.roomCode.toUpperCase() ||
+        !allowedStatuses.has(data.status)) return;
+
+    io.to(roomCode).emit('tv-media-status', {
+      roomCode,
+      status: data.status,
+      permission: typeof data.permission === 'string' ? data.permission : undefined,
+      service: typeof data.service === 'string' ? data.service : undefined,
+      autoplay: typeof data.autoplay === 'string' ? data.autoplay : undefined
+    });
   };
 }
 
@@ -268,6 +348,7 @@ function handleCloseRoom(io, socket) {
 
         // Limpiar timers
         clearAllRoomTimers(roomCode);
+        revokeTemporaryTvSockets(io, roomCode);
 
         // Eliminar sala
         await Room.findByIdAndDelete(room._id);
@@ -376,7 +457,13 @@ function handleKickPlayer(io, socket) {
 function handleDisconnect(io, socket) {
   return async () => {
     try {
-      if (!socket.playerId || socket.playerId === 'tv-display' || !socket.roomCode) return;
+      if (socket.playerId === 'tv-display') {
+        if (socket.tvAuthorizationType === 'temporary') {
+          releaseTemporaryTvSocket(socket.roomCode, socket);
+        }
+        return;
+      }
+      if (!socket.playerId || !socket.roomCode) return;
 
       const room = await Room.findOne({ code: socket.roomCode }).populate('players');
       const player = await Player.findById(socket.playerId);
@@ -419,6 +506,7 @@ function handleDisconnect(io, socket) {
  */
 function registerRoomHandlers(io, socket) {
   socket.on('join-room', handleJoinRoom(io, socket));
+  socket.on('tv-media-status', handleTvMediaStatus(io, socket));
   socket.on('leave-room', handleLeaveRoom(io, socket));
   socket.on('close-room', handleCloseRoom(io, socket));
   socket.on('delete-all-rooms', handleDeleteAllRooms(io, socket));
@@ -431,6 +519,7 @@ module.exports = {
   broadcastRoomInfo,
   // Exports individuales para testing
   handleJoinRoom,
+  handleTvMediaStatus,
   handleLeaveRoom,
   handleCloseRoom,
   handleDeleteAllRooms,

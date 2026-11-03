@@ -98,16 +98,16 @@ const GAME_CONSTANTS = {
  */
 const CHALLENGE_POOLS = {
   dance: [
-    { text: 'Baila Thriller', deezerId: '555639' },
-    { text: 'Baila como robot', deezerId: '3135556' },
-    { text: 'Baila Uptown Funk', deezerId: '92734438' },
-    { text: 'Baila Despacito', deezerId: '623698142' },
-    { text: 'Baila salsa: Vivir Mi Vida', deezerId: '68771815' },
-    { text: 'Baila salsa: La Rebelión', deezerId: '6123964' },
-    { text: 'Baila merengue: Suavemente', deezerId: '3135012761' },
-    { text: 'Baila bachata: Obsesión', deezerId: '64848628' },
-    { text: 'Baila reggaeton: Gasolina', deezerId: '3165861441' },
-    { text: 'Baila reggaeton: Con Calma', deezerId: '619949882' }
+    { text: 'Baila Thriller', deezerId: '555639', audioFile: 'michael-jackson-thriller.mp3' },
+    { text: 'Baila como robot', deezerId: '3135556', audioFile: 'baile-robot.mp3' },
+    { text: 'Baila Uptown Funk', deezerId: '92734438', audioFile: 'uptown-funk.mp3' },
+    { text: 'Baila Despacito', deezerId: '623698142', audioFile: 'despacito.mp3' },
+    { text: 'Baila salsa: Vivir Mi Vida', deezerId: '68771815', audioFile: 'vivir-mi-vida.mp3' },
+    { text: 'Baila salsa: La Rebelión', deezerId: '6123964', audioFile: 'la-rebelion.mp3' },
+    { text: 'Baila merengue: Suavemente', deezerId: '3135012761', audioFile: 'suavemente.mp3' },
+    { text: 'Baila bachata: Obsesión', deezerId: '64848628', audioFile: 'obsesion.mp3' },
+    { text: 'Baila reggaeton: Gasolina', deezerId: '3165861441', audioFile: 'gasolina.mp3' },
+    { text: 'Baila reggaeton: Con Calma', deezerId: '619949882', audioFile: 'con-calma.mp3' }
   ],
   sing: [
     { text: 'Canta Thriller', deezerId: '555639' },
@@ -118,10 +118,10 @@ const CHALLENGE_POOLS = {
     { text: 'Canta Feliz Navidad', deezerId: '991049' }
   ],
   group: [
-    { text: 'Todos bailan en círculo', deezerId: '92734438' },
-    { text: 'Todos cantan juntos', deezerId: '68771815' },
-    { text: 'Batalla de baile grupal', deezerId: '3165861441' },
-    { text: 'Foto grupal bailando', deezerId: '619949882' }
+    { text: 'Todos bailan en círculo', deezerId: '92734438', audioFile: 'uptown-funk.mp3' },
+    { text: 'Todos cantan juntos', deezerId: '68771815', audioFile: 'vivir-mi-vida.mp3' },
+    { text: 'Batalla de baile grupal', deezerId: '3165861441', audioFile: 'gasolina.mp3' },
+    { text: 'Foto grupal bailando', deezerId: '619949882', audioFile: 'con-calma.mp3' }
   ],
   trivia: [
     

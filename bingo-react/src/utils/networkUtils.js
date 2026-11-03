@@ -4,6 +4,9 @@
  * Si ya estamos en una IP de red, la usa directamente
  */
 export const getShareableUrl = () => {
+  const configuredOrigin = import.meta.env.VITE_SHAREABLE_ORIGIN;
+  if (configuredOrigin) return configuredOrigin.replace(/\/$/, '');
+
   const hostname = window.location.hostname;
   const port = window.location.port;
 
@@ -13,10 +16,11 @@ export const getShareableUrl = () => {
   }
 
   // Si estamos en localhost, necesitamos la IP de red
-  // Como no podemos obtener la IP desde el navegador, usamos una IP hardcodeada o la del .env
-  // En producción, esto debería venir del servidor o ser configurable
-  const networkIp = import.meta.env.VITE_NETWORK_IP || '192.168.1.39';
-  return `${window.location.protocol}//${networkIp}${port ? ':' + port : ''}`;
+  // A LAN host must be configured explicitly because a browser cannot discover
+  // the server's private IP without exposing network information.
+  const networkIp = import.meta.env.VITE_NETWORK_IP;
+  if (networkIp) return `${window.location.protocol}//${networkIp}${port ? ':' + port : ''}`;
+  return window.location.origin;
 };
 
 /**

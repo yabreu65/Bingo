@@ -1,0 +1,9 @@
+# Explicitly gated fresh Mongo initialization for the Bingo Contabo trial.
+# Applying this overlay recreates only the Mongo service mount against a new
+# Bingo-only volume pair. It does not delete or modify the existing volumes.
+# Do not transfer/apply this overlay until the owner authorizes the cutover.
+volumes:
+  mongo-data:
+    name: bingo-contabo-trial-020d654_mongo-data-reinit
+  mongo-config-data:
+    name: bingo-contabo-trial-020d654_mongo-config-data-reinit

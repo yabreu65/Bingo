@@ -18,6 +18,15 @@ describe('challenge rules', () => {
     expect(evaluateRiddleAnswer('la respuesta es árbol', accepted)).toBe(false);
   });
 
+  test('acepta respuestas naturales de adivinanzas con o sin articulo, sin aceptar frases diferentes', () => {
+    expect(evaluateRiddleAnswer('el reloj', ['reloj'])).toBe(true);
+    expect(evaluateRiddleAnswer('un reloj', ['reloj'])).toBe(true);
+    expect(evaluateRiddleAnswer('nube', ['una nube'])).toBe(true);
+    expect(evaluateRiddleAnswer('una escalera', ['la escalera'])).toBe(true);
+    expect(evaluateRiddleAnswer('una nube negra', ['una nube'])).toBe(false);
+    expect(evaluateRiddleAnswer('no es un reloj', ['reloj'])).toBe(false);
+  });
+
   test('returns deterministic points by challenge outcome', () => {
     expect(getChallengePoints('riddle', { success: true })).toBe(30);
     expect(getChallengePoints('karaoke', { success: true })).toBe(75);

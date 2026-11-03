@@ -57,7 +57,7 @@ function getNextChallengeType(lastChallengeType, enabledTypes = null) {
     GAME_CONSTANTS.CHALLENGE_TYPES.KARAOKE
   ];
   const rotation = Array.isArray(enabledTypes) && enabledTypes.length > 0
-    ? enabledTypes.filter(type => CHALLENGE_POOLS[type])
+    ? enabledTypes.filter(type => type !== 'sing' && CHALLENGE_POOLS[type])
     : defaultRotation;
 
   if (rotation.length === 0) return null;
@@ -273,6 +273,9 @@ function createChallengeData(challengeType, selectedPlayer, challenge) {
     baseData.data = challenge.text || challenge;
     baseData.text = challenge.text;
     baseData.deezerId = challenge.deezerId;
+    if (['dance', 'group'].includes(challengeType) && /^[a-z0-9-]+\.mp3$/.test(challenge.audioFile || '')) {
+      baseData.audioFile = challenge.audioFile;
+    }
   }
 
   return baseData;

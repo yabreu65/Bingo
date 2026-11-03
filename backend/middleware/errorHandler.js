@@ -1,35 +1,56 @@
 const logger = require('../config/logger');
 const { AppError } = require('../utils/errors');
+const {
+  redactSensitiveText,
+  sanitizeBody,
+  sanitizeLogValue,
+  sanitizeRequestUrl
+} = require('../utils/redactSecrets');
 
 /**
  * Middleware centralizado de manejo de errores
  * Debe ser el último middleware en la cadena
  */
 const errorHandler = (err, req, res, next) => {
-  // Log del error
-  logger.logError(err, {
+  const safeError = err instanceof Error
+    ? sanitizeLogValue(err)
+    : { name: 'Error', message: redactSensitiveText(String(err)) };
+
+  logger.logError(safeError, {
     method: req.method,
-    url: req.originalUrl,
+    url: sanitizeRequestUrl(req.originalUrl),
     ip: req.ip,
     userId: req.user?.userId,
-    body: req.body
+    body: sanitizeBody(req.body)
   });
 
-  // Si es un error operacional conocido (AppError)
   if (err.isOperational) {
-    return res.status(err.statusCode).json(err.toJSON());
+    return res.status(err.statusCode).json(sanitizeLogValue(err.toJSON()));
   }
 
-  // Errores de Mongoose/MongoDB
+  if (err.type === 'entity.parse.failed') {
+    return res.status(400).json({
+      success: false,
+      error: { code: 'INVALID_JSON', message: 'JSON malformado' }
+    });
+  }
+
+  if (err.type === 'entity.too.large') {
+    return res.status(413).json({
+      success: false,
+      error: { code: 'PAYLOAD_TOO_LARGE', message: 'La solicitud es demasiado grande' }
+    });
+  }
+
   if (err.name === 'ValidationError') {
     return res.status(400).json({
       success: false,
       error: {
         code: 'VALIDATION_ERROR',
         message: 'Error de validación',
-        details: Object.values(err.errors).map(e => ({
-          field: e.path,
-          message: e.message
+        details: Object.values(err.errors || {}).map((error) => ({
+          field: redactSensitiveText(error.path),
+          message: redactSensitiveText(error.message)
         }))
       }
     });
@@ -38,66 +59,47 @@ const errorHandler = (err, req, res, next) => {
   if (err.name === 'CastError') {
     return res.status(400).json({
       success: false,
-      error: {
-        code: 'INVALID_ID',
-        message: `ID inválido: ${err.value}`
-      }
+      error: { code: 'INVALID_ID', message: 'ID inválido' }
     });
   }
 
   if (err.code === 11000) {
-    const field = Object.keys(err.keyPattern)[0];
+    const field = Object.keys(err.keyPattern || {})[0] || 'registro';
     return res.status(409).json({
       success: false,
       error: {
         code: 'DUPLICATE_ENTRY',
-        message: `Ya existe un registro con ese ${field}`
+        message: `Ya existe un registro con ese ${redactSensitiveText(field)}`
       }
     });
   }
 
-  // Errores de JWT
   if (err.name === 'JsonWebTokenError') {
     return res.status(401).json({
       success: false,
-      error: {
-        code: 'INVALID_TOKEN',
-        message: 'Token inválido'
-      }
+      error: { code: 'INVALID_TOKEN', message: 'Token inválido' }
     });
   }
 
   if (err.name === 'TokenExpiredError') {
     return res.status(401).json({
       success: false,
-      error: {
-        code: 'TOKEN_EXPIRED',
-        message: 'El token ha expirado'
-      }
+      error: { code: 'TOKEN_EXPIRED', message: 'El token ha expirado' }
     });
   }
 
-  // Errores de Multer (file upload)
   if (err.name === 'MulterError') {
     return res.status(400).json({
       success: false,
-      error: {
-        code: 'FILE_UPLOAD_ERROR',
-        message: err.message
-      }
+      error: { code: 'FILE_UPLOAD_ERROR', message: 'No se pudo procesar el archivo' }
     });
   }
-
-  // Error genérico desconocido (500)
-  // En producción, no exponer detalles del error
-  const isDevelopment = process.env.NODE_ENV !== 'production';
 
   return res.status(500).json({
     success: false,
     error: {
       code: 'INTERNAL_SERVER_ERROR',
-      message: isDevelopment ? err.message : 'Error interno del servidor',
-      ...(isDevelopment && { stack: err.stack })
+      message: 'Error interno del servidor'
     }
   });
 };
@@ -111,7 +113,7 @@ const notFoundHandler = (req, res, next) => {
     success: false,
     error: {
       code: 'NOT_FOUND',
-      message: `Ruta ${req.method} ${req.originalUrl} no encontrada`
+      message: `Ruta ${req.method} ${sanitizeRequestUrl(req.originalUrl)} no encontrada`
     }
   });
 };

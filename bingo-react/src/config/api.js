@@ -9,9 +9,15 @@
  * Si estamos en localhost, usa localhost
  */
 export const getBackendUrl = () => {
+  // Production uses the HTTPS reverse proxy for both API and Socket.IO.
+  if (import.meta.env.PROD) return window.location.origin;
   // Si hay una variable de entorno específica, usarla
-  if (import.meta.env.VITE_BACKEND_URL) {
-    return import.meta.env.VITE_BACKEND_URL;
+  const configuredUrl = import.meta.env.VITE_BACKEND_URL;
+  if (configuredUrl === 'same-origin' || configuredUrl === '/') {
+    return window.location.origin;
+  }
+  if (configuredUrl) {
+    return configuredUrl.replace(/\/$/, '');
   }
 
   // Detectar automáticamente basándose en el hostname

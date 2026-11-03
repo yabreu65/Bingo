@@ -261,9 +261,10 @@ async function triggerChallenge(io, roomCode, options = {}) {
   // Obtener el siguiente tipo de reto basado en el último tipo del juego
   const lastType = game.lastChallengeType || null;
   const configuredTypes = Object.entries(room.config?.enabledChallengeTypes || {})
-    .filter(([, enabled]) => enabled !== false)
+    .filter(([type, enabled]) => enabled !== false && type !== 'sing')
     .map(([type]) => type);
-  const nextType = options.type || getNextChallengeType(lastType, configuredTypes);
+  const nextType = options.type === 'sing' ? null : (options.type || getNextChallengeType(lastType, configuredTypes));
+  if (!nextType) { logger.warn('Canto desactivado; karaoke disponible'); return; }
 
   logger.info(`[${roomCode}] Challenge type: ${nextType} (previous: ${lastType})`);
 
@@ -316,11 +317,17 @@ async function triggerChallenge(io, roomCode, options = {}) {
     title: challenge.title,
     artist: challenge.artist,
     localFile: challenge.localFile,
+    audioFile: ['dance', 'group'].includes(nextType) ? challenge.audioFile : undefined,
+    startSeconds: ['dance', 'group'].includes(nextType) ? (room.config?.challengeMusicStartSeconds ?? 20) : undefined,
     points: Number.isInteger(challenge.points) ? challenge.points : null,
     startTime: new Date(),
     duration: nextType === GAME_CONSTANTS.CHALLENGE_TYPES.KARAOKE
       ? Math.min(600, Math.max(30, Number(room.config?.karaokeDuration) || 60))
-      : (Number.isInteger(challenge.duration) ? challenge.duration : GAME_CONSTANTS.CHALLENGE_DURATION),
+      : nextType === GAME_CONSTANTS.CHALLENGE_TYPES.DANCE
+        ? (room.config?.danceDurationSeconds ?? 30)
+        : nextType === GAME_CONSTANTS.CHALLENGE_TYPES.GROUP
+          ? (room.config?.groupDurationSeconds ?? 45)
+          : (Number.isInteger(challenge.duration) ? challenge.duration : GAME_CONSTANTS.CHALLENGE_DURATION),
     responses: [],
     pointsAwarded: false
   };
@@ -330,6 +337,10 @@ async function triggerChallenge(io, roomCode, options = {}) {
   const challengeData = createChallengeData(nextType, chosenPlayer, challenge);
   challengeData.challengeId = challengeId;
   challengeData.duration = game.activeChallenge.duration;
+  if (game.activeChallenge.audioFile) {
+    challengeData.audioFile = game.activeChallenge.audioFile;
+    challengeData.startSeconds = game.activeChallenge.startSeconds;
+  }
   console.log('🎯 Challenge data being sent:', JSON.stringify(challengeData, null, 2));
   game.numbersSinceChallenge = 0;
 
@@ -583,6 +594,7 @@ function handleStartGame(io, socket) {
       const game = new Game({
         room: room._id,
         gameMode: room.config?.gameMode || 'full',
+        gameModes: room.config?.gameModes?.length ? room.config.gameModes : [room.config?.gameMode || 'full'],
         startTime: new Date(),
         availablePools: room.config?.managedContentEnabled ? await loadChallengePoolsForRoom(room._id) : initializeChallengePools(),
         lastChallengeType: null
@@ -898,6 +910,9 @@ function handleLaunchEvent(io, socket) {
           name: winner.name,
           message: `¡Felicidades a ${winner.name}, el ganador del Cartonazo!`
         });
+      } else if (type === 'sing') {
+        socket.emit('error', { message: 'El reto de canto está congelado. Utiliza karaoke.' });
+        return;
       } else if (type === 'challenge' || Object.values(GAME_CONSTANTS.CHALLENGE_TYPES).includes(type)) {
         if (!room) {
           socket.emit('error', { message: 'Sala no encontrada' });

@@ -3,7 +3,7 @@ jest.mock('../models/Game', () => ({ findById: jest.fn() }));
 jest.mock('../models/Recording', () => ({ getPlayerRecordings: jest.fn() }));
 jest.mock('../services/deezerService', () => ({ searchTracks: jest.fn() }));
 jest.mock('../config/logger', () => ({
-  error: jest.fn(), info: jest.fn(), warn: jest.fn(), debug: jest.fn()
+  error: jest.fn(), info: jest.fn(), warn: jest.fn(), debug: jest.fn(), logError: jest.fn()
 }));
 
 const express = require('express');
@@ -17,6 +17,8 @@ const roomRoutes = require('../routes/roomRoutes');
 const gameRoutes = require('../routes/gameRoutes');
 const deezerRoutes = require('../routes/deezerRoutes');
 const recordingsRoutes = require('../routes/recordings');
+const requestLogger = require('../middleware/requestLogger');
+const { errorHandler } = require('../middleware/errorHandler');
 
 const app = express();
 app.use(express.json());
@@ -24,6 +26,15 @@ app.use('/api/rooms', roomRoutes);
 app.use('/api/games', gameRoutes);
 app.use('/api/deezer', deezerRoutes);
 app.use('/api/recordings', recordingsRoutes);
+
+const errorMiddlewareApp = express();
+errorMiddlewareApp.use(express.json());
+errorMiddlewareApp.use(requestLogger);
+errorMiddlewareApp.post('/failure', (req, res, next) => {
+  next(new Error(`Failure password=${req.body.profile.password} ${req.get('x-tv-session-token')}`));
+});
+errorMiddlewareApp.post('/malformed', (req, res) => res.json({ success: true }));
+errorMiddlewareApp.use(errorHandler);
 
 afterEach(() => jest.clearAllMocks());
 
@@ -105,6 +116,51 @@ describe('HTTP error disclosure boundaries', () => {
 
     expect(response.status).toBe(403);
     expect(Room.findOne).toHaveBeenCalledWith({ code: 'ROOMA1' });
+  });
+
+  test('redacts secrets from the real error middleware response and log context', async () => {
+    const password = 'HTTP_PASSWORD_CANARY';
+    const bearer = 'HTTP_SESSION_CANARY';
+    const urlToken = 'HTTP_URL_TOKEN_CANARY';
+
+    const response = await request(errorMiddlewareApp)
+      .post(`/failure?tvSessionToken=${urlToken}`)
+      .set('x-tv-session-token', `Bearer ${bearer}`)
+      .send({ profile: { password }, entries: [{ playerCapability: 'HTTP_CAPABILITY_CANARY' }] });
+
+    expect(response.status).toBe(500);
+    expect(response.text).not.toContain(password);
+    expect(response.text).not.toContain(bearer);
+    expect(response.text).not.toContain(urlToken);
+    expect(response.text).not.toContain('HTTP_CAPABILITY_CANARY');
+    expect(logger.logError).toHaveBeenCalledTimes(1);
+    const [loggedError, context] = logger.logError.mock.calls[0];
+    expect(loggedError.message).not.toContain(password);
+    expect(loggedError.message).not.toContain(bearer);
+    expect(JSON.stringify(context)).not.toContain(password);
+    expect(JSON.stringify(context)).not.toContain(urlToken);
+    expect(JSON.stringify(context)).not.toContain('HTTP_CAPABILITY_CANARY');
+    expect(logger.error).toHaveBeenCalledTimes(1);
+    expect(JSON.stringify(logger.error.mock.calls)).not.toContain(password);
+    expect(JSON.stringify(logger.error.mock.calls)).not.toContain(bearer);
+    expect(JSON.stringify(logger.error.mock.calls)).not.toContain(urlToken);
+    expect(JSON.stringify(logger.error.mock.calls)).not.toContain('HTTP_CAPABILITY_CANARY');
+  });
+
+  test('returns a safe client error and does not log malformed JSON contents', async () => {
+    const canary = 'MALFORMED_TOKEN_CANARY';
+    const response = await request(errorMiddlewareApp)
+      .post('/malformed?token=URL_MALFORMED_CANARY')
+      .set('Content-Type', 'application/json')
+      .send(`{"token":"${canary}"`);
+
+    expect(response.status).toBe(400);
+    expect(response.text).not.toContain(canary);
+    expect(response.text).not.toContain('URL_MALFORMED_CANARY');
+    expect(logger.logError).toHaveBeenCalledTimes(1);
+    const [loggedError] = logger.logError.mock.calls[0];
+    expect(JSON.stringify(loggedError)).not.toContain(canary);
+    expect(loggedError.message).not.toContain(canary);
   });
 
   test('does not include internal details in recording errors', async () => {

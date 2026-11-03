@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import toast from 'react-hot-toast';
 import { API_URL } from '../../config/api';
+import { getAdmissionToken } from '../../utils/admissionToken';
 import { Button } from '../../design-system/primitives';
 import './QuickJoin.css';
 
@@ -72,6 +73,7 @@ const QuickJoin = ({ roomCode, onJoinComplete }) => {
         },
         body: JSON.stringify({
           roomCode: normalizedRoomCode,
+          admissionToken: await getAdmissionToken(normalizedRoomCode),
           playerName: playerName.trim(),
         }),
       });
@@ -93,6 +95,13 @@ const QuickJoin = ({ roomCode, onJoinComplete }) => {
         setError('No se pudo establecer una sesión segura. Intenta unirte de nuevo.');
         setLoading(false);
         setLoadingStep('');
+        return;
+      }
+
+      if (joinData.player.cardNumber && joinData.player.bingoCard?.matrix?.length) {
+        onJoinComplete({ roomCode: joinData.room.code, playerId: joinData.player._id,
+          playerName: joinData.player.name, isHost: false, playerCapability: joinData.playerCapability,
+          room: joinData.room, cardNumber: joinData.player.cardNumber, bingoCard: joinData.player.bingoCard });
         return;
       }
 
@@ -146,7 +155,9 @@ const QuickJoin = ({ roomCode, onJoinComplete }) => {
 
     } catch (err) {
       console.error('Error in quick join:', err);
-      const errorMsg = 'Error de conexión. Asegúrate de que el servidor esté corriendo.';
+      const errorMsg = err?.code === 'ADMISSION_LOCK_REQUIRED'
+        ? err.message
+        : 'Error de conexión. Asegúrate de que el servidor esté corriendo.';
       setError(errorMsg);
       toast.error(errorMsg);
     } finally {

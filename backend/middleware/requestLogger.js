@@ -1,4 +1,5 @@
 const logger = require('../config/logger');
+const { sanitizeBody, sanitizeRequestUrl } = require('../utils/redactSecrets');
 
 /**
  * Middleware para logging de requests HTTP
@@ -14,6 +15,7 @@ const requestLogger = (req, res, next) => {
   res.end = function(...args) {
     const duration = Date.now() - startTime;
     const statusCode = res.statusCode;
+    const sanitizedUrl = sanitizeRequestUrl(req.originalUrl);
 
     // Determinar nivel de log basado en status code
     let logLevel = 'info';
@@ -24,9 +26,9 @@ const requestLogger = (req, res, next) => {
     }
 
     // Log del request
-    logger[logLevel](`${req.method} ${req.originalUrl}`, {
+    logger[logLevel](`${req.method} ${sanitizedUrl}`, {
       method: req.method,
-      url: req.originalUrl,
+      url: sanitizedUrl,
       status: statusCode,
       duration: `${duration}ms`,
       ip: req.ip || req.connection.remoteAddress,
@@ -44,22 +46,6 @@ const requestLogger = (req, res, next) => {
   next();
 };
 
-/**
- * Sanitiza el body del request para no logear información sensible
- */
-function sanitizeBody(body) {
-  if (!body) return undefined;
-
-  const sanitized = { ...body };
-  const sensitiveFields = ['password', 'token', 'refreshToken', 'secret'];
-
-  sensitiveFields.forEach(field => {
-    if (sanitized[field]) {
-      sanitized[field] = '***REDACTED***';
-    }
-  });
-
-  return sanitized;
-}
-
 module.exports = requestLogger;
+module.exports.sanitizeBody = sanitizeBody;
+module.exports.sanitizeRequestUrl = sanitizeRequestUrl;

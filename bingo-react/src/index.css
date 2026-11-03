@@ -169,7 +169,6 @@ textarea:focus-visible {
 
 /* ========== IMPRESIÓN ========== */
 @media print {
-  .snowflakes-container,
   .confetti-container {
     display: none;
   }

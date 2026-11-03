@@ -76,7 +76,10 @@ afterEach(() => {
 describe('guest player capability HTTP boundary', () => {
   test('issues a per-player secret on join and returns only its hash-free public player/room', async () => {
     const room = makeRoom();
-    jest.spyOn(Room, 'findOne').mockResolvedValue(room);
+    jest.spyOn(mongoose.connection, 'transaction').mockImplementation(fn => fn({}));
+    jest.spyOn(Room, 'findOne').mockReturnValue({ session: jest.fn().mockResolvedValue(room) });
+    jest.spyOn(Room, 'findOneAndUpdate').mockResolvedValue(room);
+    jest.spyOn(Player, 'findOne').mockReturnValue({ select: () => ({ session: async () => null }) });
     const savedPlayers = [];
     jest.spyOn(Player.prototype, 'save').mockImplementation(async function savePlayer() {
       savedPlayers.push(this);
@@ -85,7 +88,7 @@ describe('guest player capability HTTP boundary', () => {
 
     const response = await request(app)
       .post('/api/rooms/join')
-      .send({ roomCode: room.code, playerName: 'Guest A' });
+      .send({ roomCode: room.code, playerName: 'Guest A', admissionToken: `${room.code}.${'s'.repeat(43)}` });
 
     expect(response.status).toBe(200);
     expect(response.body.playerCapability).toEqual(expect.any(String));
@@ -141,6 +144,9 @@ describe('guest player capability HTTP boundary', () => {
     const room = makeRoom({ _id: roomId, players: [attacker, target] });
     jest.spyOn(Room, 'findOne').mockReturnValue(asQuery(room));
     jest.spyOn(Player, 'findById').mockResolvedValue(target);
+    jest.spyOn(mongoose.connection, 'transaction').mockImplementation(fn => fn({}));
+    jest.spyOn(Room, 'findOneAndUpdate').mockResolvedValue(room);
+    jest.spyOn(Player, 'findOne').mockReturnValue({ session: async () => null });
     jest.spyOn(Player, 'findOneAndUpdate').mockResolvedValue(null);
 
     const response = await request(app)
@@ -168,6 +174,10 @@ describe('guest player capability HTTP boundary', () => {
     const room = makeRoom({ _id: roomId, players: [player] });
     jest.spyOn(Room, 'findOne').mockReturnValue(asQuery(room));
     jest.spyOn(Player, 'findById').mockResolvedValue(player);
+    jest.spyOn(mongoose.connection, 'transaction').mockImplementation(fn => fn({}));
+    jest.spyOn(Room, 'findOneAndUpdate').mockResolvedValue(room);
+    jest.spyOn(Player, 'findOne').mockReturnValue({ session: async () => player });
+    jest.spyOn(Player, 'exists').mockReturnValue({ session: async () => null });
     jest.spyOn(Player, 'findOneAndUpdate').mockImplementation(async (_filter, update) => {
       player.cardNumber = update.$set.cardNumber;
       player.bingoCard.matrix = update.$set['bingoCard.matrix'];
@@ -513,6 +523,41 @@ describe('player-id REST ownership', () => {
     expect(response.status).toBe(403);
     expect(player.stats.points).toBe(10);
     expect(Player.findOneAndUpdate).not.toHaveBeenCalled();
+  });
+
+  test('preserves organizer-authorized score adjustments', async () => {
+    const roomId = new mongoose.Types.ObjectId();
+    const hostId = new mongoose.Types.ObjectId();
+    const hostCapability = 'host-capability-for-score-test';
+    const host = {
+      _id: hostId,
+      room: roomId,
+      isHost: true,
+      stats: { points: 10 },
+      name: 'Organizer'
+    };
+    const room = makeRoom({
+      _id: roomId,
+      host: hostId,
+      hostCapabilityHash: createHostCapabilityHash(hostCapability, roomId),
+      players: [host]
+    });
+    jest.spyOn(Player, 'findById').mockReturnValue(asPlayerQuery(host));
+    jest.spyOn(Room, 'findById').mockReturnValue({ select: jest.fn().mockResolvedValue(room) });
+    jest.spyOn(Player, 'findOneAndUpdate').mockResolvedValue({ ...host, stats: { points: 15 } });
+
+    const response = await request(app)
+      .patch(`/api/players/${hostId}/points`)
+      .set('x-room-host-capability', hostCapability)
+      .send({ points: 5 });
+
+    expect(response.status).toBe(200);
+    expect(response.body.player.stats.points).toBe(15);
+    expect(Player.findOneAndUpdate).toHaveBeenCalledWith(
+      { _id: hostId, room: roomId, isHost: true },
+      { $inc: { 'stats.points': 5 } },
+      { new: true, runValidators: true }
+    );
   });
 });
 

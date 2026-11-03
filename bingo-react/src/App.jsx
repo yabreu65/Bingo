@@ -1,11 +1,11 @@
-import { lazy, Suspense, useState, useEffect } from 'react';
+import { lazy, Suspense, useState, useEffect, useRef } from 'react';
 import { Toaster } from 'react-hot-toast';
 import toast from 'react-hot-toast';
 import { useGame } from './context/useGame';
 import { useSocket } from './context/useSocket';
-import Snowflakes from './components/UI/Snowflakes';
 import { API_URL } from './config/api';
-import { listenForTVAuthorization } from './utils/tvAuthorization';
+import { isTVAuthorizationToken, listenForTVAuthorization } from './utils/tvAuthorization';
+import { canRestorePlayerEntrySession, resolveEntryRoute } from './utils/entryRoutes';
 import './App.css';
 
 const STORAGE_KEY = 'bingo_session';
@@ -38,22 +38,102 @@ function App() {
   const [mode, setMode] = useState(null); // 'single' or 'multi'
   const [roomData, setRoomData] = useState(null);
   const [tvCapability, setTvCapability] = useState(null);
+  const [tvSessionToken, setTvSessionToken] = useState(null);
+  const [tvAuthorizationError, setTvAuthorizationError] = useState(null);
+  const tvAuthorizationRequests = useRef(new Set());
   const [cardSelected, setCardSelected] = useState(false);
   const [inWaitingRoom, setInWaitingRoom] = useState(false);
   const [isReconnecting, setIsReconnecting] = useState(true);
   const [showReconnectPrompt, setShowReconnectPrompt] = useState(false);
   const [savedSessionData, setSavedSessionData] = useState(null);
 
-  // Detectar parámetros de URL
-  const urlParams = new URLSearchParams(window.location.search);
-  const tvRoomCode = urlParams.get('tv');
-  const quickJoinRoomCode = urlParams.get('room');
+  const entryRoute = resolveEntryRoute(window.location);
+  const tvRoomCode = entryRoute.type === 'tv' ? entryRoute.roomCode : null;
+  const tvToken = entryRoute.type === 'tv' ? entryRoute.tvToken : null;
+  const quickJoinRoomCode = entryRoute.type === 'player' ? entryRoute.roomCode : null;
 
   // Receive the scoped TV credential without putting it in the URL.
   useEffect(() => {
     if (!tvRoomCode) return undefined;
     return listenForTVAuthorization(window, tvRoomCode, setTvCapability);
   }, [tvRoomCode]);
+
+  useEffect(() => {
+    if (!tvRoomCode || tvCapability) return undefined;
+
+    const normalizedRoomCode = tvRoomCode.toUpperCase();
+    const storageKey = `bingo-tv-session:${normalizedRoomCode}`;
+    const hasStoredSession = Boolean(sessionStorage.getItem(storageKey));
+    if (!isTVAuthorizationToken(tvToken) && !hasStoredSession) return undefined;
+    const requestKey = `${normalizedRoomCode}:${tvToken || 'stored-session'}`;
+    if (tvAuthorizationRequests.current.has(requestKey)) return undefined;
+    tvAuthorizationRequests.current.add(requestKey);
+    let renewalTimer;
+
+    const saveSession = (token, expiresAt) => {
+      setTvSessionToken(token);
+      sessionStorage.setItem(storageKey, JSON.stringify({ token, expiresAt }));
+    };
+
+    const scheduleRenewal = (token, expiresAt) => {
+      const delay = Math.max(new Date(expiresAt).getTime() - Date.now() - 30_000, 30_000);
+      renewalTimer = window.setTimeout(async () => {
+        try {
+          const response = await fetch(`${API_URL}/api/rooms/${normalizedRoomCode}/tv-authorization/renew`, {
+            method: 'POST',
+            headers: { 'x-tv-session-token': token }
+          });
+          const data = await response.json();
+          if (!response.ok || !data.tvSessionToken && !data.expiresAt) throw new Error(data.error || 'Sesión de TV no renovable');
+          saveSession(token, data.expiresAt);
+          scheduleRenewal(token, data.expiresAt);
+        } catch (error) {
+          setTvAuthorizationError(error.message || 'La sesión temporal de TV expiró');
+        }
+      }, delay);
+    };
+
+    const claimOrRestore = async () => {
+      try {
+        let token;
+        let expiresAt;
+        if (isTVAuthorizationToken(tvToken)) {
+          const response = await fetch(`${API_URL}/api/rooms/${normalizedRoomCode}/tv-authorization/claim`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ token: tvToken })
+          });
+          const data = await response.json();
+          if (!response.ok) throw new Error(data.error || 'El enlace temporal de TV no es válido');
+          token = data.tvSessionToken;
+          expiresAt = data.expiresAt;
+          window.history.replaceState({}, document.title, `/tv/${encodeURIComponent(normalizedRoomCode)}`);
+        } else {
+          const stored = JSON.parse(sessionStorage.getItem(storageKey) || 'null');
+          token = stored?.token;
+          expiresAt = stored?.expiresAt;
+          if (!isTVAuthorizationToken(token)) throw new Error('Abrí un enlace temporal de TV válido para esta sala');
+          const response = await fetch(`${API_URL}/api/rooms/${normalizedRoomCode}/tv-authorization/renew`, {
+            method: 'POST',
+            headers: { 'x-tv-session-token': token }
+          });
+          const data = await response.json();
+          if (!response.ok) throw new Error(data.error || 'La sesión temporal de TV expiró o fue revocada');
+          expiresAt = data.expiresAt;
+        }
+        saveSession(token, expiresAt);
+        scheduleRenewal(token, expiresAt);
+      } catch (error) {
+        tvAuthorizationRequests.current.delete(requestKey);
+        setTvAuthorizationError(error.message || 'No se pudo autorizar esta TV');
+      }
+    };
+
+    claimOrRestore();
+    return () => {
+      window.clearTimeout(renewalTimer);
+    };
+  }, [tvRoomCode, tvToken, tvCapability]);
 
   // Listener global para cierre de sala
   useEffect(() => {
@@ -86,14 +166,22 @@ function App() {
   useEffect(() => {
     const loadSavedSession = async () => {
       try {
-        // NO cargar sesión si hay parámetros de URL (QR o TV)
-        if (tvRoomCode || quickJoinRoomCode) {
-          console.log('🔗 URL params detected, skipping session load');
+        // TV never reads a player's saved session. For QR entry, restore only
+        // an already authenticated guest of this exact room, otherwise join anew.
+        if (tvRoomCode) {
           setIsReconnecting(false);
           return;
         }
 
         const savedSession = localStorage.getItem(STORAGE_KEY);
+        if (quickJoinRoomCode) {
+          let candidate;
+          try { candidate = JSON.parse(savedSession || 'null'); } catch { candidate = null; }
+          if (!canRestorePlayerEntrySession(quickJoinRoomCode, candidate)) {
+            setIsReconnecting(false);
+            return;
+          }
+        }
         if (!savedSession) {
           setIsReconnecting(false);
           return;
@@ -159,18 +247,17 @@ function App() {
           }
         }
 
-        // Si NO tiene cartón, necesitamos obtener los datos de la sala para CardSelection
+        // Siempre refrescar la sala para recibir cambios de modalidad y política
+        // multimedia también cuando la sesión ya conserva un cartón.
         let roomInfo = null;
-        if (!hasCard && !session.isHost) {
-          try {
-            const roomResponse = await fetch(`${API_URL}/api/rooms/${session.roomCode}`);
-            if (roomResponse.ok) {
-              const roomDataFromAPI = await roomResponse.json();
-              roomInfo = roomDataFromAPI.room;
-            }
-          } catch (err) {
-            console.error('Error fetching room data:', err);
+        try {
+          const roomResponse = await fetch(`${API_URL}/api/rooms/${session.roomCode}`);
+          if (roomResponse.ok) {
+            const roomDataFromAPI = await roomResponse.json();
+            roomInfo = roomDataFromAPI.room;
           }
+        } catch (err) {
+          console.error('Error fetching room data:', err);
         }
 
         // Cargar la sesión directamente desde localStorage
@@ -263,7 +350,7 @@ function App() {
 
   const handleRoomReady = (data) => {
     setRoomData(data);
-    if (data.isHost) {
+    if (data.isHost || (data.cardNumber && data.bingoCard?.matrix?.length)) {
       setCardSelected(true);
       setInWaitingRoom(true);
     } else {
@@ -309,35 +396,39 @@ function App() {
   };
 
   // Vista de TV - Pantalla para mostrar en televisor
-  // URL de ejemplo: http://192.168.1.39:5173/?tv=ABC123
+  // URL de ejemplo: http://192.168.1.39:5173/tv/ABC123
   if (tvRoomCode) {
     return (
       <div className="app">
         <Toaster position="top-right" toastOptions={{ duration: 3000 }} />
         <Suspense fallback={<LoadingScreen />}>
-          <TVDisplay roomCode={tvRoomCode.toUpperCase()} tvCapability={tvCapability} />
+          <TVDisplay
+            roomCode={tvRoomCode.toUpperCase()}
+            tvCapability={tvCapability}
+            tvSessionToken={tvSessionToken}
+            tvAuthorizationError={tvAuthorizationError}
+          />
         </Suspense>
       </div>
     );
   }
 
   // Quick Join - Acceso directo a sala mediante QR
-  // URL de ejemplo: http://192.168.1.39:5173/?room=ABC123
-  if (quickJoinRoomCode && !roomData) {
+  // URL de ejemplo: http://192.168.1.39:5173/player/ABC123
+  if (quickJoinRoomCode && !roomData && !isReconnecting) {
     const handleQuickJoinComplete = (data) => {
       setRoomData(data);
       setMode('multi');
       setCardSelected(true);
       setInWaitingRoom(true);
       setShowLanding(false);
-      // Limpiar el parámetro room de la URL sin recargar
+      // Clear transient query data while retaining the explicit player path.
       window.history.replaceState({}, '', window.location.pathname);
     };
 
     return (
       <div className="app">
         <Toaster position="top-right" toastOptions={{ duration: 3000 }} />
-        <Snowflakes />
         <Suspense fallback={<LoadingScreen />}>
           <QuickJoin
             roomCode={quickJoinRoomCode.toUpperCase()}
@@ -353,7 +444,6 @@ function App() {
     return (
       <div className="app">
         <Toaster position="top-right" toastOptions={{ duration: 3000 }} />
-        <Snowflakes />
         <div className="reconnecting-screen">
           <div className="reconnecting-container">
             <div className="spinner-large"></div>
@@ -372,7 +462,6 @@ function App() {
 
     return (
       <div className="app">
-        <Snowflakes />
         <div className="reconnect-prompt-screen">
           <div className="reconnect-prompt-container">
             <h1 className="christmas-title">🎄 Bingo Navideño 🎅</h1>
@@ -431,7 +520,6 @@ function App() {
     return (
       <div className="app">
         <Toaster position="top-right" toastOptions={{ duration: 3000 }} />
-        <Snowflakes />
         <div className="mode-selection-screen">
           <div className="mode-selection-container">
             <h1 className="christmas-title">🎄 Bingo Navideño 🎅</h1>
@@ -468,8 +556,7 @@ function App() {
       return (
         <div className="app">
           <Toaster position="top-right" toastOptions={{ duration: 3000 }} />
-          <Snowflakes />
-          <Suspense fallback={<LoadingScreen />}>
+            <Suspense fallback={<LoadingScreen />}>
             <RoomSetup onRoomReady={handleRoomReady} />
           </Suspense>
         </div>
@@ -481,8 +568,7 @@ function App() {
       return (
         <div className="app">
           <Toaster position="top-right" toastOptions={{ duration: 3000 }} />
-          <Snowflakes />
-          <Suspense fallback={<LoadingScreen />}>
+            <Suspense fallback={<LoadingScreen />}>
             <CardSelection roomData={roomData} onCardSelected={handleCardSelected} />
           </Suspense>
         </div>
@@ -495,8 +581,7 @@ function App() {
         return (
           <div className="app">
             <Toaster position="top-right" toastOptions={{ duration: 3000 }} />
-            <Snowflakes />
-            <Suspense fallback={<LoadingScreen />}>
+                <Suspense fallback={<LoadingScreen />}>
               <OrganizerDashboard roomData={roomData} />
             </Suspense>
           </div>
@@ -505,8 +590,7 @@ function App() {
         return (
           <div className="app">
             <Toaster position="top-right" toastOptions={{ duration: 3000 }} />
-            <Snowflakes />
-            <Suspense fallback={<LoadingScreen />}>
+                <Suspense fallback={<LoadingScreen />}>
               <PlayerCardView roomData={roomData} />
             </Suspense>
           </div>
@@ -518,7 +602,6 @@ function App() {
   // Single player flow (original)
   return (
     <div className="app">
-      <Snowflakes />
       <Toaster
         position="top-right"
         toastOptions={{

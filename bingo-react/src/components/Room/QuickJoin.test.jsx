@@ -1,10 +1,12 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 import QuickJoin from './QuickJoin';
 
 afterEach(() => {
   vi.restoreAllMocks();
 });
+
+beforeEach(() => { Object.defineProperty(navigator, 'locks', { configurable: true, value: { request: async (_key, callback) => callback() } }); });
 
 describe('QuickJoin', () => {
   it('shows validation errors before making network requests', () => {
@@ -62,6 +64,7 @@ describe('QuickJoin', () => {
     expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({
       roomCode: 'ABC123',
       playerName: 'Ana',
+      admissionToken: expect.stringMatching(/^ABC123\.[A-Za-z0-9_-]{43}$/),
     });
     expect(fetchMock.mock.calls[1][0]).toContain('/api/rooms/ABC123/select-card');
     expect(JSON.parse(fetchMock.mock.calls[1][1].body)).toEqual({
@@ -75,4 +78,22 @@ describe('QuickJoin', () => {
       playerCapability
     })));
   });
+  it('recovers the persisted card without selecting it again on retry', async () => {
+    const onJoinComplete = vi.fn();
+    const bingoCard = { matrix: [[1]], markedCells: [[2, 2], [0, 0]] };
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({
+      player: { _id: 'same-player', name: 'Ana', cardNumber: 8, bingoCard },
+      room: { code: 'ABC123' }, playerCapability: 'j'.repeat(43)
+    }) });
+    vi.stubGlobal('fetch', fetchMock);
+    render(<QuickJoin roomCode="ABC123" onJoinComplete={onJoinComplete} />);
+    fireEvent.change(screen.getByLabelText('Tu Nombre'), { target: { value: 'Ana' } });
+    fireEvent.change(screen.getByLabelText(/número de cartón/i), { target: { value: '42' } });
+    fireEvent.submit(screen.getByRole('button', { name: /unirse al juego/i }).closest('form'));
+    await waitFor(() => expect(onJoinComplete).toHaveBeenCalledWith(expect.objectContaining({
+      playerId: 'same-player', cardNumber: 8, bingoCard
+    })));
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
 });

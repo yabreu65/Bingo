@@ -6,6 +6,7 @@ import TiebreakVotingModal from '../Voting/TiebreakVotingModal';
 import VotingModal from '../Voting/VotingModal';
 import SyncedMusicPlayer from '../Music/SyncedMusicPlayer';
 import { CARD_MATRIX_VERSION, getCardCell } from '../../utils/bingoCardGenerator';
+import { resolveMultimediaPolicy, shouldRenderPlayerMedia } from '../../utils/multimediaPolicy';
 import './PlayerCardView.css';
 
 const STORAGE_KEY = 'bingo_session';
@@ -20,9 +21,7 @@ const PlayerCardView = ({ roomData }) => {
     ) || []
   );
   const [gameState, setGameState] = useState(roomData.gameState || 'waiting');
-  const [gameMode, setGameMode] = useState(
-    roomData.room?.config?.gameMode || roomData.gameMode || 'full'
-  );
+  const [gameModes, setGameModes] = useState(() => roomData.room?.config?.gameModes?.length ? roomData.room.config.gameModes : [roomData.room?.config?.gameMode || roomData.gameMode || 'full']);
   const [activeEvent, setActiveEvent] = useState(null);
   const [activeChallenge, setActiveChallenge] = useState(null);
   const [triviaResult, setTriviaResult] = useState(null);
@@ -36,6 +35,10 @@ const PlayerCardView = ({ roomData }) => {
       localFile: track.resourceId
     }));
   }, [roomData.room?.config?.activePlaylist]);
+  const multimediaPolicy = useMemo(
+    () => resolveMultimediaPolicy(roomData.room?.config),
+    [roomData.room?.config]
+  );
 
   // Estados para votación de tie-break
   const [tiebreakVoting, setTiebreakVoting] = useState(null); // { candidates, votingDuration, message }
@@ -81,9 +84,8 @@ const PlayerCardView = ({ roomData }) => {
     if (data.gameState) {
       setGameState(data.gameState);
     }
-    if (data.gameMode) {
-      setGameMode(data.gameMode);
-    }
+    if (data.gameMode && !data.gameModes?.length) setGameModes([data.gameMode]);
+    if (data.gameModes?.length) setGameModes(data.gameModes);
 
     // Actualizar número actual
     if (data.currentNumber !== undefined) {
@@ -347,12 +349,12 @@ const PlayerCardView = ({ roomData }) => {
     return markedCells.some((cell) => cell.row === row && cell.col === col);
   };
 
-  const handleClaimBingo = () => {
+  const handleClaimBingo = (selectedMode) => {
     if (confirm('¿Cantar BINGO?')) {
       socket?.emit('claim-bingo', {
         roomCode: roomData.roomCode,
         playerId: roomData.playerId,
-        bingoType: gameMode
+        bingoType: selectedMode
       });
     }
   };
@@ -477,9 +479,9 @@ const PlayerCardView = ({ roomData }) => {
 
       {/* Bingo Button */}
       {gameState === 'playing' && (
-        <button className="bingo-claim-btn" onClick={handleClaimBingo}>
-          🎉 ¡CANTAR {gameModeLabels[gameMode] || gameModeLabels.full}!
-        </button>
+        <div className="bingo-claim-options">{gameModes.map(mode => <button key={mode} className="bingo-claim-btn" onClick={() => handleClaimBingo(mode)}>
+          🎉 ¡CANTAR {gameModeLabels[mode] || gameModeLabels.full}!
+        </button>)}</div>
       )}
 
       {/* Waiting Message */}
@@ -490,11 +492,14 @@ const PlayerCardView = ({ roomData }) => {
         </div>
       )}
 
-      <SyncedMusicPlayer
-        roomCode={roomData.roomCode}
-        isHost={false}
-        playlist={managedPlaylist}
-      />
+      {shouldRenderPlayerMedia(multimediaPolicy) && (
+        <SyncedMusicPlayer
+          roomCode={roomData.roomCode}
+          isHost={false}
+          playlist={managedPlaylist}
+          mediaPolicy={multimediaPolicy}
+        />
+      )}
 
       {/* Tie-break Voting Modal */}
       {tiebreakVoting && (
@@ -569,6 +574,7 @@ const PlayerCardView = ({ roomData }) => {
           externalPlayerId={roomData.playerId}
           externalPlayerName={roomData.playerName}
           externalPlayerCapability={roomData.playerCapability}
+          roomConfig={roomData.room?.config}
           externalTriviaResult={triviaResult}
         />
       )}

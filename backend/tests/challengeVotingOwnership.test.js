@@ -211,14 +211,16 @@ describe('challenge and voting socket identity', () => {
       _id: 'player-a', room: room._id, socketId: 'socket-a', isConnected: true
     };
     const game = {
+      _id: 'game-a',
       activeChallenge: {
-        type: 'trivia', player: player._id,
+        id: 'trivia-a', type: 'trivia', player: player._id, responses: [],
         data: { question: 'Question?', options: ['A', 'B'], correct: 1 }
       }
     };
     Room.findOne.mockResolvedValue(room);
     Player.findOne.mockResolvedValue(player);
     Game.findById.mockResolvedValue(game);
+    Game.findOneAndUpdate.mockResolvedValue({ activeChallenge: game.activeChallenge });
     const socket = makeSocket({ playerId: player._id });
     const { io, emit } = makeIO();
     registerChallengeHandlers(io, socket);
@@ -237,7 +239,43 @@ describe('challenge and voting socket identity', () => {
     }));
   });
 
+  test('does not award trivia points when another request already claimed the response', async () => {
+    jest.useFakeTimers();
+    const room = { _id: 'room-a', code: 'ROOMA1', currentGame: 'game-a', manualPlayers: [] };
+    const player = { _id: 'player-a', room: room._id, socketId: 'socket-a', isConnected: true };
+    const challenge = {
+      id: 'trivia-a', type: 'trivia', player: player._id, startTime: new Date(),
+      data: { question: 'Question?', options: ['A', 'B'], correct: 1 }, responses: []
+    };
+    const game = { _id: 'game-a', activeChallenge: challenge, save: jest.fn() };
+    Room.findOne.mockResolvedValue(room);
+    Player.findOne.mockResolvedValue(player);
+    Game.findById.mockResolvedValue(game);
+    Game.findOneAndUpdate.mockResolvedValue(null);
+    const socket = makeSocket({ playerId: player._id });
+    const { io, emit } = makeIO();
+    registerChallengeHandlers(io, socket);
+    const triviaAnswered = socket.on.mock.calls.find(([event]) => event === 'trivia-answered')[1];
+
+    await triviaAnswered({ roomCode: room.code, playerId: player._id, answer: 1 });
+
+    expect(Game.findOneAndUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        _id: game._id,
+        'activeChallenge.id': challenge.id,
+        'activeChallenge.responses.playerId': { $ne: player._id }
+      }),
+      expect.any(Object),
+      { new: true }
+    );
+    expect(Player.findOneAndUpdate).not.toHaveBeenCalled();
+    expect(socket.emit).toHaveBeenCalledWith('error', { message: 'Ya respondiste este desafío' });
+    expect(emit).not.toHaveBeenCalled();
+    expect(game.save).not.toHaveBeenCalled();
+  });
+
   test('evaluates riddles server-side without broadcasting the accepted answers', async () => {
+    Game.findOneAndUpdate.mockResolvedValue({ _id: 'game-a', activeChallenge: null });
     const room = {
       _id: 'room-a', code: 'ROOMA1', currentGame: 'game-a',
       save: jest.fn().mockResolvedValue(undefined)
@@ -272,7 +310,7 @@ describe('challenge and voting socket identity', () => {
     expect(emit).not.toHaveBeenCalledWith('challenge-result-public', expect.objectContaining({
       result: expect.objectContaining({ success: true })
     }));
-    expect(game.save).toHaveBeenCalledTimes(1);
+    expect(game.save).not.toHaveBeenCalled();
   });
 
   test('requires every group participant before completing a group challenge', async () => {
@@ -361,7 +399,12 @@ describe('challenge and voting socket identity', () => {
       { $inc: { 'stats.points': 50, 'stats.challengesCompleted': 1 } }
     );
     expect(updatedGame.activeChallenge).toBeNull();
-    expect(updatedGame.save).toHaveBeenCalledTimes(1);
+    expect(updatedGame.save).not.toHaveBeenCalled();
+    expect(Game.findOneAndUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({ 'activeChallenge.id': 'group-a', 'activeChallenge.pointsAwarded': { $ne: true } }),
+      expect.objectContaining({ $set: { activeChallenge: null }, $push: { gameEvents: expect.any(Object) } }),
+      { new: true }
+    );
     expect(emit).toHaveBeenCalledWith('challenge-completed', expect.objectContaining({
       success: true,
       result: { type: 'group', success: true, points: 50 }
@@ -455,6 +498,41 @@ describe('challenge and voting socket identity', () => {
     expect(Game.findOne).not.toHaveBeenCalled();
     expect(io.to).not.toHaveBeenCalled();
     expect(socket.emit).toHaveBeenCalledWith('error', expect.any(Object));
+  });
+
+  test('awards a voting bonus only once when completion events race', async () => {
+    const hostCapability = 'host-secret';
+    const room = {
+      _id: 'room-a', code: 'ROOMA1', host: 'host-a',
+      hostCapabilityHash: require('../middleware/socketAuthMiddleware')
+        .createHostCapabilityHash(hostCapability, 'room-a')
+    };
+    const game = { _id: 'game-a', activeVoting: { voteId: 'vote-a' }, completedVotes: [] };
+    const player = { _id: 'player-a', room: room._id, stats: { points: 10 } };
+    const results = {
+      voteId: 'vote-a', performerId: player._id, performerName: 'Player A',
+      challengeType: 'dance', totalVotes: 1, averageStars: 5, bonusPoints: 5, distribution: {}
+    };
+    Room.findOne.mockReturnValue({ select: jest.fn().mockResolvedValue(room) });
+    Vote.findById.mockResolvedValue({ _id: 'vote-a', roomCode: room.code });
+    votingService.completeVoting.mockResolvedValue(results);
+    Game.findOne.mockResolvedValue(game);
+    Game.findOneAndUpdate.mockResolvedValueOnce(game).mockResolvedValueOnce(null);
+    jest.spyOn(Player, 'findOneAndUpdate').mockResolvedValue(player);
+    const socket = makeSocket({ playerId: 'host-a' });
+    const { io } = makeIO();
+
+    await Promise.all([
+      endVoting(io, socket, { roomCode: room.code, voteId: 'vote-a', hostCapability }),
+      endVoting(io, socket, { roomCode: room.code, voteId: 'vote-a', hostCapability })
+    ]);
+
+    expect(Game.findOneAndUpdate).toHaveBeenCalledTimes(2);
+    expect(Player.findOneAndUpdate).toHaveBeenCalledTimes(1);
+    expect(Player.findOneAndUpdate).toHaveBeenCalledWith(
+      { _id: player._id, room: room._id },
+      { $inc: { 'stats.points': results.bonusPoints } }
+    );
   });
 
   test('blocks voting-stat reads for a room other than the socket-bound room', async () => {
@@ -552,14 +630,16 @@ describe('challenge and voting socket identity', () => {
       save: jest.fn().mockResolvedValue(undefined)
     };
     const game = {
+      _id: 'game-a',
       activeChallenge: {
-        id: 'karaoke-current', type: 'trivia', player: 'manual-1', startTime: new Date(),
+        id: 'karaoke-current', type: 'trivia', player: 'manual-1', startTime: new Date(), responses: [],
         data: { question: 'Question?', options: ['A', 'B', 'C'], correct: 2 }
       },
       save: jest.fn().mockResolvedValue(undefined)
     };
     Room.findOne.mockResolvedValue(room);
     Game.findById.mockResolvedValue(game);
+    Game.findOneAndUpdate.mockResolvedValueOnce({ activeChallenge: game.activeChallenge });
     const tvSocket = makeSocket({ playerId: 'tv-display', tvAuthorized: true });
     const { io, emit } = makeIO();
     jest.useFakeTimers();
@@ -575,7 +655,7 @@ describe('challenge and voting socket identity', () => {
       success: true,
       result: { points: 75 }
     });
-    expect(game.save).toHaveBeenCalledTimes(2);
+    expect(game.save).toHaveBeenCalledTimes(1);
     expect(Player.findOneAndUpdate).toHaveBeenCalledWith(
       { _id: 'manual-1', room: room._id },
       { $inc: { 'stats.points': 75, 'stats.challengesCompleted': 1 } }

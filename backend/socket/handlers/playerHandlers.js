@@ -97,43 +97,10 @@ function handleMarkCell(io, socket) {
 /**
  * Handler para actualizar puntos de un jugador
  */
-function handleUpdatePoints(io, socket) {
-  return async (data) => {
-    try {
-      const roomCode = socket.roomCode;
-      const playerId = socket.playerId;
-      const requestedRoomCode = typeof data?.roomCode === 'string' ? data.roomCode.toUpperCase() : '';
-      const points = data?.points;
-      if (!roomCode || !playerId || playerId === 'tv-display' ||
-          requestedRoomCode !== roomCode.toUpperCase() ||
-          data?.playerId?.toString() !== playerId.toString() ||
-          !Number.isInteger(points) || points < -1000 || points > 1000) {
-        return socket.emit('error', { message: 'No tienes permisos para actualizar estos puntos' });
-      }
-
-      const room = await Room.findOne({ code: roomCode });
-      if (!room) return socket.emit('error', { message: 'Sala no encontrada' });
-      const player = await Player.findOneAndUpdate(
-        { _id: playerId, room: room._id, socketId: socket.id, isConnected: true },
-        { $inc: { 'stats.points': points } },
-        { new: true }
-      );
-      if (!player) return socket.emit('error', { message: 'No tienes permisos para actualizar estos puntos' });
-
-      io.to(roomCode).emit('points-updated', {
-        playerId,
-        newPoints: player.stats.points
-      });
-      logger.info(`[${roomCode}] Points updated`, {
-        playerId,
-        pointsAdded: points,
-        newTotal: player.stats.points
-      });
-    } catch (error) {
-      logger.error('Error in update-points:', error);
-      socket.emit('error', { message: 'No se pudieron actualizar los puntos' });
-    }
-  };
+function handleUpdatePoints(_io, socket) {
+  return async () => socket.emit('error', {
+    message: 'No tienes permisos para actualizar estos puntos'
+  });
 }
 
 /**

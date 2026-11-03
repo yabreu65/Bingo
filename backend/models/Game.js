@@ -11,6 +11,7 @@ const gameSchema = new mongoose.Schema({
     enum: ['line', 'fourCorners', 'centralCross', 'full'],
     default: 'full'
   },
+  gameModes: [{ type: String, enum: ['line', 'fourCorners', 'centralCross', 'full'] }],
   availableNumbers: [Number],
   calledNumbers: [Number],
   currentNumber: Number,

@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
+  createRemoteTVDisplayURL,
   createTVDisplayURL,
+  isTVAuthorizationToken,
   listenForTVAuthorization,
   openTVDisplay
 } from './tvAuthorization';
@@ -11,8 +13,17 @@ describe('TV capability handoff', () => {
   it('keeps the TV capability out of the display URL', () => {
     const url = createTVDisplayURL('https://bingo.example', 'abc123');
 
-    expect(url).toBe('https://bingo.example/?tv=ABC123');
+    expect(url).toBe('https://bingo.example/tv/ABC123');
     expect(url).not.toContain(capability);
+  });
+
+  it('creates a temporary remote-TV URL with a scoped one-time token', () => {
+    const token = 'r'.repeat(43);
+    const url = createRemoteTVDisplayURL('https://bingo.example', 'abc123', token);
+
+    expect(url).toBe(`https://bingo.example/tv/ABC123?tvToken=${token}`);
+    expect(isTVAuthorizationToken(token)).toBe(true);
+    expect(isTVAuthorizationToken('not-a-token')).toBe(false);
   });
 
   it('authorizes only a valid message from the same-origin opener for this room', () => {
@@ -87,7 +98,7 @@ describe('TV capability handoff', () => {
       clearTimeout: vi.fn()
     };
 
-    expect(openTVDisplay(windowRef, '/?tv=ABC123', 'ABC123', capability, onBlocked)).toBeNull();
+    expect(openTVDisplay(windowRef, '/tv/ABC123', 'ABC123', capability, onBlocked)).toBeNull();
     expect(onBlocked).toHaveBeenCalledOnce();
     expect(windowRef.clearTimeout).toHaveBeenCalledWith(9);
     expect(windowRef.removeEventListener).toHaveBeenCalledWith('message', expect.any(Function));

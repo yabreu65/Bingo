@@ -4,6 +4,7 @@ import { useSocket } from '../../context/useSocket';
 import SyncedMusicPlayer from '../Music/SyncedMusicPlayer';
 import BingoCard from '../BingoCard/BingoCard';
 import { CARD_MATRIX_VERSION } from '../../utils/bingoCardGenerator';
+import { resolveMultimediaPolicy, shouldRenderPlayerMedia } from '../../utils/multimediaPolicy';
 import './WaitingRoom.css';
 
 const WaitingRoom = ({ roomData, onGameStart }) => {
@@ -26,6 +27,10 @@ const WaitingRoom = ({ roomData, onGameStart }) => {
       localFile: track.resourceId
     }));
   }, [roomData.room?.config?.activePlaylist]);
+  const multimediaPolicy = useMemo(
+    () => resolveMultimediaPolicy(roomData.room?.config),
+    [roomData.room?.config]
+  );
 
   useEffect(() => {
     // Join the Socket.io room with the current principal's capability.
@@ -164,12 +169,15 @@ const WaitingRoom = ({ roomData, onGameStart }) => {
             />
           </div>
         </div>
-        <SyncedMusicPlayer
-          roomCode={roomData.roomCode}
-          isHost={roomData.isHost}
-          hostCapability={roomData.isHost ? roomData.hostCapability : undefined}
-          playlist={managedPlaylist}
-        />
+        {shouldRenderPlayerMedia(multimediaPolicy) && (
+          <SyncedMusicPlayer
+            roomCode={roomData.roomCode}
+            isHost={roomData.isHost}
+            hostCapability={roomData.isHost ? roomData.hostCapability : undefined}
+            playlist={managedPlaylist}
+            mediaPolicy={multimediaPolicy}
+          />
+        )}
       </div>
     );
   }
@@ -277,11 +285,7 @@ const WaitingRoom = ({ roomData, onGameStart }) => {
             <div className="config-item">
               <span className="config-label">Modo de juego:</span>
               <span className="config-value">
-                {roomData.room.config?.gameMode === 'line' && '📏 Línea'}
-                {roomData.room.config?.gameMode === 'fourCorners' && '◻️ Cuatro Esquinas'}
-                {roomData.room.config?.gameMode === 'centralCross' && '➕ Cruz Central'}
-                {roomData.room.config?.gameMode === 'full' && '🎯 Cartón Completo'}
-                {!roomData.room.config?.gameMode && '🎯 Cartón Completo'}
+                {(roomData.room.config?.gameModes?.length ? roomData.room.config.gameModes : [roomData.room.config?.gameMode || 'full']).map(mode => ({ line: '📏 Línea', fourCorners: '◻️ Cuatro esquinas', centralCross: '➕ Cruz central', full: '🎯 Cartón completo' }[mode])).join(' · ')}
               </span>
             </div>
           </div>
@@ -313,12 +317,15 @@ const WaitingRoom = ({ roomData, onGameStart }) => {
       </div>
 
       {/* Synced Music Player */}
-      <SyncedMusicPlayer
-        roomCode={roomData.roomCode}
-        isHost={roomData.isHost}
-        hostCapability={roomData.isHost ? roomData.hostCapability : undefined}
-        playlist={managedPlaylist}
-      />
+      {shouldRenderPlayerMedia(multimediaPolicy) && (
+        <SyncedMusicPlayer
+          roomCode={roomData.roomCode}
+          isHost={roomData.isHost}
+          hostCapability={roomData.isHost ? roomData.hostCapability : undefined}
+          playlist={managedPlaylist}
+          mediaPolicy={multimediaPolicy}
+        />
+      )}
       {countdown != null && (
         <div className="countdown-overlay" style={{ position: 'fixed', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.35)', color: '#fff', fontSize: '6rem', fontWeight: 800 }}>
           {countdown}

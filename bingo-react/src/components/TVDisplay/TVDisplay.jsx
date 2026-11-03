@@ -1,5 +1,5 @@
 "use client";
-import { useCallback, useState, useEffect, useRef } from 'react';
+import { useCallback, useState, useEffect, useRef, useMemo } from 'react';
 // eslint-disable-next-line no-unused-vars
 import { AnimatePresence, motion } from 'framer-motion';
 import { useSocket } from '../../context/useSocket';
@@ -8,8 +8,13 @@ import { QRCodeSVG } from 'qrcode.react';
 import { Radio, Tv, Users, Crown } from 'lucide-react';
 import DeezerPlayer from '../Music/DeezerPlayer';
 import KaraokeOverlay from '../Music/KaraokeOverlay';
+import ChallengeAudioPlayer from '../Music/ChallengeAudioPlayer';
+import { resolveMultimediaPolicy, shouldRenderTvMedia, shouldUseExternalSources } from '../../utils/multimediaPolicy';
+import { isLocalTvMediaPolicy, resolveTvMediaUrl } from '../../utils/localTvMedia';
+import { attemptMediaPlayback, checkLocalTvReadiness, isLoopbackBrowserOrigin, readLoopbackPermission } from '../../utils/localTvDiagnostics';
  
 import { getShareableUrl } from '../../utils/networkUtils';
+import { createPlayerEntryURL } from '../../utils/entryRoutes';
 import './TVDisplay.css';
 
 const MotionBox = ({ children, ...props }) => (
@@ -24,7 +29,7 @@ const MotionBox = ({ children, ...props }) => (
   </motion.div>
 );
 
-const TVDisplay = ({ roomCode, tvCapability }) => {
+const TVDisplay = ({ roomCode, tvCapability, tvSessionToken, tvAuthorizationError }) => {
   const { socket } = useSocket();
   const [currentNumber, setCurrentNumber] = useState(null);
   const [calledNumbers, setCalledNumbers] = useState([]);
@@ -38,9 +43,12 @@ const TVDisplay = ({ roomCode, tvCapability }) => {
   const [triviaAnswer, setTriviaAnswer] = useState(null); // Para almacenar la respuesta del jugador
   const [manualPlayerAnswers, setManualPlayerAnswers] = useState({}); // Respuestas de jugadores manuales {playerId: answerIndex}
   const [manualPlayerResults, setManualPlayerResults] = useState({});
-  const [riddleResult, setRiddleResult] = useState(null);
+  const [resultReveal, setResultReveal] = useState(null);
   const [effectsMuted, setEffectsMuted] = useState(() => localStorage.getItem('bingo-tv-effects-muted') === 'true');
+  const [tvConnectionError, setTvConnectionError] = useState(null);
   const [musicStatus, setMusicStatus] = useState('loading');
+  const [localMediaDiagnostics, setLocalMediaDiagnostics] = useState(null);
+  const [localMediaRequestPending, setLocalMediaRequestPending] = useState(false);
   const [activeVoting, setActiveVoting] = useState(null);
 
   // Estados para tie-break
@@ -54,10 +62,107 @@ const TVDisplay = ({ roomCode, tvCapability }) => {
   const [currentSongIndex, setCurrentSongIndex] = useState(0);
   const [playlist, setPlaylist] = useState(() => shufflePlaylist()); // Playlist aleatorio
   const videoPlayerRef = useRef(null);
+  const gameStateRef = useRef('waiting');
   const isChallengeActiveRef = useRef(false); // Ref síncrono para trackear challenges
+  const currentChallengeRef = useRef(null);
+  const resultRevealRef = useRef(null);
+  const resultRevealTimerRef = useRef(null);
   const applauseAudioRef = useRef(null); // Ref para sonido de aplauso
   const donkeyAudioRef = useRef(null); // Ref para sonido de burro
+  const handledOutcomeKeysRef = useRef(new Set());
+  const musicVolumeBeforeEffectRef = useRef(null);
   const currentSong = playlist[currentSongIndex];
+  const multimediaPolicy = useMemo(
+    () => roomInfo ? resolveMultimediaPolicy(roomInfo.config) : null,
+    [roomInfo]
+  );
+  const canRenderTvMedia = shouldRenderTvMedia(multimediaPolicy);
+  const canUseExternalSources = shouldUseExternalSources(multimediaPolicy);
+  const localTvEnabled = isLocalTvMediaPolicy(multimediaPolicy);
+  const canLoadTvMedia = canRenderTvMedia && (
+    !localTvEnabled || localMediaDiagnostics?.allowed === true
+  );
+  const tvMediaUrl = useCallback(
+    (relativePath) => resolveTvMediaUrl(relativePath, multimediaPolicy || { mode: 'LEGACY' }),
+    [multimediaPolicy]
+  );
+
+  const emitTvMediaStatus = useCallback((status, diagnostics = {}) => {
+    if (!localTvEnabled || !socket?.connected) return;
+    socket.emit('tv-media-status', {
+      roomCode,
+      status,
+      permission: diagnostics.permission,
+      service: diagnostics.service,
+      autoplay: diagnostics.autoplay
+    });
+  }, [localTvEnabled, roomCode, socket]);
+
+  const reportLocalMediaPlayback = useCallback((status) => {
+    if (!localTvEnabled) return;
+    setLocalMediaDiagnostics((current) => ({ ...(current || {}), media: status }));
+    emitTvMediaStatus(status);
+  }, [emitTvMediaStatus, localTvEnabled]);
+
+  const updateLocalMediaReadiness = useCallback(async ({ requestService = false } = {}) => {
+    if (!localTvEnabled) return;
+
+    setLocalMediaRequestPending(requestService);
+    if (requestService) emitTvMediaStatus('checking');
+    try {
+      const diagnostics = await checkLocalTvReadiness({ requestService });
+      const status = diagnostics.allowed
+        ? 'available'
+        : diagnostics.permission === 'denied'
+          ? 'permission-denied'
+          : diagnostics.service === 'permission-required'
+            ? 'permission-required'
+            : diagnostics.service === 'blocked-or-offline'
+              ? 'unavailable'
+              : 'blocked';
+      const nextDiagnostics = { ...diagnostics, status };
+      setLocalMediaDiagnostics(nextDiagnostics);
+      emitTvMediaStatus(status === 'permission-denied' ? 'permission-denied' :
+        status === 'unavailable' ? 'unavailable' : status === 'permission-required' ? 'permission-required' : 'available',
+      diagnostics);
+    } catch {
+      const diagnostics = { status: 'unavailable', service: 'blocked-or-offline', permission: 'unknown', allowed: false };
+      setLocalMediaDiagnostics(diagnostics);
+      emitTvMediaStatus('unavailable', diagnostics);
+    } finally {
+      setLocalMediaRequestPending(false);
+    }
+  }, [emitTvMediaStatus, localTvEnabled]);
+
+  useEffect(() => {
+    if (!localTvEnabled) {
+      return undefined;
+    }
+
+    let active = true;
+    const initializeLocalMedia = async () => {
+      const permission = await readLoopbackPermission();
+      if (!active) return;
+      if (permission === 'granted' || isLoopbackBrowserOrigin()) {
+        await updateLocalMediaReadiness({ requestService: isLoopbackBrowserOrigin() });
+        return;
+      }
+
+      const status = permission === 'denied' ? 'permission-denied' : 'permission-required';
+      setLocalMediaDiagnostics({ permission, service: 'permission-required', status, allowed: false });
+      emitTvMediaStatus(status, { permission, service: 'permission-required' });
+    };
+    initializeLocalMedia().catch(() => {
+      if (!active) return;
+      const diagnostics = { status: 'unavailable', service: 'blocked-or-offline', permission: 'unknown', allowed: false };
+      setLocalMediaDiagnostics(diagnostics);
+      emitTvMediaStatus('unavailable', diagnostics);
+    });
+
+    return () => {
+      active = false;
+    };
+  }, [emitTvMediaStatus, localTvEnabled, updateLocalMediaReadiness]);
 
   const handleKaraokeVideoEnd = useCallback(() => {
     socket?.emit('karaoke-video-end', {
@@ -79,6 +184,84 @@ const TVDisplay = ({ roomCode, tvCapability }) => {
     socket?.emit('start-tiebreak-voting', { roomCode });
   };
 
+  const restoreMusicVolumeAfterEffect = useCallback(() => {
+    const video = videoPlayerRef.current;
+    if (video && musicVolumeBeforeEffectRef.current !== null) {
+      video.volume = musicVolumeBeforeEffectRef.current;
+    }
+    musicVolumeBeforeEffectRef.current = null;
+  }, []);
+
+  const playOutcomeSound = useCallback((kind, data, isCorrect) => {
+    // A preliminary trivia event intentionally has no outcome.
+    // Never interpret undefined as an incorrect answer.
+    if (typeof isCorrect !== 'boolean') return;
+    const key = [
+      kind,
+      data?.challengeId || activeChallenge?.challengeId || '',
+      data?.playerId || '',
+      String(data?.answer ?? data?.result?.answer ?? '')
+    ].join(':');
+    if (handledOutcomeKeysRef.current.has(key)) return;
+    if (handledOutcomeKeysRef.current.size > 100) handledOutcomeKeysRef.current.clear();
+    handledOutcomeKeysRef.current.add(key);
+    if (effectsMuted) return;
+
+    const sound = isCorrect ? applauseAudioRef.current : donkeyAudioRef.current;
+    const other = isCorrect ? donkeyAudioRef.current : applauseAudioRef.current;
+    if (!sound) return;
+    other?.pause();
+    if (other) other.currentTime = 0;
+    sound.pause();
+    sound.currentTime = 0;
+    const video = videoPlayerRef.current;
+    if (video && musicVolumeBeforeEffectRef.current === null) {
+      musicVolumeBeforeEffectRef.current = video.volume;
+      video.volume = Math.min(video.volume, 0.15);
+    }
+    Promise.resolve(sound.play()).catch((error) => {
+      console.warn('La TV no pudo reproducir el efecto del reto:', error);
+      restoreMusicVolumeAfterEffect();
+    });
+  }, [activeChallenge?.challengeId, effectsMuted, restoreMusicVolumeAfterEffect]);
+
+  const displayAnswerResult = useCallback((kind, data, correct) => {
+    if (typeof correct !== 'boolean') return;
+    const challengeId = data?.challengeId || currentChallengeRef.current?.challengeId || '';
+    const key = [kind, challengeId, data?.playerId || '', String(data?.answer ?? data?.result?.answer ?? '')].join(':');
+    if (resultRevealRef.current?.key === key) return;
+
+    if (resultRevealTimerRef.current) window.clearTimeout(resultRevealTimerRef.current);
+    const reveal = {
+      key,
+      kind,
+      correct,
+      answer: kind === 'riddle' ? String(data?.answer ?? '') : null,
+      playerName: data?.playerName || currentChallengeRef.current?.player?.name || ''
+    };
+    resultRevealRef.current = reveal;
+    setResultReveal(reveal);
+    isChallengeActiveRef.current = true;
+    videoPlayerRef.current?.pause();
+
+    // Complete audio effects: applause ~11.75 s, donkey ~5.15 s.
+    const holdMs = correct ? 12000 : 7000;
+    resultRevealTimerRef.current = window.setTimeout(() => {
+      if (resultRevealRef.current?.key !== key) return;
+      resultRevealRef.current = null;
+      resultRevealTimerRef.current = null;
+      setResultReveal(null);
+      isChallengeActiveRef.current = Boolean(currentChallengeRef.current);
+      if (!isChallengeActiveRef.current && gameStateRef.current === 'playing' && videoPlayerRef.current) {
+        attemptMediaPlayback(videoPlayerRef.current).catch(() => {});
+      }
+    }, holdMs);
+  }, []);
+
+  useEffect(() => () => {
+    if (resultRevealTimerRef.current) window.clearTimeout(resultRevealTimerRef.current);
+  }, []);
+
   useEffect(() => {
     if (!socket) return;
 
@@ -87,9 +270,13 @@ const TVDisplay = ({ roomCode, tvCapability }) => {
       setCalledNumbers((prev) => [...prev, data.number]);
     };
 
-    const handleGameStateChanged = (data) => setGameState(data.state);
+    const handleGameStateChanged = (data) => {
+      gameStateRef.current = data.state;
+      setGameState(data.state);
+    };
     const handleGameStarted = () => {
         console.log('📺 TV: Game started!');
+        gameStateRef.current = 'playing';
         setGameState('playing');
     };
     const handleRoomInfo = (data) => {
@@ -106,6 +293,7 @@ const TVDisplay = ({ roomCode, tvCapability }) => {
         console.log('📺 TVDisplay: videoId:', data.videoId);
 
         // IMPORTANTE: Establecer el ref PRIMERO (síncrono) antes de pausar
+        currentChallengeRef.current = data;
         isChallengeActiveRef.current = true;
         console.log('🔴 Challenge active flag SET to TRUE');
 
@@ -144,8 +332,9 @@ const TVDisplay = ({ roomCode, tvCapability }) => {
         console.log('🎮 Challenge complete, resuming game');
 
         // IMPORTANTE: Establecer el ref PRIMERO (síncrono)
-        isChallengeActiveRef.current = false;
-        console.log('🟢 Challenge active flag SET to FALSE');
+        currentChallengeRef.current = null;
+        isChallengeActiveRef.current = Boolean(resultRevealRef.current);
+        console.log('🟢 Challenge active flag SET to', isChallengeActiveRef.current);
 
         setActiveChallenge(null);
         setChallengeTimeLeft(null);
@@ -159,43 +348,13 @@ const TVDisplay = ({ roomCode, tvCapability }) => {
     };
 
     const handleTriviaAnswered = (data) => {
-        console.log('📺 TVDisplay: ========== TRIVIA ANSWERED EVENT ==========');
-        console.log('📺 TVDisplay: Full data received:', JSON.stringify(data, null, 2));
-        console.log('📺 TVDisplay: Active challenge:', activeChallenge);
-
-        const { answer, isCorrect } = data;
-
-        console.log('📺 TVDisplay: Extracted values:', {
-            answer,
-            isCorrect,
-            answerType: typeof answer,
-            isCorrectType: typeof isCorrect
-        });
-
-        // Guardar la respuesta para resaltarla en el UI
-        setTriviaAnswer({ answer, isCorrect });
-        console.log('📺 TVDisplay: ✅ triviaAnswer state updated');
-
-        // Reproducir sonido correspondiente
-        const audioToPlay = isCorrect ? applauseAudioRef.current : donkeyAudioRef.current;
-        const soundName = isCorrect ? 'applause (CORRECT)' : 'donkey (INCORRECT)';
-
-        console.log(`📺 TVDisplay: Will play ${soundName} because isCorrect=${isCorrect}`);
-
-        if (audioToPlay) {
-            audioToPlay.currentTime = 0;
-            audioToPlay.play()
-                .then(() => {
-                    console.log(`🔊 Successfully playing ${soundName} sound on TV`);
-                })
-                .catch(err => {
-                    console.error(`❌ Error playing ${soundName} sound on TV:`, err);
-                });
-        } else {
-            console.error(`❌ Audio ref is null for ${soundName}`);
-        }
-
-        console.log('📺 TVDisplay: ========== END TRIVIA ANSWERED EVENT ==========');
+      // The backend broadcasts an early response without isCorrect and a
+      // validated public result later. Only the validated result may trigger
+      // a sound or show green/red feedback.
+      if (typeof data?.isCorrect !== 'boolean') return;
+      setTriviaAnswer({ answer: data.answer, isCorrect: data.isCorrect });
+      displayAnswerResult('trivia', data, data.isCorrect);
+      playOutcomeSound('trivia', data, data.isCorrect);
     };
     const handleTriviaResult = (data) => {
       const challengePlayerId = activeChallenge?.player?.id || activeChallenge?.player?._id || activeChallenge?.player?.playerId;
@@ -204,17 +363,12 @@ const TVDisplay = ({ roomCode, tvCapability }) => {
       setManualPlayerResults(prev => ({ ...prev, [data.playerId]: data }));
     };
     const handleRiddleResult = (data) => {
-      const result = data.result || data;
-      if (!data?.challengeId || !result.answer) return;
-      const normalized = { ...data, answer: result.answer, success: data.success ?? result.success };
-      setRiddleResult(normalized);
-      if (!effectsMuted) {
-        const audioToPlay = normalized.success ? applauseAudioRef.current : donkeyAudioRef.current;
-        audioToPlay?.play().catch(() => {});
-      }
-      window.setTimeout(() => setRiddleResult(current => (
-        current?.challengeId === normalized.challengeId ? null : current
-      )), 6000);
+      const result = data?.result || data;
+      const success = data?.success ?? result?.success;
+      if (!data?.challengeId || !result?.answer || typeof success !== 'boolean') return;
+      const normalized = { ...data, answer: result.answer, success };
+      displayAnswerResult('riddle', normalized, success);
+      playOutcomeSound('riddle', normalized, success);
     };
     const handleCountdownTick = (data) => {
         if (typeof data?.value === 'number') {
@@ -291,12 +445,12 @@ const TVDisplay = ({ roomCode, tvCapability }) => {
       }
 
       if (videoPlayerRef.current) {
-        if (data.isPlaying) {
+        if (data.isPlaying && gameStateRef.current === 'playing') {
           console.log('▶️ Music sync: Attempting to play video');
 
           // Esperar un poco para asegurar que el video esté listo
           setTimeout(() => {
-            if (videoPlayerRef.current && !isChallengeActiveRef.current) {
+            if (videoPlayerRef.current && !isChallengeActiveRef.current && gameStateRef.current === 'playing') {
               videoPlayerRef.current.play()
                 .then(() => {
                   console.log('✅✅✅ Video PLAYING via music-sync ✅✅✅');
@@ -327,17 +481,26 @@ const TVDisplay = ({ roomCode, tvCapability }) => {
 
     // Join only after receiving the scoped capability through the opener handshake.
     const joinTVRoom = () => {
-      if (!tvCapability) return;
-      socket.emit('join-room', { roomCode, playerId: 'tv-display', tvCapability }, (response) => {
+      if (!tvCapability && !tvSessionToken) return;
+      const authorization = tvSessionToken
+        ? { tvSessionToken }
+        : { tvCapability };
+      socket.emit('join-room', { roomCode, playerId: 'tv-display', ...authorization }, (response) => {
         if (response?.success) {
+          setTvConnectionError(null);
           console.log('📺 TV Display joined room successfully:', response);
         } else {
+          setTvConnectionError(response?.error || 'La autorización de TV no es válida o expiró.');
           console.error('📺 TV Display failed to join room:', response?.error);
         }
       });
     };
+    const handleTvAuthorizationRevoked = () => {
+      setTvConnectionError('La autorización temporal de esta TV fue revocada. Generá un nuevo enlace desde el organizador.');
+    };
     joinTVRoom();
     socket.on('connect', joinTVRoom);
+    socket.on('tv-authorization-revoked', handleTvAuthorizationRevoked);
 
     socket.on('number-called', handleNumberCalled);
     socket.on('game-started', handleGameStarted);
@@ -373,6 +536,7 @@ const TVDisplay = ({ roomCode, tvCapability }) => {
 
     return () => {
       socket.off('connect', joinTVRoom);
+      socket.off('tv-authorization-revoked', handleTvAuthorizationRevoked);
       socket.off('number-called', handleNumberCalled);
       socket.off('game-started', handleGameStarted);
       socket.off('game-state-changed', handleGameStateChanged);
@@ -399,7 +563,7 @@ const TVDisplay = ({ roomCode, tvCapability }) => {
       socket.off('tiebreak-voting-progress', handleTiebreakVotingProgress);
       socket.off('tiebreak-results', handleTiebreakResults);
     };
-  }, [socket, roomCode, tvCapability, activeChallenge, gameState, playlist.length, effectsMuted]); // Solo re-ejecutar si cambia el contexto de la sala o el estado del juego
+  }, [socket, roomCode, tvCapability, tvSessionToken, activeChallenge, gameState, playlist.length, effectsMuted, playOutcomeSound, displayAnswerResult]); // Los handlers respetan la configuración actual de sonido
 
   // Manejar cuando termina una canción
   const handleVideoEnded = () => {
@@ -427,6 +591,10 @@ const TVDisplay = ({ roomCode, tvCapability }) => {
 
   // Manejar reproducción manual del video
   const handleVideoPlay = () => {
+    if (gameStateRef.current === 'waiting' || gameStateRef.current === 'finished' || resultRevealRef.current) {
+      videoPlayerRef.current?.pause();
+      return;
+    }
     // Solo emitir si el juego está pausado
     if (!isChallengeActiveRef.current && gameState === 'paused') {
       console.log('▶️ Video played manually, resuming game');
@@ -451,16 +619,22 @@ const TVDisplay = ({ roomCode, tvCapability }) => {
           videoElement.currentTime = 20;
 
           // Solo auto-reproducir si el juego está activo Y NO hay un challenge
-          if (gameState === 'playing' && !isChallengeActiveRef.current) {
+          if (gameState === 'playing' && gameStateRef.current === 'playing' && !isChallengeActiveRef.current) {
             console.log('📺 Auto-playing new song from second 20');
-            videoElement.play()
-              .then(() => {
+            attemptMediaPlayback(videoElement).then((result) => {
+              if (result === 'playing') {
+                setMusicStatus('playing');
+                reportLocalMediaPlayback('playing');
                 console.log('✅ New song playing successfully');
-              })
-              .catch(err => {
-                console.warn('⚠️ Auto-play prevented for new song:', err);
+              } else if (result === 'autoplay-blocked') {
+                setMusicStatus('autoplay-blocked');
+                reportLocalMediaPlayback(result);
                 console.log('💡 Tip: Click on the video to start playback');
-              });
+              } else {
+                setMusicStatus('unavailable');
+                reportLocalMediaPlayback(result);
+              }
+            });
           } else if (isChallengeActiveRef.current) {
             console.log('🚫 Not auto-playing new song - challenge is active');
           } else {
@@ -475,7 +649,7 @@ const TVDisplay = ({ roomCode, tvCapability }) => {
         videoElement.removeEventListener('loadedmetadata', handleLoadedMetadata);
       };
     }
-  }, [currentSong, gameState, activeChallenge, playlist.length]);
+  }, [currentSong, gameState, activeChallenge, playlist.length, reportLocalMediaPlayback, canLoadTvMedia]);
 
   // Sincronizar video con el estado del juego Y cuando termina un challenge
   useEffect(() => {
@@ -483,7 +657,8 @@ const TVDisplay = ({ roomCode, tvCapability }) => {
 
     console.log('🔄 useEffect [gameState] triggered - gameState:', gameState, 'activeChallenge:', activeChallenge, 'challengeRef:', isChallengeActiveRef.current);
 
-    if (gameState === 'paused' && videoPlayerRef.current) {
+    gameStateRef.current = gameState;
+    if (['waiting', 'paused', 'finished'].includes(gameState) && videoPlayerRef.current) {
       console.log('⏸️ Game state is PAUSED, pausing video');
       videoPlayerRef.current.pause();
     } else if (gameState === 'playing' && !activeChallenge) {
@@ -494,15 +669,20 @@ const TVDisplay = ({ roomCode, tvCapability }) => {
       if (!isLoading) {
         console.log('🎮 Game state is PLAYING, video is ready, attempting to play');
         setTimeout(() => {
-          if (videoPlayerRef.current && !isChallengeActiveRef.current) {
+          if (videoPlayerRef.current && !isChallengeActiveRef.current && gameStateRef.current === 'playing') {
             console.log('🎬 Calling video.play() from gameState effect...');
-            videoPlayerRef.current.play()
-              .then(() => {
-                console.log('✅ Video playing after game state change');
-              })
-              .catch(err => {
-                console.warn('⚠️ Auto-play prevented:', err);
-              });
+            attemptMediaPlayback(videoPlayerRef.current).then((result) => {
+              if (result === 'playing') {
+                setMusicStatus('playing');
+                reportLocalMediaPlayback('playing');
+              } else if (result === 'autoplay-blocked') {
+                setMusicStatus('autoplay-blocked');
+                reportLocalMediaPlayback(result);
+              } else {
+                setMusicStatus('unavailable');
+                reportLocalMediaPlayback(result);
+              }
+            });
           }
         }, 300);
       } else {
@@ -511,7 +691,7 @@ const TVDisplay = ({ roomCode, tvCapability }) => {
     } else {
       console.log('⏭️ Not playing - gameState:', gameState, 'activeChallenge:', !!activeChallenge);
     }
-  }, [gameState, activeChallenge]);
+  }, [gameState, activeChallenge, reportLocalMediaPlayback]);
 
   const getBingoLetter = (num) => {
     if (num <= 15) return 'B';
@@ -545,18 +725,64 @@ const TVDisplay = ({ roomCode, tvCapability }) => {
 
   return (
     <div className="tv-display-grid pf-tv-stage">
-      {/* Elementos de audio ocultos para sonidos de trivia */}
-      <audio ref={applauseAudioRef} src="/sounds/aplauso.mp3" preload="auto" />
-      <audio ref={donkeyAudioRef} src="/sounds/burro.mp3" preload="auto" />
+      {(tvAuthorizationError || tvConnectionError) && (
+        <div className="tv-authorization-error" role="alert">
+          {tvAuthorizationError || tvConnectionError}
+        </div>
+      )}
+      {multimediaPolicy?.mediaBlocked && (
+        <div className="tv-media-status" role="alert">
+          LOCAL_TV está deshabilitado en producción hasta su certificación. No se usarán medios del servidor automáticamente.
+        </div>
+      )}
+      {localTvEnabled && (
+        <div className="tv-media-status" data-testid="local-tv-media-status" role="status">
+          {localMediaDiagnostics?.permission === 'denied'
+            ? 'Medios locales: permiso de red local denegado. Permitilo en el navegador para reproducir desde esta laptop.'
+            : localMediaDiagnostics?.status === 'permission-required'
+              ? 'Medios locales: habilitá el acceso de red local para esta TV antes de reproducir.'
+            : localMediaDiagnostics?.media === 'playing'
+              ? 'Medios locales: reproducción activa en esta TV.'
+              : localMediaDiagnostics?.media === 'autoplay-blocked'
+                ? 'Medios locales: reproducción automática bloqueada. Presioná Reproducir música.'
+                : localMediaDiagnostics?.media === 'unavailable'
+                  ? 'Medios locales: el archivo no está disponible. El bingo puede continuar sin música.'
+                : localMediaDiagnostics?.service === 'blocked-or-offline'
+                  ? 'Medios locales: no se pudo contactar el servicio local. El bingo puede continuar sin música.'
+                  : 'Medios locales: verificando servicio y permisos del navegador…'}
+          {localMediaDiagnostics?.status === 'permission-required' && (
+            <button
+              type="button"
+              data-testid="enable-local-tv-media"
+              disabled={localMediaRequestPending}
+              onClick={() => updateLocalMediaReadiness({ requestService: true })}
+            >
+              {localMediaRequestPending ? 'Comprobando acceso…' : 'Habilitar reproducción local'}
+            </button>
+          )}
+          {localMediaDiagnostics?.permission === 'denied' && (
+            <button
+              type="button"
+              data-testid="retry-local-tv-permission"
+              onClick={() => updateLocalMediaReadiness({ requestService: true })}
+            >
+              Reintentar después de cambiar el permiso
+            </button>
+          )}
+        </div>
+      )}
+      {/* Un solo par de efectos para trivia y adivinanzas. */}
+      {canLoadTvMedia && <audio ref={applauseAudioRef} src={tvMediaUrl('sounds/aplauso.mp3')} preload="auto" onEnded={restoreMusicVolumeAfterEffect} />}
+      {canLoadTvMedia && <audio ref={donkeyAudioRef} src={tvMediaUrl('sounds/burro.mp3')} preload="auto" onEnded={restoreMusicVolumeAfterEffect} />}
 
       {/* OVERLAYS */}
       <AnimatePresence>
-        {activeChallenge && (
+        {activeChallenge && !resultReveal && (
           <MotionBox className="overlay challenge-overlay">
             <div className="challenge-content">
                 <Crown className="challenge-icon" size={64} />
                 <h2 className="challenge-title">RETO: {activeChallenge.type?.toUpperCase()}</h2>
-                <p className="challenge-player">Jugador: {activeChallenge.player?.name}</p>
+                <p className="challenge-player">{activeChallenge.type === 'group' ? '¡TODOS A BAILAR EN GRUPO!' : 'Jugador: ' + (activeChallenge.player?.name || '')}</p>
 
                 {activeChallenge.type === 'trivia' && activeChallenge.data && (
                   <>
@@ -695,7 +921,7 @@ const TVDisplay = ({ roomCode, tvCapability }) => {
                   <p className="challenge-text">{activeChallenge.type === 'riddle' ? activeChallenge.data?.prompt : activeChallenge.text}</p>
                 )}
 
-                {activeChallenge.deezerId && (
+                {activeChallenge.deezerId && canUseExternalSources && !['dance', 'group', 'sing'].includes(activeChallenge.type) && (
                   <div className="challenge-music-player" style={{ marginTop: '20px', maxWidth: '500px', margin: '20px auto' }}>
                     <DeezerPlayer
                       trackId={activeChallenge.deezerId}
@@ -704,11 +930,21 @@ const TVDisplay = ({ roomCode, tvCapability }) => {
                     />
                   </div>
                 )}
-                {activeChallenge.localFile && (
+                {['dance', 'group'].includes(activeChallenge.type) && activeChallenge.audioFile && /^[a-z0-9-]+\.mp3$/.test(activeChallenge.audioFile) && canLoadTvMedia && (
+                  <ChallengeAudioPlayer
+                    key={activeChallenge.challengeId || activeChallenge.audioFile}
+                    src={tvMediaUrl('music/retos/' + activeChallenge.audioFile)}
+                    startSeconds={activeChallenge.startSeconds}
+                    duration={activeChallenge.duration}
+                  />
+                )}
+                {activeChallenge.localFile && canLoadTvMedia && (
                   <KaraokeOverlay
                     localFile={activeChallenge.localFile}
+                    videoUrl={tvMediaUrl(`music/karaoke/${activeChallenge.localFile}`)}
                       maxDuration={activeChallenge.duration}
                       onVideoEnd={handleKaraokeVideoEnd}
+                      onPlaybackStatus={reportLocalMediaPlayback}
                       onUnavailable={(message) => console.warn(message)}
                   />
                 )}
@@ -717,15 +953,16 @@ const TVDisplay = ({ roomCode, tvCapability }) => {
             </div>
           </MotionBox>
         )}
-        {riddleResult && (
-          <MotionBox className="overlay challenge-overlay" role="status">
+        {resultReveal && (
+          <MotionBox className="overlay challenge-overlay" role="status" data-testid="tv-answer-result">
             <div className="challenge-content">
-              <h2 className="challenge-title">RESULTADO DE LA ADIVINANZA</h2>
-              <p className="challenge-player">Jugador: {riddleResult.playerName || 'Jugador'}</p>
-              <p className="challenge-text">Respuesta: {riddleResult.answer}</p>
-              <p style={{ color: riddleResult.success ? '#22c55e' : '#ef4444', fontSize: '2rem', fontWeight: 'bold' }}>
-                {riddleResult.success ? '✅ ¡CORRECTO!' : '❌ INCORRECTO'}
+              <h2 className="challenge-title">{resultReveal.kind === 'trivia' ? 'RESULTADO DE LA TRIVIA' : 'RESULTADO DE LA ADIVINANZA'}</h2>
+              {resultReveal.playerName && <p className="challenge-player">{resultReveal.playerName}</p>}
+              {resultReveal.answer && <p className="challenge-text">Respuesta: {resultReveal.answer}</p>}
+              <p style={{ color: resultReveal.correct ? '#22c55e' : '#ef4444', fontSize: '3rem', fontWeight: 'bold' }}>
+                {resultReveal.correct ? '✅ ¡CORRECTO!' : '❌ INCORRECTO'}
               </p>
+              <p className="challenge-text">{resultReveal.correct ? '👏 ¡Aplausos!' : '🐴 ¡Inténtalo de nuevo!'}</p>
               <button type="button" onClick={() => {
                 const next = !effectsMuted;
                 setEffectsMuted(next);
@@ -756,7 +993,7 @@ const TVDisplay = ({ roomCode, tvCapability }) => {
                     <p className="qr-instructions">Escanea el código QR o entra a la sala:</p>
                     <strong className="qr-room-code">{roomCode}</strong>
                     <div className="qr-code-container">
-                        <QRCodeSVG value={`${getShareableUrl()}/?room=${roomCode}`} size={220} includeMargin={true} />
+                        <QRCodeSVG value={createPlayerEntryURL(getShareableUrl(), roomCode)} size={220} includeMargin={true} />
                     </div>
                 </div>
             </MotionBox>
@@ -857,7 +1094,7 @@ const TVDisplay = ({ roomCode, tvCapability }) => {
               </button>
             )}
 
-            {tieBreakStatus === 'playing' && tieBreakPerformer?.songData && (
+            {tieBreakStatus === 'playing' && tieBreakPerformer?.songData && canLoadTvMedia && (
               <div style={{
                 width: '80%',
                 maxWidth: '1200px',
@@ -872,7 +1109,7 @@ const TVDisplay = ({ roomCode, tvCapability }) => {
                   autoPlay
                 >
                   <source
-                    src={`/music/${tieBreakPerformer.songData.localFile}`}
+                    src={tvMediaUrl(`music/${tieBreakPerformer.songData.localFile}`)}
                     type="video/mp4"
                   />
                 </video>
@@ -1025,30 +1262,41 @@ const TVDisplay = ({ roomCode, tvCapability }) => {
 
       <section className="grid-video">
         <div className="video-wrapper">
-          <video
+          {canRenderTvMedia ? <video
             ref={videoPlayerRef}
             onPause={handleVideoPause}
             onPlay={handleVideoPlay}
             onEnded={handleVideoEnded}
             style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-            controls
-            autoPlay
+            controls={gameState === 'playing' || gameState === 'paused'}
             playsInline
             onLoadStart={() => setMusicStatus(currentSong?.localFile ? 'loading' : 'unavailable')}
             onCanPlay={() => setMusicStatus('ready')}
-            onPlaying={() => setMusicStatus('playing')}
-            onError={() => setMusicStatus('unavailable')}
+            onPlaying={() => {
+              setMusicStatus('playing');
+              reportLocalMediaPlayback('playing');
+            }}
+            onError={() => {
+              setMusicStatus('unavailable');
+              reportLocalMediaPlayback('unavailable');
+            }}
           >
-            {currentSong?.localFile && (
-              <source src={`/music/${encodeURIComponent(currentSong.localFile)}`} type="video/mp4" />
+            {currentSong?.localFile && canLoadTvMedia && (
+              <source src={tvMediaUrl(`music/${currentSong.localFile}`)} type="video/mp4" />
             )}
             Tu navegador no soporta el elemento de video.
-          </video>
+          </video> : (
+            <p role="status">La reproducción multimedia está deshabilitada para esta TV.</p>
+          )}
           {musicStatus === 'unavailable' && (
             <p role="alert">La pista local no está disponible. El bingo puede continuar sin música.</p>
           )}
-          {musicStatus === 'ready' && (
-            <button type="button" onClick={() => videoPlayerRef.current?.play().then(() => setMusicStatus('playing')).catch(() => setMusicStatus('unavailable'))}>
+          {musicStatus === 'autoplay-blocked' && (
+            <button type="button" onClick={async () => {
+              const result = await attemptMediaPlayback(videoPlayerRef.current);
+              setMusicStatus(result === 'playing' ? 'playing' : result);
+              reportLocalMediaPlayback(result);
+            }}>
               Reproducir música
             </button>
           )}
@@ -1100,9 +1348,6 @@ const TVDisplay = ({ roomCode, tvCapability }) => {
         </div>
       </section>
 
-      {/* Elementos de audio para sonidos de trivia */}
-      <audio ref={applauseAudioRef} src="/sounds/aplauso.mp3" preload="auto" />
-      <audio ref={donkeyAudioRef} src="/sounds/burro.mp3" preload="auto" />
     </div>
   );
 };

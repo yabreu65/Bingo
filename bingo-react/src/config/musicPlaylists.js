@@ -229,8 +229,8 @@ export const MUSIC_PLAYLISTS = [
     "localFile": "Olga Tanon - Es Mentiroso.mp4"
   },
   {
-    "title": "- Daiquiri",
-    "artist": "PURO DEDESO DE AMAR",
+    "title": "Puro deseo de amar",
+    "artist": "Daiquirí",
     "localFile": "PURO DEDESO DE AMAR - - Daiquiri.mp4"
   },
   {

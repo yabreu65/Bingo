@@ -1,4 +1,5 @@
-const { cleanEnv, str, port, url } = require('envalid');
+const { cleanEnv, str, port, url, num } = require('envalid');
+const { resolveNetworkPolicy } = require('./networkPolicy');
 
 /**
  * Validar y limpiar variables de entorno
@@ -31,6 +32,27 @@ const validateEnv = () => {
     FRONTEND_URL: url({
       desc: 'URL del frontend para CORS',
       example: 'http://localhost:5173'
+    }),
+
+    BINGO_ACCESS_MODE: str({
+      default: 'local',
+      choices: ['local', 'lan', 'public'],
+      desc: 'Explicit network exposure mode'
+    }),
+
+    ALLOWED_ORIGINS: str({
+      default: '',
+      desc: 'Comma-separated browser origins allowed by CORS'
+    }),
+
+    LAN_ORIGINS: str({
+      default: '',
+      desc: 'Comma-separated LAN browser origins allowed in lan mode'
+    }),
+
+    TRUST_PROXY_HOPS: num({
+      default: 0,
+      desc: 'Number of trusted reverse-proxy hops'
     }),
 
     // Variables opcionales (para features futuras)
@@ -86,6 +108,8 @@ const validateEnv = () => {
     console.error('❌ ERROR: FRONTEND_URL no debería apuntar a localhost en producción');
     process.exit(1);
   }
+
+  resolveNetworkPolicy(env);
 
   return env;
 };

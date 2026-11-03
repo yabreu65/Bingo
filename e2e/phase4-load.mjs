@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { randomBytes } from 'node:crypto';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { dirname, join, resolve } from 'node:path';
@@ -10,7 +11,7 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const backendDir = join(root, 'backend');
 const requireFromBackend = createRequire(join(backendDir, 'server.js'));
 const { io } = requireFromBackend('socket.io-client');
-const { MongoMemoryServer } = requireFromBackend('mongodb-memory-server');
+const { MongoMemoryReplSet } = requireFromBackend('mongodb-memory-server');
 const mongoose = requireFromBackend('mongoose');
 const Room = requireFromBackend(join(backendDir, 'models/Room.js'));
 const Player = requireFromBackend(join(backendDir, 'models/Player.js'));
@@ -131,8 +132,10 @@ async function readProcessStats(pid) {
 }
 
 async function main() {
-  const mongo = await MongoMemoryServer.create();
-  assert.match(mongo.getUri(), /^mongodb:\/\//, 'MongoMemoryServer URI required');
+  // Admission now requires transactions and unique indexes on a writable replica set.
+  // This fixture is disposable and never connects to an existing Mongo instance.
+  const mongo = await MongoMemoryReplSet.create({ replSet: { count: 1, storageEngine: 'wiredTiger' } });
+  assert.match(mongo.getUri(), /^mongodb:\/\//, 'Mongo replica set URI required');
   let backend;
   let resourceTimer;
   const clients = [];
@@ -165,7 +168,8 @@ async function main() {
     for (let index = 0; index < PLAYER_COUNT; index += 1) {
       const name = `Phase4 Player ${index + 1}`;
       const joinStarted = monotonic();
-      const joined = await request('/api/rooms/join', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ roomCode, playerName: name }) });
+      const admissionToken = `${roomCode}.${randomBytes(32).toString('base64url')}`;
+      const joined = await request('/api/rooms/join', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ roomCode, playerName: name, admissionToken }) });
       metrics.latenciesMs.join.push(monotonic() - joinStarted);
       metrics.operations.joins += 1;
       const cardNumber = index + 1;
@@ -259,7 +263,8 @@ async function main() {
     };
 
     if (RUN_MINIGAMES) {
-      const challengeTypes = ['trivia', 'riddle', 'dance', 'sing', 'group', 'karaoke'];
+      // Canto está congelado: validar solo los retos actualmente habilitados.
+      const challengeTypes = ['trivia', 'riddle', 'dance', 'group', 'karaoke'];
       for (const type of challengeTypes) {
         metrics.minigames.attempted.push(type);
         host.socket.emit('launch-event', { roomCode, type, hostCapability: host.capability });

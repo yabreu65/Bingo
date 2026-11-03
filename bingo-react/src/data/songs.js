@@ -10,7 +10,7 @@ export const SONGS = [
   "🕯️ Los Peces en el Río",
   "🎵 Feliz Navidad",
   "🌟 Silent Night",
-  "❄️ Let It Snow",
+  "🎵 Let It Snow",
   "🎄 Oh Christmas Tree",
   "🔔 Deck the Halls",
   "⛄ Frosty the Snowman",
@@ -19,5 +19,5 @@ export const SONGS = [
   "⭐ O Holy Night",
   "🎵 Joy to the World",
   "🌟 Hark the Herald Angels Sing",
-  "❄️ Winter Wonderland"
+  "🎵 Winter Wonderland"
 ];

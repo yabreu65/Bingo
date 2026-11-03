@@ -25,6 +25,7 @@ const playerSchema = new mongoose.Schema({
   socketId: {
     type: String
   },
+  admissionTokenHash: { type: String, select: false },
   guestCapabilityHash: {
     type: String,
     select: false
@@ -102,6 +103,7 @@ playerSchema.virtual('displayName').get(function() {
 const stripPrivatePlayerFields = (doc, ret) => {
   delete ret.__v;
   delete ret.guestCapabilityHash;
+  delete ret.admissionTokenHash;
   return ret;
 };
 
@@ -112,6 +114,10 @@ playerSchema.set('toJSON', {
 
 playerSchema.set('toObject', {
   transform: stripPrivatePlayerFields
+});
+
+playerSchema.index({ room: 1, admissionTokenHash: 1 }, {
+  unique: true, partialFilterExpression: { admissionTokenHash: { $type: 'string' } }
 });
 
 // Impide que dos jugadores digitales reciban el mismo cartón dentro de una sala.

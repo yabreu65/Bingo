@@ -26,6 +26,21 @@ const roomSchema = new mongoose.Schema({
     type: String,
     select: false
   },
+  tvAuthorization: {
+    linkTokenHash: {
+      type: String,
+      select: false
+    },
+    linkExpiresAt: Date,
+    linkClaimedAt: Date,
+    sessionTokenHash: {
+      type: String,
+      select: false
+    },
+    sessionExpiresAt: Date,
+    sessionLastSeenAt: Date,
+    revokedAt: Date
+  },
   players: [{
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Player'
@@ -38,13 +53,16 @@ const roomSchema = new mongoose.Schema({
   config: {
     timeBetweenNumbers: { type: Number, default: 30 },
     karaokeDuration: { type: Number, min: 30, max: 600, default: 60 },
+    challengeMusicStartSeconds: { type: Number, min: 0, max: 180, default: 20 },
+    danceDurationSeconds: { type: Number, min: 10, max: 120, default: 30 },
+    groupDurationSeconds: { type: Number, min: 10, max: 120, default: 45 },
     challengeEffectsMuted: { type: Boolean, default: false },
     challengeFrequency: { type: Number, default: 3 },
     enabledChallengeTypes: {
       trivia: { type: Boolean, default: true },
       riddle: { type: Boolean, default: true },
       dance: { type: Boolean, default: true },
-      sing: { type: Boolean, default: true },
+      sing: { type: Boolean, default: false },
       group: { type: Boolean, default: true },
       karaoke: { type: Boolean, default: true }
     },
@@ -53,12 +71,33 @@ const roomSchema = new mongoose.Schema({
       enum: ['line', 'fourCorners', 'centralCross', 'full'],
       default: 'full'
     },
+    gameModes: [{ type: String, enum: ['line', 'fourCorners', 'centralCross', 'full'] }],
     tieBreakEnabled: { type: Boolean, default: false },
     maxPlayers: { type: Number, default: 50 },
     eventName: { type: String, trim: true, maxlength: 160, default: '' },
     resultVisibility: { type: String, enum: ['public', 'organizer'], default: 'public' },
     activePlaylist: { type: mongoose.Schema.Types.ObjectId, ref: 'Playlist', default: null },
-    managedContentEnabled: { type: Boolean, default: false }
+    managedContentEnabled: { type: Boolean, default: false },
+    eventMode: {
+      type: String,
+      enum: ['LEGACY', 'LOCAL', 'REMOTE_PRESENTIAL', 'DISTRIBUTED']
+    },
+    multimediaPolicy: {
+      primarySurface: {
+        type: String,
+        enum: ['tv', 'players', 'both']
+      },
+      tvMediaSource: {
+        type: String,
+        enum: ['SERVER', 'LOCAL_TV'],
+        default: 'SERVER'
+      },
+      playerPlayback: {
+        type: String,
+        enum: ['disabled', 'optional', 'required']
+      },
+      allowExternalSources: Boolean
+    }
   },
   currentGame: {
     type: mongoose.Schema.Types.ObjectId,
