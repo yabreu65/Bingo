@@ -3,7 +3,6 @@ import { Toaster } from 'react-hot-toast';
 import toast from 'react-hot-toast';
 import { useGame } from './context/useGame';
 import { useSocket } from './context/useSocket';
-import Snowflakes from './components/UI/Snowflakes';
 import { API_URL } from './config/api';
 import { isTVAuthorizationToken, listenForTVAuthorization } from './utils/tvAuthorization';
 import { resolveEntryRoute } from './utils/entryRoutes';
@@ -343,7 +342,7 @@ function App() {
 
   const handleRoomReady = (data) => {
     setRoomData(data);
-    if (data.isHost) {
+    if (data.isHost || (data.cardNumber && data.bingoCard?.matrix?.length)) {
       setCardSelected(true);
       setInWaitingRoom(true);
     } else {
@@ -422,7 +421,6 @@ function App() {
     return (
       <div className="app">
         <Toaster position="top-right" toastOptions={{ duration: 3000 }} />
-        <Snowflakes />
         <Suspense fallback={<LoadingScreen />}>
           <QuickJoin
             roomCode={quickJoinRoomCode.toUpperCase()}
@@ -438,7 +436,6 @@ function App() {
     return (
       <div className="app">
         <Toaster position="top-right" toastOptions={{ duration: 3000 }} />
-        <Snowflakes />
         <div className="reconnecting-screen">
           <div className="reconnecting-container">
             <div className="spinner-large"></div>
@@ -457,7 +454,6 @@ function App() {
 
     return (
       <div className="app">
-        <Snowflakes />
         <div className="reconnect-prompt-screen">
           <div className="reconnect-prompt-container">
             <h1 className="christmas-title">🎄 Bingo Navideño 🎅</h1>
@@ -516,7 +512,6 @@ function App() {
     return (
       <div className="app">
         <Toaster position="top-right" toastOptions={{ duration: 3000 }} />
-        <Snowflakes />
         <div className="mode-selection-screen">
           <div className="mode-selection-container">
             <h1 className="christmas-title">🎄 Bingo Navideño 🎅</h1>
@@ -553,8 +548,7 @@ function App() {
       return (
         <div className="app">
           <Toaster position="top-right" toastOptions={{ duration: 3000 }} />
-          <Snowflakes />
-          <Suspense fallback={<LoadingScreen />}>
+            <Suspense fallback={<LoadingScreen />}>
             <RoomSetup onRoomReady={handleRoomReady} />
           </Suspense>
         </div>
@@ -566,8 +560,7 @@ function App() {
       return (
         <div className="app">
           <Toaster position="top-right" toastOptions={{ duration: 3000 }} />
-          <Snowflakes />
-          <Suspense fallback={<LoadingScreen />}>
+            <Suspense fallback={<LoadingScreen />}>
             <CardSelection roomData={roomData} onCardSelected={handleCardSelected} />
           </Suspense>
         </div>
@@ -580,8 +573,7 @@ function App() {
         return (
           <div className="app">
             <Toaster position="top-right" toastOptions={{ duration: 3000 }} />
-            <Snowflakes />
-            <Suspense fallback={<LoadingScreen />}>
+                <Suspense fallback={<LoadingScreen />}>
               <OrganizerDashboard roomData={roomData} />
             </Suspense>
           </div>
@@ -590,8 +582,7 @@ function App() {
         return (
           <div className="app">
             <Toaster position="top-right" toastOptions={{ duration: 3000 }} />
-            <Snowflakes />
-            <Suspense fallback={<LoadingScreen />}>
+                <Suspense fallback={<LoadingScreen />}>
               <PlayerCardView roomData={roomData} />
             </Suspense>
           </div>
@@ -603,7 +594,6 @@ function App() {
   // Single player flow (original)
   return (
     <div className="app">
-      <Snowflakes />
       <Toaster
         position="top-right"
         toastOptions={{

@@ -49,6 +49,8 @@ export const resolveMultimediaPolicy = (config = {}) => {
     legacy: mode === EVENT_MODES.LEGACY && !explicitPolicy,
     primarySurface: explicitPolicy?.primarySurface || defaults.primarySurface,
     tvMediaSource,
+    // Preserve the requested source: never silently distribute local media centrally.
+    mediaBlocked: Boolean(import.meta.env.PROD && tvMediaSource === 'LOCAL_TV'),
     playerPlayback: explicitPolicy?.playerPlayback || defaults.playerPlayback,
     allowExternalSources: typeof explicitPolicy?.allowExternalSources === 'boolean'
       ? explicitPolicy.allowExternalSources
@@ -60,10 +62,10 @@ export const shouldRenderPlayerMedia = (policy) =>
   Boolean(policy) && policy.playerPlayback !== 'disabled';
 
 export const shouldRenderTvMedia = (policy) =>
-  Boolean(policy) && ['tv', 'both'].includes(policy.primarySurface);
+  Boolean(policy) && !policy.mediaBlocked && ['tv', 'both'].includes(policy.primarySurface);
 
 export const shouldUseExternalSources = (policy) =>
-  Boolean(policy?.allowExternalSources);
+  Boolean(policy?.allowExternalSources) && !policy?.mediaBlocked;
 
 export const requiresPlayerConsent = (policy, isHost = false) =>
   policy?.playerPlayback === 'optional' && !policy.legacy && !isHost;

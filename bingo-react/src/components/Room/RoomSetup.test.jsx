@@ -1,5 +1,5 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 import RoomSetup from './RoomSetup';
 
 vi.mock('../../context/useSocket', () => ({
@@ -14,7 +14,21 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+beforeEach(() => { Object.defineProperty(navigator, 'locks', { configurable: true, value: { request: async (_key, callback) => callback() } }); });
+
 describe('RoomSetup host capability handoff', () => {
+  it('explains unsupported new admission and makes no HTTP request without Web Locks', async () => {
+    localStorage.clear();
+    vi.stubGlobal('navigator', {});
+    const fetch = vi.fn(); vi.stubGlobal('fetch', fetch);
+    render(<RoomSetup onRoomReady={vi.fn()} />);
+    fireEvent.click(screen.getByRole('button', { name: /Unirse a Sala/i }));
+    fireEvent.change(screen.getByLabelText('Tu Nombre'), { target: { value: 'Bea' } });
+    fireEvent.change(screen.getByLabelText('Código de Sala'), { target: { value: 'ABC123' } });
+    fireEvent.submit(screen.getByRole('button', { name: /Unirse a Sala/i }).closest('form'));
+    await waitFor(() => expect(screen.getByText(/requiere Web Locks/i)).toBeInTheDocument());
+    expect(fetch).not.toHaveBeenCalled();
+  });
   it('passes the server-issued host capability to the organizer session', async () => {
     const onRoomReady = vi.fn();
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({

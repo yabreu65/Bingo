@@ -2,6 +2,7 @@ import { useState } from 'react';
 import toast from 'react-hot-toast';
 import { useSocket } from '../../context/useSocket';
 import { API_URL } from '../../config/api';
+import { getAdmissionToken } from '../../utils/admissionToken';
 import { Button } from '../../design-system/primitives';
 import './RoomSetup.css';
 
@@ -135,6 +136,7 @@ const RoomSetup = ({ onRoomReady }) => {
         },
         body: JSON.stringify({
           roomCode: roomCode.trim().toUpperCase(),
+          admissionToken: await getAdmissionToken(roomCode.trim().toUpperCase()),
           playerName: playerName.trim(),
         }),
       });
@@ -149,6 +151,8 @@ const RoomSetup = ({ onRoomReady }) => {
           playerName: playerName.trim(),
           isHost: false,
           playerCapability: data.playerCapability,
+          cardNumber: data.player.cardNumber,
+          bingoCard: data.player.bingoCard,
           room: data.room
         });
       } else {
@@ -161,7 +165,9 @@ const RoomSetup = ({ onRoomReady }) => {
       }
     } catch (err) {
       console.error('Error joining room:', err);
-      const errorMsg = 'Error de conexión. Asegúrate de que el servidor esté corriendo.';
+      const errorMsg = err?.code === 'ADMISSION_LOCK_REQUIRED'
+        ? err.message
+        : 'Error de conexión. Asegúrate de que el servidor esté corriendo.';
       setError(errorMsg);
       toast.error(errorMsg);
     } finally {

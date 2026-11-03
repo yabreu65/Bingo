@@ -285,11 +285,7 @@ const WaitingRoom = ({ roomData, onGameStart }) => {
             <div className="config-item">
               <span className="config-label">Modo de juego:</span>
               <span className="config-value">
-                {roomData.room.config?.gameMode === 'line' && '📏 Línea'}
-                {roomData.room.config?.gameMode === 'fourCorners' && '◻️ Cuatro Esquinas'}
-                {roomData.room.config?.gameMode === 'centralCross' && '➕ Cruz Central'}
-                {roomData.room.config?.gameMode === 'full' && '🎯 Cartón Completo'}
-                {!roomData.room.config?.gameMode && '🎯 Cartón Completo'}
+                {(roomData.room.config?.gameModes?.length ? roomData.room.config.gameModes : [roomData.room.config?.gameMode || 'full']).map(mode => ({ line: '📏 Línea', fourCorners: '◻️ Cuatro esquinas', centralCross: '➕ Cruz central', full: '🎯 Cartón completo' }[mode])).join(' · ')}
               </span>
             </div>
           </div>

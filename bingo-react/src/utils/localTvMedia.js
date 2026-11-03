@@ -50,10 +50,11 @@ export const resolveServerMediaUrl = (relativePath) => {
 };
 
 export const isLocalTvMediaPolicy = (policy) =>
-  policy?.mode === 'REMOTE_PRESENTIAL' && policy?.tvMediaSource === 'LOCAL_TV';
+  !import.meta.env.PROD && policy?.mode === 'REMOTE_PRESENTIAL' && policy?.tvMediaSource === 'LOCAL_TV';
 
 export const resolveTvMediaUrl = (relativePath, policy) => {
   const normalized = normalizeRelativeMediaPath(relativePath);
+  if (import.meta.env.PROD && policy?.tvMediaSource === 'LOCAL_TV') return null;
   if (!isLocalTvMediaPolicy(policy)) return resolveServerMediaUrl(normalized);
   return `${LOCAL_TV_MEDIA_ORIGIN.replace(/\/$/, '')}/media/${mediaIdForPath(normalized)}`;
 };

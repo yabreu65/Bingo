@@ -1,4 +1,5 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { resolveMultimediaPolicy, shouldRenderTvMedia, shouldUseExternalSources } from './multimediaPolicy';
 import {
   isLocalTvMediaPolicy,
   isMediaIdentifier,
@@ -7,7 +8,20 @@ import {
   resolveTvMediaUrl
 } from './localTvMedia';
 
+afterEach(() => vi.unstubAllEnvs());
+
 describe('local TV media resolution', () => {
+  it('blocks uncertified LOCAL_TV in production without a SERVER fallback', () => {
+    vi.stubEnv('PROD', true);
+    const policy = { mode: 'REMOTE_PRESENTIAL', tvMediaSource: 'LOCAL_TV' };
+    expect(isLocalTvMediaPolicy(policy)).toBe(false);
+    expect(resolveTvMediaUrl('music/ci-video.mp4', policy)).toBeNull();
+    const effective = resolveMultimediaPolicy({ eventMode: 'REMOTE_PRESENTIAL', multimediaPolicy: { tvMediaSource: 'LOCAL_TV', allowExternalSources: true } });
+    expect(effective.tvMediaSource).toBe('LOCAL_TV');
+    expect(effective.mediaBlocked).toBe(true);
+    expect(shouldRenderTvMedia(effective)).toBe(false);
+    expect(shouldUseExternalSources(effective)).toBe(false);
+  });
   it('creates a stable identifier from a relative path only', () => {
     const first = mediaIdForPath('music/ci-video.mp4');
     expect(first).toBe(mediaIdForPath('music/ci-video.mp4'));
