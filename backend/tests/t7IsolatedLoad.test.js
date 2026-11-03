@@ -23,8 +23,9 @@ const { clearAllRoomTimers } = require('../socket/utils/roomTimer');
 const { clearChallengeTimer } = require('../socket/handlers/gameHandlers');
 const { getCard } = require('../utils/bingoCards');
 
-jest.setTimeout(90000);
 const MAX_MS = 180000;
+// The synthetic 500-player scenario is bounded by MAX_MS; Jest must not abort it earlier.
+jest.setTimeout(MAX_MS + 30000);
 const MAX_RSS = 1024 * 1024 * 1024;
 const report = { version: 1, profile: 'production middleware; synthetic per-room trusted-proxy IP; loopback HTTP/WebSocket',
   limits: { wallMs: MAX_MS, maxSockets: 540, nodeRssBytes: MAX_RSS, mongoRssBytes: MAX_RSS, cpuSeconds: 160 },
@@ -342,8 +343,13 @@ test('E: ten independent rooms with 500 guests isolate real number, challenge an
   }
   m.aggregateAdmissionDurationMs = Math.round(performance.now() - admissionsStarted);
   m.aggregateAdmissionsPerSecond = 500000 / m.aggregateAdmissionDurationMs;
+  // Preserve sequential card allocation per room while checking independent
+  // rooms concurrently: avoids 500 serialized HTTP round trips on slower CI.
+  for (let i = 0; i < groups.length; i += 2) {
+    await Promise.all(groups.slice(i, i + 2).map(group => cards(m, group.created, group.admitted)));
+  }
+  // Keep socket admission bounded to one room at a time for accept backlog.
   for (const group of groups) {
-    await cards(m, group.created, group.admitted);
     Object.assign(group, await connectGroup(m, group.created, group.admitted));
     const started = expectOK(await send(m, 'post', '/api/games/start', { roomId: group.created.room._id }, group.created.ip,
       { 'x-room-host-capability': group.created.hostCapability }));
@@ -377,7 +383,9 @@ test('E: ten independent rooms with 500 guests isolate real number, challenge an
   // Barrier: all server handlers/events above completed, then allow queued transport frames to drain.
   await delay(100);
   for (const [index, group] of groups.entries()) {
-    for (const item of group.admitted) {
+    // Sync validation remains per player, but independent sockets can be
+    // checked concurrently instead of introducing 500 serial round trips.
+    await Promise.all(group.admitted.map(async item => {
       const record = received.get(item.socket.id);
       expect(record.number).toEqual([index + 1]);
       expect(record.challenge).toHaveLength(1);
@@ -388,7 +396,7 @@ test('E: ten independent rooms with 500 guests isolate real number, challenge an
       expect(sync.data.calledNumbers).toEqual([index + 1]);
       expect(sync.data.playerData.bingoCard.matrix).toEqual(item.card.bingoCard.matrix);
       expect(sync.data.activeChallenge).toBeTruthy();
-    }
+    }));
     await audit(m, group.created, 50, 50);
     const game = await Game.findById(group.gameId).lean();
     expect(game.calledNumbers).toEqual([index + 1]);
