@@ -1,6 +1,6 @@
 # Bingo Public QR Entry
-Scope: Add explicit public player/TV entry routes and preserve the organizer's Basic Auth boundary for the temporary Bingo deployment.
-Status: T1-T4 implemented and verified in commits `5936542`, `2e7fff0`, `5ef9c75`, `4f172c1`, and `2722856`; local T5 checks pass, but live Traefik ingress proof is blocked pending an owner decision. No production database access or Contabo deployment.
+Scope: Add explicit public player/TV entry routes and validate them in an isolated temporary Contabo project without changing the active Bingo router or shared Traefik static configuration.
+Status: T1-T4 implemented; T5-T7 authorized after owner selected “Sí, autorizo ese alcance”; no production database access or main Bingo deployment.
 
 ## Specs
 
@@ -50,28 +50,39 @@ Status: T1-T4 implemented and verified in commits `5936542`, `2e7fff0`, `5ef9c75
 >    - Acciones administrativas rechazadas sin autorización.
 >    - TV con su autorización independiente.”
 
-### S8 — Scope, environment, and delivery limits
-> “6. Mantener protegidos MongoDB, servicios internos y los demás proyectos de Contabo.
+### S8 — Current environment and delivery limits
+> “No modificar el Traefik compartido globalmente.
+> No detener contenedores existentes.
+> No tocar MongoDB de producción.
+> No abrir puertos adicionales.
+> No modificar credenciales.
+> No desplegar todavía los cambios en el Bingo principal.”
 >
-> RESTRICCIONES:
-> No modificar servicios de otros proyectos.
-> No publicar puertos del backend.
-> No eliminar globalmente Basic Auth.
-> No consultar ni modificar la base de producción.
-> No hacer refactorizaciones generales.
-> No desplegar todavía en Contabo.
+> “Primero presentar el plan exacto de aislamiento y los recursos que se crearían. Si el aislamiento es viable, solicitar autorización antes de crear el entorno temporal.”
 >
-> ENTREGA:
-> Implementación mínima, pruebas dirigidas PASS/FAIL y cambios necesarios para desplegar de manera controlada.
+> “Evitar auditorías generales y trabajo adicional innecesario.”
+
+### S9 — Direct Contabo validation
+> “Quiero probarlo directamente en el VPS Contabo, sin descargar Traefik localmente.”
 >
-> No ampliar el alcance a nuevas funcionalidades de Bingo.”
+> “1. Inspeccionar la configuración existente de Traefik y Docker en Contabo.
+> 2. Determinar la forma mínima de crear un entorno temporal de prueba aislado.
+> 3. Utilizar un router y hostname de prueba distintos de los utilizados por Bingo y los demás proyectos.
+> 4. No conectar el entorno de prueba a la base de datos de producción.
+> 5. No modificar el router de Bingo actualmente activo.
+> 6. Reutilizar imágenes existentes cuando sea posible y evitar descargar componentes innecesarios.
+> 7. Comprobar acceso público de jugadores, APIs de admisión, recursos estáticos, Socket.IO y protección administrativa.
+> 8. Verificar que los demás servicios continúan funcionando.
+> 9. Registrar los recursos creados para eliminarlos posteriormente.”
 
 ## Tasks
 - T1 [S1-S2] route: frontend entry resolver for `/player/:code`, `/tv/:code`, `/organizer`, and safe legacy redirects; commit: `5936542`.
 - T2 [S1-S2,S5-S6] route: frontend QR/TV URL generation and focused compatibility/capability tests; commit: `2e7fff0`.
 - T3 [S3-S8] route: Bingo-only Traefik overlay with path/method allowlists, protected fallback, static routes, and Socket.IO rate limit; commits: `5ef9c75`, `4f172c1`. Risk: item 2 (selected public routers change the security boundary).
 - T4 [S3-S8] route: reuse focused isolated HTTP, Socket.IO, capability, admin, TV, and Compose-routing suites; add only uncovered assertions and controlled-rollout instructions; commit: `2722856`.
-- T5 [S1-S8] route: run focused verification, inspect final diff, and record PASS/FAIL evidence; evidence commit: `8ee0bcb`. Blocked: owner decision on whether to authorize an isolated local Traefik runtime test (one image pull, no Contabo) or accept static-only evidence and defer runtime proof.
+- T5 [S1-S9] route: deploy a distinct temporary Contabo Compose project after explicit owner authorization, reusing available images and a fresh private Mongo replica set; commit: pending. Risk: items 2 and 5.
+- T6 [S1-S9] route: verify public QR/player flow, admission APIs, static assets, Socket.IO without guest Authorization headers, protected organizer/admin, 24 same-IP clients, and baseline health of existing services; commit: pending. Risk: items 2 and 5.
+- T7 [S8-S9] route: record runtime evidence and exact cleanup inventory; leave the temporary resources intact for later owner-directed cleanup; commit: pending. Risk: item 5.
 
 ## Log
 
@@ -163,4 +174,47 @@ Status: T1-T4 implemented and verified in commits `5936542`, `2e7fff0`, `5ef9c75
 > Ran the focused backend Jest command recorded in `docs/m5.4-public-access.md`: 8 suites and 81 tests passed. `u1IsolatedIntegration.test.js` used a disposable `MongoMemoryReplSet` and loopback HTTP/Socket.IO server. Existing tests cover admission/card assignment, capability denials, host/admin protection, TV authorization, socket identity, and event limits; no duplicate backend test was added. `docs/m5.4-public-access.md` now records exact public route/method allowlists, protected fallback, pre-deployment validation, smoke/rollback gates, and the explicit not-deployed/runtime-unverified status; this documentation/evidence slice is commit `2722856`. The pre-existing unrelated hunk in the same documentation file remains unstaged. Actual Traefik same-IP and WSS behavior remain unverified.
 
 ### L8 — T5 final verification and remaining decision
-> The feature slice from base `020d654` contains the explicit routing, overlay, tests, rollout documentation, and verification evidence; `git diff --check` passes for the committed slice and current worktree. The Compose structural test passed 4/4 in a clean checkout of `4f172c1`; the isolated backend access command passed 8 suites/81 tests; focused frontend tests (8/8 and 14/14) and frontend build passed in T1/T2, with no frontend code changed afterward. The current local merged trial config also passed a static Compose merge check using synthetic environment values: Basic Auth fallback remained, backend/Mongo had no public labels/network/host ports, UI was GET/HEAD-only, and burst was 150. `gentle_review` assessed T3 as high risk/item 2; independent review's S3-S7 checks passed after the correction. The review did not run the clean test due lack of exact command authorization, but the parent did run it and observed PASS. Live Traefik matching, Basic Auth challenge, source-IP rate behavior, and WSS remain unverified; no image was pulled or deployment performed. The worktree retains extensive pre-existing dirty/untracked entries and no staged paths; only reviewed feature files were committed, while a pre-existing hunk in `docs/m5.4-public-access.md` remains unstaged. Risk: item 2 (public router rules change the security boundary). The remaining decision is whether to authorize one isolated local Traefik image pull/runtime proof, or accept the static-only evidence and defer live proof. T5 local verification evidence is commit `8ee0bcb`.
+> The feature slice from base `020d654` contains the explicit routing, overlay, tests, rollout documentation, and verification evidence; `git diff --check` passes for the committed slice and current worktree. The Compose structural test passed 4/4 in a clean checkout of `4f172c1`; the isolated backend access command passed 8 suites/81 tests; focused frontend tests (8/8 and 14/14) and frontend build passed in T1/T2, with no frontend code changed afterward. The current local merged trial config also passed a static Compose merge check using synthetic environment values: Basic Auth fallback remained, backend/Mongo had no public labels/network/host ports, UI was GET/HEAD-only, and burst was 150. `gentle_review` assessed T3 as high risk/item 2; independent review's S3-S7 checks passed after the correction. The review did not run the clean test due lack of exact command authorization, but the parent did run it and observed PASS. Live Traefik matching, Basic Auth challenge, source-IP rate behavior, and WSS remain unverified; no image was pulled or deployment performed. The worktree retains extensive pre-existing dirty/untracked entries and no staged paths; only reviewed feature files were committed, while a pre-existing hunk in `docs/m5.4-public-access.md` remains unstaged. Risk: item 2 (public router rules change the security boundary). The local-Traefik verification path was superseded by the owner's direct-Contabo strategy. T5-T7 now cover the owner-authorized isolated VPS verification; no local Traefik image was pulled. T5-T7 evidence and work-unit commits are pending.
+
+### L9 — Contabo validation request
+> “Gentle Shell, cambiamos la estrategia de validación del acceso público de Bingo Bailable.
+>
+> Quiero probarlo directamente en el VPS Contabo, sin descargar Traefik localmente.
+>
+> OBJETIVO:
+> Validar el ingreso de jugadores mediante QR sin Basic Auth, manteniendo protegidos el organizador y la administración.
+>
+> PROCEDIMIENTO:
+>
+> 1. Inspeccionar la configuración existente de Traefik y Docker en Contabo.
+> 2. Determinar la forma mínima de crear un entorno temporal de prueba aislado.
+> 3. Utilizar un router y hostname de prueba distintos de los utilizados por Bingo y los demás proyectos.
+> 4. No conectar el entorno de prueba a la base de datos de producción.
+> 5. No modificar el router de Bingo actualmente activo.
+> 6. Reutilizar imágenes existentes cuando sea posible y evitar descargar componentes innecesarios.
+> 7. Comprobar acceso público de jugadores, APIs de admisión, recursos estáticos, Socket.IO y protección administrativa.
+> 8. Verificar que los demás servicios continúan funcionando.
+> 9. Registrar los recursos creados para eliminarlos posteriormente.
+>
+> RESTRICCIONES:
+> No modificar el Traefik compartido globalmente.
+> No detener contenedores existentes.
+> No tocar MongoDB de producción.
+> No abrir puertos adicionales.
+> No modificar credenciales.
+> No desplegar todavía los cambios en el Bingo principal.
+>
+> Primero presentar el plan exacto de aislamiento y los recursos que se crearían. Si el aislamiento es viable, solicitar autorización antes de crear el entorno temporal.
+>
+> Evitar auditorías generales y trabajo adicional innecesario.”
+
+### L10 — Authorization
+> “Sí, autorizo ese alcance”
+>
+> The selected scope includes only the distinct temporary test project, its new dynamic router/possible ACME certificate, isolated test data and test-only secrets, with no edits to shared Traefik static configuration, existing routers, services, ports, or existing credentials.
+
+### L11 — Read-only Contabo preflight
+> Shared Traefik v3.7 is running on the existing HTTP/HTTPS listeners with Docker `exposedByDefault=false`, HTTPS redirection, the existing Let's Encrypt HTTP-challenge resolver, and network `pawtech_public`. The current temporary Bingo frontend/backend/Mongo are healthy; the existing Bingo trial router remains untouched. Docker reports 45 containers total, 23 running, 22 not running, and none marked unhealthy. Required backend, Nginx, and Mongo images are already present. The proposed test hostname resolves to the VPS and has no router-label collision. Inspection did not read secrets or logs and changed no remote resources.
+
+### L12 — Test topology and client constraints
+> `backend/services/roomAdmission.js` uses MongoDB transactions and returns HTTP 503 for standalone MongoDB, so the isolated test database must be a single-node replica set. The existing virtual-player fleet already provides exactly 24 players, but its Contabo mode is pinned to the prior trial hostname and adds Basic Auth to guest requests. Keep its source unchanged; use it through a one-off test adapter that targets the approved test hostname without guest Authorization headers, while using the existing trial Basic Auth only to create the isolated test room. This preserves the requested no-Basic-Auth guest proof and avoids changing the existing runner contract.
