@@ -56,3 +56,11 @@ describe('network access policy', () => {
     expect(rejected.mock.calls[0][0]).toBeInstanceOf(Error);
   });
 });
+
+test('public mode rejects insecure secondary allowed origins', () => {
+  expect(() => resolveNetworkPolicy({ ...base, BINGO_ACCESS_MODE: 'public',
+    FRONTEND_URL: 'https://event.example', ALLOWED_ORIGINS: 'http://other.example' })).toThrow(/HTTPS/);
+});
+test.each(['1.5', '1junk', '-1'])('rejects noninteger proxy hops %s', (TRUST_PROXY_HOPS) => {
+  expect(() => resolveNetworkPolicy({ ...base, TRUST_PROXY_HOPS })).toThrow(/integer/);
+});

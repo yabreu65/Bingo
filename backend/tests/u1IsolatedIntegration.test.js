@@ -5,7 +5,7 @@ const path = require('path');
 const express = require('express');
 const mongoose = require('mongoose');
 const request = require('supertest');
-const { MongoMemoryServer } = require('mongodb-memory-server');
+const { MongoMemoryReplSet } = require('mongodb-memory-server');
 const { Server } = require('socket.io');
 const socketClient = require('socket.io-client');
 
@@ -77,7 +77,7 @@ const makeRoom = async (hostName) => {
 const joinRoom = async (roomCode, playerName) => {
   const response = await request(server)
     .post('/api/rooms/join')
-    .send({ roomCode, playerName });
+    .send({ roomCode, playerName, admissionToken: `${roomCode}.${crypto.randomBytes(32).toString('base64url')}` });
   expect(response.status).toBe(200);
   return response.body;
 };
@@ -99,13 +99,10 @@ const getMongoBinaryOptions = () => {
 
 beforeAll(async () => {
   mongoPath = fs.mkdtempSync(path.join(__dirname, '../.tmp-u1-integration-'));
-  mongoServer = await MongoMemoryServer.create({
-    binary: getMongoBinaryOptions(),
-    instance: {
-      dbPath: mongoPath,
-      dbName: `bingo_u1_${crypto.randomBytes(6).toString('hex')}`,
-      port: 0
-    }
+  mongoServer = await MongoMemoryReplSet.create({
+    binary: getMongoBinaryOptions() || { downloadDir: path.join(__dirname, '../node_modules/.cache/t5-mongodb') },
+    replSet: { count: 1, storageEngine: 'wiredTiger' },
+    instanceOpts: [{ dbPath: mongoPath, port: 0 }]
   });
   const dbName = `bingo_u1_${crypto.randomBytes(6).toString('hex')}`;
   await mongoose.connect(mongoServer.getUri(dbName));

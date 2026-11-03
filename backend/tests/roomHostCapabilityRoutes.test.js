@@ -122,6 +122,7 @@ describe('room host capability REST flow', () => {
   });
 
   test('allows the room capability to remove a manual player and release its card', async () => {
+    jest.spyOn(Room, 'updateOne').mockResolvedValue({ modifiedCount: 1 });
     const capability = 'remove-secret';
     const manualPlayer = { playerId: 'manual-1', playerName: 'Manual player', cardNumber: 186 };
     const room = {
@@ -142,9 +143,13 @@ describe('room host capability REST flow', () => {
       success: true,
       data: expect.objectContaining({ freedCard: 186 })
     }));
-    expect(room.manualPlayers).toEqual([]);
-    expect(room.reservedCards).toEqual([]);
-    expect(room.save).toHaveBeenCalledTimes(1);
+    expect(Room.updateOne).toHaveBeenCalledWith({ _id: room._id,
+      manualPlayers: { $elemMatch: { playerId: 'manual-1', cardNumber: 186 } }
+    }, {
+      $pull: { manualPlayers: { playerId: 'manual-1' }, reservedCards: 186 },
+      $set: { lastActivity: expect.any(Date) }
+    });
+    expect(room.save).not.toHaveBeenCalled();
   });
 
   test('rejects REST game start without room capability before creating or starting a game', async () => {
@@ -203,14 +208,17 @@ describe('room host capability REST flow', () => {
     });
     const adminToken = jwt.sign({ userId: 'admin-1' }, process.env.JWT_SECRET);
 
+    jest.spyOn(Room, 'findOneAndUpdate').mockResolvedValue({ ...room, config: { tieBreakEnabled: true } });
     const response = await request(app)
       .patch('/api/rooms/ABC123/config')
       .set('Authorization', `Bearer ${adminToken}`)
       .send({ config: { tieBreakEnabled: true } });
 
     expect(response.status).toBe(200);
-    expect(room.config.tieBreakEnabled).toBe(true);
-    expect(room.save).toHaveBeenCalledTimes(1);
+    expect(response.body.room.config.tieBreakEnabled).toBe(true);
+    expect(Room.findOneAndUpdate).toHaveBeenCalledWith({ _id: room._id },
+      { $set: { 'config.tieBreakEnabled': true } }, { new: true, runValidators: true });
+    expect(room.save).not.toHaveBeenCalled();
   });
 
   test('accepts the room capability for configuration changes', async () => {
@@ -223,14 +231,17 @@ describe('room host capability REST flow', () => {
     };
     jest.spyOn(Room, 'findOne').mockReturnValue({ select: jest.fn().mockResolvedValue(room) });
 
+    jest.spyOn(Room, 'findOneAndUpdate').mockResolvedValue({ ...room, config: { tieBreakEnabled: true } });
     const response = await request(app)
       .patch('/api/rooms/ABC123/config')
       .set('x-room-host-capability', capability)
       .send({ config: { tieBreakEnabled: true } });
 
     expect(response.status).toBe(200);
-    expect(room.config.tieBreakEnabled).toBe(true);
-    expect(room.save).toHaveBeenCalledTimes(1);
+    expect(response.body.room.config.tieBreakEnabled).toBe(true);
+    expect(Room.findOneAndUpdate).toHaveBeenCalledWith({ _id: room._id },
+      { $set: { 'config.tieBreakEnabled': true } }, { new: true, runValidators: true });
+    expect(room.save).not.toHaveBeenCalled();
     expect(response.body.room.hostCapabilityHash).toBeUndefined();
   });
 });

@@ -62,6 +62,8 @@ describe('event modality configuration', () => {
 
     expect(response.status).toBe(200);
     expect(response.body.room.config).toMatchObject({
+      gameMode: 'line',
+      gameModes: ['line', 'fourCorners', 'centralCross'],
       eventMode: 'LOCAL',
       multimediaPolicy: {
         primarySurface: 'tv',

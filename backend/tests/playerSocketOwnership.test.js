@@ -9,7 +9,7 @@ jest.mock('../socket/utils/roomTimer', () => ({ clearAllRoomTimers: jest.fn(), e
 const Room = require('../models/Room');
 const Player = require('../models/Player');
 const Game = require('../models/Game');
-const { handleMarkCell, handleUpdatePoints } = require('../socket/handlers/playerHandlers');
+const { registerPlayerHandlers, handleMarkCell, handleUpdatePoints } = require('../socket/handlers/playerHandlers');
 const {
   handleVerifyRoom,
   handleSyncGameState,
@@ -37,6 +37,7 @@ const makeSocket = (overrides = {}) => ({
   roomCode: 'ROOMA1',
   playerId: 'player-a',
   emit: jest.fn(),
+  on: jest.fn(),
   ...overrides
 });
 const makeIO = () => {
@@ -55,6 +56,7 @@ describe('player socket mutation ownership', () => {
 
     await handleMarkCell(io, socket)({ roomCode: 'ROOMA1', playerId: 'player-victim', row: 0, col: 0 });
     await handleUpdatePoints(io, socket)({ roomCode: 'ROOMA1', playerId: 'player-victim', points: 10 });
+    await handleUpdatePoints(io, socket)({ roomCode: 'ROOMA1', playerId: 'player-victim', points: -1000 });
 
     expect(socket.emit).toHaveBeenCalledWith('error', expect.any(Object));
     expect(Room.findOne).not.toHaveBeenCalled();
@@ -110,14 +112,27 @@ describe('player socket mutation ownership', () => {
     expect(player.save).not.toHaveBeenCalled();
     expect(emit).toHaveBeenCalledWith('cell-marked', { playerId: 'player-a', row: 0, col: 0 });
 
-    Player.findOneAndUpdate.mockResolvedValueOnce({ stats: { points: 7 } });
-    await handleUpdatePoints(io, socket)({ roomCode: 'ROOMA1', playerId: 'player-a', points: 7 });
-    expect(Player.findOneAndUpdate).toHaveBeenLastCalledWith(
-      { _id: 'player-a', room: 'room-a', socketId: 'socket-current', isConnected: true },
-      { $inc: { 'stats.points': 7 } },
-      { new: true }
-    );
-    expect(emit).toHaveBeenCalledWith('points-updated', { playerId: 'player-a', newPoints: 7 });
+  });
+
+  test.each([1000, -1000])('rejects client-selected score delta %i even for the bound player', async (points) => {
+    const socket = makeSocket();
+    const room = makeRoom();
+    const { io, emit } = makeIO();
+    Room.findOne.mockReset().mockReturnValue(asQuery(room));
+    Player.findOneAndUpdate.mockReset().mockResolvedValue({ stats: { points } });
+
+    registerPlayerHandlers(io, socket);
+    const updatePoints = socket.on.mock.calls.find(([event]) => event === 'update-points')[1];
+    await updatePoints({ roomCode: 'ROOMA1', playerId: 'player-a', points });
+    await updatePoints({ roomCode: 'ROOMA1', playerId: 'player-a', points });
+
+    expect(socket.emit).toHaveBeenCalledTimes(2);
+    expect(socket.emit).toHaveBeenCalledWith('error', {
+      message: 'No tienes permisos para actualizar estos puntos'
+    });
+    expect(Room.findOne).not.toHaveBeenCalled();
+    expect(Player.findOneAndUpdate).not.toHaveBeenCalled();
+    expect(emit).not.toHaveBeenCalled();
   });
 
   test('binds verify-room and game-state sync to the current socket owner', async () => {
