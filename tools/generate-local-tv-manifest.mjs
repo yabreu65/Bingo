@@ -27,7 +27,7 @@ const walk = async (root, directory = root) => {
     if (entry.name.startsWith('.')) continue;
     const absolute = resolve(directory, entry.name);
     if (entry.isDirectory()) files.push(...await walk(root, absolute));
-    else if (MEDIA_TYPES.has(extname(entry.name).toLowerCase())) {
+    else if (entry.isFile() && MEDIA_TYPES.has(extname(entry.name).toLowerCase())) {
       const path = relative(root, absolute).replaceAll('\\', '/');
       files.push({ id: mediaIdForPath(path), path, mime: MEDIA_TYPES.get(extname(entry.name).toLowerCase()) });
     }

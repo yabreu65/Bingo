@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-import { createReadStream } from 'node:fs';
-import { readFile, stat } from 'node:fs/promises';
+import { constants } from 'node:fs';
+import { readFile, lstat, realpath, open } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { extname, resolve, relative, isAbsolute } from 'node:path';
 import { URL } from 'node:url';
@@ -20,7 +20,7 @@ const parseArg = (name, fallback) => {
   return index >= 0 ? process.argv[index + 1] : fallback;
 };
 
-const root = resolve(parseArg('--root', '.'));
+const root = await realpath(resolve(parseArg('--root', '.')));
 const manifestPath = resolve(parseArg('--manifest', 'tv-media-manifest.json'));
 const port = Number.parseInt(parseArg('--port', '8787'), 10);
 const allowedOrigin = parseArg('--allow-origin', '');
@@ -74,8 +74,43 @@ const corsHeaders = allowedOrigin
   }
   : {};
 
-const server = createServer(async (request, response) => {
+// Reject symlinks in every component, not only lexical ../ traversal.
+// The configured root must be trusted and not writable by untrusted users.
+const openMedia = async (path) => {
+  let current = root;
+  for (const part of relative(root, path).split('/')) {
+    current = resolve(current, part);
+    if ((await lstat(current)).isSymbolicLink()) throw Object.assign(new Error('Not found'), { code: 'ENOENT' });
+  }
+  const canonical = await realpath(path);
+  const within = relative(root, canonical);
+  if (within === '..' || within.startsWith('../') || isAbsolute(within)) {
+    throw Object.assign(new Error('Not found'), { code: 'ENOENT' });
+  }
+  const file = await open(canonical, constants.O_RDONLY | constants.O_NOFOLLOW);
   try {
+    const metadata = await file.stat();
+    const verified = await lstat(path);
+    if (!metadata.isFile() || verified.isSymbolicLink() ||
+        metadata.ino !== verified.ino || metadata.dev !== verified.dev ||
+        await realpath(path) !== canonical) {
+      throw Object.assign(new Error('Not found'), { code: 'ENOENT' });
+    }
+    return { file, metadata };
+  } catch (error) { await file.close(); throw error; }
+};
+
+const server = createServer(async (request, response) => {
+  let file;
+  try {
+    if (request.headers.origin && request.headers.origin !== allowedOrigin) {
+      send(response, 403, { 'Cache-Control': 'no-store' }, 'Forbidden');
+      return;
+    }
+    if (!['127.0.0.1', 'localhost'].includes((request.headers.host || '').split(':')[0])) {
+      send(response, 403, { 'Cache-Control': 'no-store' }, 'Forbidden');
+      return;
+    }
     const url = new URL(request.url || '/', 'http://127.0.0.1');
     if (request.method === 'OPTIONS') {
       if (!allowedOrigin || request.headers.origin !== allowedOrigin) {
@@ -105,7 +140,16 @@ const server = createServer(async (request, response) => {
       send(response, 404, { 'Cache-Control': 'no-store' }, 'Not found');
       return;
     }
-    const metadata = await stat(entry.path);
+    const opened = await openMedia(entry.path);
+    file = opened.file;
+    const metadata = opened.metadata;
+    const stream = (range) => {
+      const source = file.createReadStream(range);
+      file = undefined; // Stream owns and closes the descriptor.
+      source.on('error', () => response.destroy());
+      response.on('close', () => source.destroy());
+      source.pipe(response);
+    };
     const range = rangeFor(request.headers.range, metadata.size);
     const baseHeaders = {
       'Accept-Ranges': 'bytes',
@@ -120,7 +164,7 @@ const server = createServer(async (request, response) => {
     if (!range) {
       response.writeHead(200, { ...baseHeaders, 'Content-Length': metadata.size });
       if (request.method === 'HEAD') response.end();
-      else createReadStream(entry.path).pipe(response);
+      else stream();
       return;
     }
     const length = range.end - range.start + 1;
@@ -130,10 +174,12 @@ const server = createServer(async (request, response) => {
       'Content-Range': `bytes ${range.start}-${range.end}/${metadata.size}`
     });
     if (request.method === 'HEAD') response.end();
-    else createReadStream(entry.path, { start: range.start, end: range.end }).pipe(response);
+    else stream({ start: range.start, end: range.end });
   } catch (error) {
-    if (error.code === 'ENOENT') send(response, 404, { 'Cache-Control': 'no-store' }, 'Not found');
+    if (['ENOENT', 'ELOOP', 'ENOTDIR'].includes(error.code)) send(response, 404, { 'Cache-Control': 'no-store' }, 'Not found');
     else send(response, 500, { 'Cache-Control': 'no-store' }, 'Media service error');
+  } finally {
+    if (file) await file.close();
   }
 });
 
