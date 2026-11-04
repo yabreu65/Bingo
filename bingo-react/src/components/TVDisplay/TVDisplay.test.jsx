@@ -1,12 +1,12 @@
-import { act, fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
 import TVDisplay from './TVDisplay';
-const state = vi.hoisted(() => ({ handlers: {}, socket: {
+const state = vi.hoisted(() => ({ handlers: {}, playlist: [], socket: {
   connected: true, on: vi.fn(), off: vi.fn(), emit: vi.fn()
 } }));
 vi.mock('../../context/useSocket', () => ({ useSocket: () => ({ socket: state.socket }) }));
-vi.mock('../../config/musicPlaylists', () => ({ shufflePlaylist: () => [] }));
-afterEach(() => { vi.unstubAllEnvs(); vi.unstubAllGlobals(); });
+vi.mock('../../config/musicPlaylists', () => ({ shufflePlaylist: () => state.playlist }));
+afterEach(() => { state.playlist = []; vi.unstubAllEnvs(); vi.unstubAllGlobals(); });
 it('loads before room policy and blocks production LOCAL_TV without any media request or fallback', () => {
   vi.stubEnv('PROD', true);
   const fetch = vi.fn();
@@ -32,6 +32,7 @@ it('QR en espera no inicia música, incluso si llega music-sync=true', () => {
     const video = container.querySelector('video');
     expect(video).toBeTruthy();
     expect(video.hasAttribute('autoplay')).toBe(false);
+    expect(screen.queryByRole('button', { name: 'Preparar TV y activar sonido' })).not.toBeInTheDocument();
     act(() => state.handlers['music-sync']({ isPlaying: true }));
     expect(play).not.toHaveBeenCalled();
     fireEvent.play(video);
@@ -207,5 +208,59 @@ it('la TV mantiene el resultado de adivinanza incorrecta y burro por 7 segundos 
     vi.useRealTimers();
     play.mockRestore();
     pause.mockRestore();
+  }
+});
+
+it('la TV remota requiere preparar el audio una sola vez y permanece en silencio durante la espera', async () => {
+  state.playlist = [{ title: 'Pista prueba', artist: 'Prueba', localFile: 'pista.mp4' }];
+  state.socket.emit.mockClear();
+  const load = vi.spyOn(HTMLMediaElement.prototype, 'load').mockImplementation(() => {});
+  const play = vi.spyOn(HTMLMediaElement.prototype, 'play').mockResolvedValue();
+  const pause = vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(() => {});
+  try {
+    state.socket.on.mockImplementation((name, handler) => { state.handlers[name] = handler; });
+    const { container } = render(<TVDisplay roomCode="REMOTE" tvSessionToken={'s'.repeat(43)} />);
+    act(() => state.handlers['room-info']({ code: 'REMOTE', players: [], config: { eventMode: 'REMOTE_PRESENTIAL' } }));
+    const video = container.querySelector('.grid-video video');
+    expect(video).toBeTruthy();
+    const prepare = screen.getByRole('button', { name: 'Preparar TV y activar sonido' });
+    expect(play).not.toHaveBeenCalled();
+    fireEvent.click(prepare);
+    expect(play).toHaveBeenCalledTimes(1);
+    expect(video.muted).toBe(true);
+    await waitFor(() => expect(screen.getByText(/TV remota preparada/)).toBeInTheDocument());
+    expect(video.muted).toBe(false);
+    expect(pause).toHaveBeenCalled();
+    expect(state.socket.emit).not.toHaveBeenCalledWith('pause-game', expect.anything());
+    expect(screen.queryByRole('button', { name: 'Preparar TV y activar sonido' })).not.toBeInTheDocument();
+
+    act(() => state.handlers['game-state-changed']({ state: 'playing' }));
+    fireEvent.loadedMetadata(video);
+    await waitFor(() => expect(play).toHaveBeenCalledTimes(2));
+    expect(video.muted).toBe(false);
+  } finally {
+    load.mockRestore(); play.mockRestore(); pause.mockRestore();
+  }
+});
+
+it('si el navegador rechaza la preparación remota, permite reintentar sin fingir que el audio está listo', async () => {
+  state.playlist = [{ title: 'Pista prueba', artist: 'Prueba', localFile: 'pista.mp4' }];
+  const load = vi.spyOn(HTMLMediaElement.prototype, 'load').mockImplementation(() => {});
+  const play = vi.spyOn(HTMLMediaElement.prototype, 'play')
+    .mockRejectedValueOnce(Object.assign(new Error('gesture required'), { name: 'NotAllowedError' }))
+    .mockResolvedValue();
+  const pause = vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(() => {});
+  try {
+    state.socket.on.mockImplementation((name, handler) => { state.handlers[name] = handler; });
+    render(<TVDisplay roomCode="REMOTE" tvSessionToken={'s'.repeat(43)} />);
+    act(() => state.handlers['room-info']({ code: 'REMOTE', players: [], config: { eventMode: 'DISTRIBUTED' } }));
+    fireEvent.click(screen.getByRole('button', { name: 'Preparar TV y activar sonido' }));
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('El navegador bloqueó la reproducción'));
+    expect(screen.queryByText(/TV remota preparada/)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Preparar TV y activar sonido' }));
+    await waitFor(() => expect(screen.getByText(/TV remota preparada/)).toBeInTheDocument());
+    expect(play).toHaveBeenCalledTimes(2);
+  } finally {
+    load.mockRestore(); play.mockRestore(); pause.mockRestore();
   }
 });

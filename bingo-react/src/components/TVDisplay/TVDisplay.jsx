@@ -47,6 +47,9 @@ const TVDisplay = ({ roomCode, tvCapability, tvSessionToken, tvAuthorizationErro
   const [effectsMuted, setEffectsMuted] = useState(() => localStorage.getItem('bingo-tv-effects-muted') === 'true');
   const [tvConnectionError, setTvConnectionError] = useState(null);
   const [musicStatus, setMusicStatus] = useState('loading');
+  const [remoteTvAudioPrepared, setRemoteTvAudioPrepared] = useState(false);
+  const [remoteTvAudioPreparing, setRemoteTvAudioPreparing] = useState(false);
+  const [remoteTvAudioError, setRemoteTvAudioError] = useState(null);
   const [localMediaDiagnostics, setLocalMediaDiagnostics] = useState(null);
   const [localMediaRequestPending, setLocalMediaRequestPending] = useState(false);
   const [activeVoting, setActiveVoting] = useState(null);
@@ -62,6 +65,7 @@ const TVDisplay = ({ roomCode, tvCapability, tvSessionToken, tvAuthorizationErro
   const [currentSongIndex, setCurrentSongIndex] = useState(0);
   const [playlist, setPlaylist] = useState(() => shufflePlaylist()); // Playlist aleatorio
   const videoPlayerRef = useRef(null);
+  const remoteTvAudioPrimingRef = useRef(false);
   const gameStateRef = useRef('waiting');
   const isChallengeActiveRef = useRef(false); // Ref síncrono para trackear challenges
   const currentChallengeRef = useRef(null);
@@ -580,8 +584,51 @@ const TVDisplay = ({ roomCode, tvCapability, tvSessionToken, tvAuthorizationErro
     });
   };
 
+  // Preparación explícita del audio, solo para TV autorizada con enlace temporal.
+  // play() debe ejecutarse durante este clic; un evento remoto no puede
+  // conceder el permiso de autoplay del navegador.
+  const handlePrepareRemoteTvAudio = () => {
+    const video = videoPlayerRef.current;
+    if (!tvSessionToken || !canLoadTvMedia || !video || remoteTvAudioPreparing) return;
+
+    remoteTvAudioPrimingRef.current = true;
+    setRemoteTvAudioPreparing(true);
+    setRemoteTvAudioError(null);
+    video.muted = true; // Nunca reproducir sonido antes de iniciar el juego.
+
+    let started;
+    try {
+      started = video.play();
+    } catch (error) {
+      started = Promise.reject(error);
+    }
+    Promise.resolve(started).then(() => {
+      const gameIsPlaying = gameStateRef.current === 'playing' && !isChallengeActiveRef.current;
+      if (!gameIsPlaying) {
+        video.pause();
+        setMusicStatus('ready');
+      }
+      video.muted = false;
+      setRemoteTvAudioPrepared(true);
+      setRemoteTvAudioPreparing(false);
+      if (gameIsPlaying) setMusicStatus('playing');
+      // El evento pause se despacha después de pause(); no debe pausar la sala.
+      window.setTimeout(() => { remoteTvAudioPrimingRef.current = false; }, 100);
+    }).catch((error) => {
+      video.pause();
+      video.muted = false;
+      setRemoteTvAudioPrepared(false);
+      setRemoteTvAudioPreparing(false);
+      setRemoteTvAudioError(error?.name === 'NotAllowedError'
+        ? 'El navegador bloqueó la reproducción. Volvé a pulsar Preparar TV.'
+        : 'No se pudo preparar el video. Revisá que la pista esté disponible.');
+      window.setTimeout(() => { remoteTvAudioPrimingRef.current = false; }, 100);
+    });
+  };
+
   // Manejar pausa manual del video
   const handleVideoPause = () => {
+    if (remoteTvAudioPrimingRef.current) return;
     // Solo emitir si no estamos en un challenge (para no interferir)
     if (!isChallengeActiveRef.current && gameState === 'playing') {
       console.log('⏸️ Video paused manually, pausing game');
@@ -591,6 +638,7 @@ const TVDisplay = ({ roomCode, tvCapability, tvSessionToken, tvAuthorizationErro
 
   // Manejar reproducción manual del video
   const handleVideoPlay = () => {
+    if (remoteTvAudioPrimingRef.current) return;
     if (gameStateRef.current === 'waiting' || gameStateRef.current === 'finished' || resultRevealRef.current) {
       videoPlayerRef.current?.pause();
       return;
@@ -1262,6 +1310,22 @@ const TVDisplay = ({ roomCode, tvCapability, tvSessionToken, tvAuthorizationErro
 
       <section className="grid-video">
         <div className="video-wrapper">
+          {tvSessionToken && canLoadTvMedia && !tvAuthorizationError && !tvConnectionError &&
+            (!remoteTvAudioPrepared || gameState === 'waiting') && (
+              <div className="tv-remote-audio-setup" data-testid="remote-tv-audio-setup" role="status">
+                {remoteTvAudioPrepared ? (
+                  <p>TV remota preparada. La música comenzará automáticamente al iniciar el juego.</p>
+                ) : (
+                  <>
+                    <p>Antes de iniciar el bingo, prepará el sonido en esta laptop una sola vez.</p>
+                    <button type="button" onClick={handlePrepareRemoteTvAudio} disabled={remoteTvAudioPreparing}>
+                      {remoteTvAudioPreparing ? 'Preparando sonido…' : 'Preparar TV y activar sonido'}
+                    </button>
+                    {remoteTvAudioError && <p role="alert">{remoteTvAudioError}</p>}
+                  </>
+                )}
+              </div>
+            )}
           {canRenderTvMedia ? <video
             ref={videoPlayerRef}
             onPause={handleVideoPause}
