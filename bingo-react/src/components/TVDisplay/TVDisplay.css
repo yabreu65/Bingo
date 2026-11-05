@@ -484,6 +484,21 @@
   text-align: center;
   box-shadow: var(--pf-shadow-panel);
 }
+/* La vista QR es un overlay de pantalla completa: la acción debe estar
+   en su contenido para no quedar oculta ni interceptada por el QR. */
+.pf-tv-stage .qr-overlay .tv-remote-audio-setup {
+  position: static;
+  z-index: auto;
+  left: auto;
+  bottom: auto;
+  transform: none;
+  width: min(100%, 520px);
+}
+.pf-tv-stage .qr-overlay .qr-content {
+  max-height: 90dvh;
+  overflow-y: auto;
+  box-sizing: border-box;
+}
 .pf-tv-stage .tv-remote-audio-setup p { margin: 0; }
 .pf-tv-stage .tv-remote-audio-setup button {
   min-height: var(--pf-touch-target);

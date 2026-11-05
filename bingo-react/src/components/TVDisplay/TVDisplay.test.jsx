@@ -224,6 +224,7 @@ it('la TV remota requiere preparar el audio una sola vez y permanece en silencio
     const video = container.querySelector('.grid-video video');
     expect(video).toBeTruthy();
     const prepare = screen.getByRole('button', { name: 'Preparar TV y activar sonido' });
+    expect(prepare.closest('.qr-content')).toBeTruthy();
     expect(play).not.toHaveBeenCalled();
     fireEvent.click(prepare);
     expect(play).toHaveBeenCalledTimes(1);
