@@ -600,6 +600,13 @@ async function main() {
     await hostPage.getByLabel('Intervalo (s)').fill('7');
     await hostPage.getByLabel('Frecuencia de retos').fill('2');
     await hostPage.getByLabel('Máximo de jugadores').fill('12');
+    // Las salas nuevas empiezan exclusivamente en Cartón completo; para probar
+    // la edición explícita a Línea, desmarcar primero la modalidad exclusiva.
+    assert.equal(await hostPage.getByRole('checkbox', { name: 'Cartón completo', exact: true }).isChecked(), true);
+    for (const label of ['Línea', 'Cuatro esquinas', 'Cruz central']) {
+      assert.equal(await hostPage.getByRole('checkbox', { name: label, exact: true }).isChecked(), false);
+    }
+    await hostPage.getByRole('checkbox', { name: 'Cartón completo', exact: true }).uncheck();
     await hostPage.getByRole('checkbox', { name: 'Línea', exact: true }).check();
     assert.equal(await hostPage.getByRole('checkbox', { name: 'Cartón completo', exact: true }).isChecked(), false);
     await hostPage.getByRole('checkbox', { name: 'Desempate habilitado' }).check();
