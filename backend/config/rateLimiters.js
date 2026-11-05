@@ -6,16 +6,31 @@ const isProduction = process.env.NODE_ENV === 'production';
 
 /**
  * Rate limiter estricto para creación de salas
- * Production: maximum 5 rooms per hour per IP. Development stays permissive
+ * Production: maximum 20 room creation attempts per hour per IP. Development stays permissive
  * so local testing and shared LAN events are not blocked.
  */
 const createRoomLimiter = rateLimit({
   windowMs: 60 * 60 * 1000, // 1 hora
-  max: isProduction ? 5 : 100,
+  max: isProduction ? 20 : 100,
   standardHeaders: true, // Return rate limit info in `RateLimit-*` headers
   legacyHeaders: false, // Disable `X-RateLimit-*` headers
   handler: (req, res) => {
     // Calcular segundos hasta el reset (resetTime es timestamp en ms)
+    const retryInSeconds = Math.ceil((req.rateLimit.resetTime - Date.now()) / 1000);
+    res.status(429).json(rateLimitErrorResponse(retryInSeconds));
+  }
+});
+
+/**
+ * Mantener el registro de cuentas separado del límite de salas de prueba.
+ * El tráfico de crear salas nunca debe consumir el cupo de registros.
+ */
+const registerLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: isProduction ? 5 : 100,
+  standardHeaders: true,
+  legacyHeaders: false,
+  handler: (req, res) => {
     const retryInSeconds = Math.ceil((req.rateLimit.resetTime - Date.now()) / 1000);
     res.status(429).json(rateLimitErrorResponse(retryInSeconds));
   }
@@ -105,6 +120,7 @@ const skipTrustedIPs = (req) => {
 
 module.exports = {
   createRoomLimiter,
+  registerLimiter,
   joinRoomLimiter,
   generalApiLimiter,
   speedLimiter,

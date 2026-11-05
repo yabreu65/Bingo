@@ -5,7 +5,7 @@ const { validateRequest } = require('../middleware/validateRequest');
 const { requireAuth } = require('../middleware/authMiddleware');
 const {
   generalApiLimiter,
-  createRoomLimiter
+  registerLimiter
 } = require('../config/rateLimiters');
 const {
   registerSchema,
@@ -22,7 +22,7 @@ const {
 // Registro de usuarios
 router.post(
   '/register',
-  createRoomLimiter, // Mismo límite que crear sala (5 por hora)
+  registerLimiter, // Registro de cuentas: 5 por hora, separado de crear salas.
   validateRequest(registerSchema),
   authController.register
 );
