@@ -25,14 +25,16 @@ describe('Selección de modalidades de victoria', () => {
     expect(validate(modes).success).toBe(false);
   });
 
-  test('una sala nueva selecciona por defecto linea, cuatro esquinas y cruz central', () => {
+  test('una sala nueva selecciona únicamente cartón completo por defecto', () => {
     const config = normalizeNewRoomConfig();
-    expect(config.gameModes).toEqual(['line', 'fourCorners', 'centralCross']);
-    expect(config.gameMode).toBe('line');
+    expect(config.gameModes).toEqual(['full']);
+    expect(config.gameMode).toBe('full');
     const room = new Room({ code: 'DEF123', name: 'Nueva', host: '507f1f77bcf86cd799439011', config });
-    expect(room.config.gameModes).toEqual(['line', 'fourCorners', 'centralCross']);
-    expect(room.config.gameMode).toBe('line');
-    expect(room.config.gameModes).not.toContain('full');
+    expect(room.config.gameModes).toEqual(['full']);
+    expect(room.config.gameMode).toBe('full');
+    expect(room.config.gameModes).not.toContain('line');
+    expect(room.config.gameModes).not.toContain('fourCorners');
+    expect(room.config.gameModes).not.toContain('centralCross');
     expect(validate(room.config.gameModes).success).toBe(true);
   });
 
