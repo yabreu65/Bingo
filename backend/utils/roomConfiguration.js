@@ -58,11 +58,11 @@ const normalizeNewRoomConfig = (config = {}) => {
   // historical schema fallback consistent for new rooms and older documents.
   const normalized = { ...config, maxPlayers: config.maxPlayers ?? 50 };
 
-  // New rooms start with the three combinable Bingo winning modes. Preserve
-  // explicit selections (including full) and legacy single-mode rooms.
+  // New rooms default to full card as the ONLY winning mode.
+  // Preserve explicitly selected modes and existing legacy single-mode rooms.
   if (config.gameMode === undefined && config.gameModes === undefined) {
-    normalized.gameMode = 'line';
-    normalized.gameModes = ['line', 'fourCorners', 'centralCross'];
+    normalized.gameMode = 'full';
+    normalized.gameModes = ['full'];
   }
 
   const eventMode = SELECTABLE_EVENT_MODES.includes(config.eventMode)
