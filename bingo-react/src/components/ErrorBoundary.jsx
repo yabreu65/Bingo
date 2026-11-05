@@ -1,6 +1,20 @@
 import React from 'react';
 import { AlertTriangle, RefreshCw, Home } from 'lucide-react';
 
+// Diagnóstico visible solo para la TV. Nunca mostrar URLs ni credenciales de
+// autorización en la pantalla compartida ni en capturas de soporte.
+const safeTvErrorSummary = (error) => {
+  const kind = typeof error?.name === 'string' && /^[A-Za-z]{1,30}$/.test(error.name)
+    ? error.name : 'Error';
+  const raw = typeof error?.message === 'string' ? error.message : '';
+  const safeMessage = raw
+    .replace(/https?:\/\/[^\s]+/gi, '[URL oculta]')
+    .replace(/[A-Za-z0-9_-]{40,}/g, '[valor oculto]')
+    .replace(/[\r\n\t]+/g, ' ')
+    .slice(0, 200);
+  return safeMessage ? `${kind}: ${safeMessage}` : kind;
+};
+
 /**
  * Error Boundary Component
  * Captura errores de React y muestra una UI amigable
@@ -39,7 +53,7 @@ class ErrorBoundary extends React.Component {
   reportError = async (error, errorInfo) => {
     try {
       // Solo reportar en producción
-      if (import.meta.env.MODE === 'production') {
+      if (import.meta.env.MODE === 'production' && !window.location.pathname.startsWith('/tv/')) {
         await fetch('/api/errors/report', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -92,6 +106,14 @@ class ErrorBoundary extends React.Component {
             <p className="text-gray-600 text-center mb-6">
               No te preocupes, ya estamos trabajando en solucionarlo.
             </p>
+
+            {window.location.pathname.startsWith('/tv/') && this.state.error && (
+              <details className="mb-6 rounded-lg bg-gray-100 p-3 text-gray-800" data-testid="tv-error-diagnostic">
+                <summary className="cursor-pointer font-semibold">Detalle técnico para soporte</summary>
+                <p className="mt-2 break-words font-mono text-xs">{safeTvErrorSummary(this.state.error)}</p>
+                <p className="mt-2 text-xs">Comparte una foto de este detalle, sin compartir el enlace privado de TV.</p>
+              </details>
+            )}
 
             {/* Detalles del error (solo en desarrollo) */}
             {import.meta.env.MODE === 'development' && this.state.error && (

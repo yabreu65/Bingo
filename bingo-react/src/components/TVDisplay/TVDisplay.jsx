@@ -771,6 +771,28 @@ const TVDisplay = ({ roomCode, tvCapability, tvSessionToken, tvAuthorizationErro
     });
   };
 
+  // La capa de espera ocupa toda la TV: el botón debe vivir DENTRO del QR
+  // para recibir el clic real requerido por la política multimedia del navegador.
+  const renderRemoteTvAudioSetup = () => {
+    if (!tvSessionToken || !canLoadTvMedia || tvAuthorizationError || tvConnectionError) return null;
+    if (remoteTvAudioPrepared && gameState !== 'waiting') return null;
+    return (
+      <div className="tv-remote-audio-setup" data-testid="remote-tv-audio-setup" role="status">
+        {remoteTvAudioPrepared ? (
+          <p>TV remota preparada. La música comenzará automáticamente al iniciar el juego.</p>
+        ) : (
+          <>
+            <p>Antes de iniciar el bingo, prepará el sonido en esta laptop una sola vez.</p>
+            <button type="button" onClick={handlePrepareRemoteTvAudio} disabled={remoteTvAudioPreparing}>
+              {remoteTvAudioPreparing ? 'Preparando sonido…' : 'Preparar TV y activar sonido'}
+            </button>
+            {remoteTvAudioError && <p role="alert">{remoteTvAudioError}</p>}
+          </>
+        )}
+      </div>
+    );
+  };
+
   return (
     <div className="tv-display-grid pf-tv-stage">
       {(tvAuthorizationError || tvConnectionError) && (
@@ -1043,6 +1065,7 @@ const TVDisplay = ({ roomCode, tvCapability, tvSessionToken, tvAuthorizationErro
                     <div className="qr-code-container">
                         <QRCodeSVG value={createPlayerEntryURL(getShareableUrl(), roomCode)} size={220} includeMargin={true} />
                     </div>
+                    {renderRemoteTvAudioSetup()}
                 </div>
             </MotionBox>
         )}
@@ -1310,22 +1333,7 @@ const TVDisplay = ({ roomCode, tvCapability, tvSessionToken, tvAuthorizationErro
 
       <section className="grid-video">
         <div className="video-wrapper">
-          {tvSessionToken && canLoadTvMedia && !tvAuthorizationError && !tvConnectionError &&
-            (!remoteTvAudioPrepared || gameState === 'waiting') && (
-              <div className="tv-remote-audio-setup" data-testid="remote-tv-audio-setup" role="status">
-                {remoteTvAudioPrepared ? (
-                  <p>TV remota preparada. La música comenzará automáticamente al iniciar el juego.</p>
-                ) : (
-                  <>
-                    <p>Antes de iniciar el bingo, prepará el sonido en esta laptop una sola vez.</p>
-                    <button type="button" onClick={handlePrepareRemoteTvAudio} disabled={remoteTvAudioPreparing}>
-                      {remoteTvAudioPreparing ? 'Preparando sonido…' : 'Preparar TV y activar sonido'}
-                    </button>
-                    {remoteTvAudioError && <p role="alert">{remoteTvAudioError}</p>}
-                  </>
-                )}
-              </div>
-            )}
+          {gameState !== 'waiting' && renderRemoteTvAudioSetup()}
           {canRenderTvMedia ? <video
             ref={videoPlayerRef}
             onPause={handleVideoPause}
